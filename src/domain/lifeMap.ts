@@ -16,37 +16,66 @@ export class LayerView {
         this.isolatedNodes = this.map.rootNodes;
     }
     refresh(layer: number) {
-        this.forwardSteps = layer
         this.edges = this.map.rootEdges;
         this.isolatedNodes = this.map.rootNodes;
-        while (layer > 0) {
-            this.nextLayer()
-            layer--
+        this.forwardSteps = 0;
+        while (this.forwardSteps < layer && this.nextLayer()) {
+            // keep stepping until the target layer or the bottom
         }
 
     }
 
-    prevLayer() {
-        if (this.forwardSteps <= 0) { return }
+    /**
+     * Inverse method for nextLayer(), inferred from the current edges:
+     * nextLayer() expands every expandable visible edge, so the edges
+     * revealed by the last step are exactly those with
+     * layer === forwardSteps. Collapse just them back to their parents;
+     * shallower edges were expanded in earlier steps and stay untouched.
+     * @returns return false when already at the top layer.
+     */
 
-        this.edges = this.edges.filter(e => e.layer < this.forwardSteps)
+    prevLayer(): boolean {
+        if (this.forwardSteps <= 0) { return false }
+
+        const result: Edge[] = [];
+        const collapsedParents = new Set<string>();
+        for (const e of this.edges) {
+            const parent = e.parentEdge;
+            if (parent && e.layer === this.forwardSteps) {
+                if (!collapsedParents.has(parent.id)) {
+                    collapsedParents.add(parent.id);
+                    result.push(parent);
+                }
+            } else {
+                result.push(e);
+            }
+        }
+        this.edges = result;
         this.forwardSteps--;
+        return true
     }
-    // show more detail of the current edges and also keep the current edges.
+    // go one layer deeper: replace each expanded edge with its children.
+    // An edge without children has nothing deeper to show, so it stays.
     /**
      * 
      * @returns return true when not reach the bottom, return false when reach to the bottom.
      */
     nextLayer(): boolean {
-        const newEdges: Edge[] = this.edges.flatMap(e =>
-            e.childrenEdges.length ? e.childrenEdges : []
-        );
-        if (newEdges.length === 0) {
-            return false
-        } else {
-            this.edges = this.edges.concat(newEdges);
-            this.forwardSteps++
+        let expandedAny = false;
+        const result: Edge[] = [];
+        for (const e of this.edges) {
+            if (e.childrenEdges.length > 0) {
+                result.push(...e.childrenEdges);
+                expandedAny = true;
+            } else {
+                result.push(e);
+            }
         }
+        if (!expandedAny) {
+            return false
+        }
+        this.edges = result;
+        this.forwardSteps++;
         return true
     }
 

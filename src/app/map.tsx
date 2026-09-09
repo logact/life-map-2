@@ -12,8 +12,10 @@ import Svg, { G, Line, Polygon } from "react-native-svg";
 
 import { Edge } from "@/domain/edge";
 import Goal from "@/domain/goal";
+import { Task } from "@/domain/task";
+import { Record as RecordNode } from "@/domain/record";
 import { LayerView, LifeMap } from "@/domain/lifeMap";
-import { Node } from "@/domain/node";
+import { Node, NodeKind } from "@/domain/node";
 
 // ---------- View models: plain data describing what to draw ----------
 // The UI renders ONLY from these. It never renders domain objects directly.
@@ -30,6 +32,7 @@ interface NodeViewModel {
   x: number;
   y: number;
   title: string;
+  kind: NodeKind;
 }
 
 interface EdgeViewModel {
@@ -57,14 +60,14 @@ function mapDomainToViewModel(layerView: LayerView): MapViewModel {
     edges.push({ id: e.id, fromId: e.node1.id, toId: e.node2.id, layer: e.layer });
     for (const n of [e.node1, e.node2]) {
       if (!nodes.has(n.id)) {
-        nodes.set(n.id, { id: n.id, x: n.x, y: n.y, title: n.title });
+        nodes.set(n.id, { id: n.id, x: n.x, y: n.y, title: n.title, kind: n.kind });
       }
     }
   }
 
   for (const n of layerView.map.rootNodes) {
     if (!nodes.has(n.id)) {
-      nodes.set(n.id, { id: n.id, x: n.x, y: n.y, title: n.title });
+      nodes.set(n.id, { id: n.id, x: n.x, y: n.y, title: n.title, kind: n.kind });
     }
   }
   return { nodes: [...nodes.values()], edges };
@@ -133,12 +136,30 @@ function createDemoMap(cx: number, cy: number): LifeMap {
   // ---- branch C: Career -> Friends, stays at layer 0 ----
   map.addEdge(career, friends);
 
+  // ---- tasks and a record under Health ----
+  const runTask = new Task(cx - 80, cy - 280, "Run 5km", [], []);
+  const sleepTask = new Task(cx + 80, cy - 280, "Sleep 8h", [], []);
+  map.addTask(health, runTask);
+  map.addTask(health, sleepTask);
+  map.attachRecord(
+    runTask,
+    new RecordNode(cx - 80, cy - 370, "Ran 4.8km", [], [], "felt good"),
+  );
+
   return map;
 }
 
 // ---------- Screen ----------
 
 const NODE_SIZE = 72;
+const TASK_SIZE = 56;
+const RECORD_SIZE = 30;
+
+function nodeSize(kind: NodeKind): number {
+  if (kind === "task") return TASK_SIZE;
+  if (kind === "record") return RECORD_SIZE;
+  return NODE_SIZE;
+}
 // how far one arrow-pad press moves the viewport, in screen pixels
 const PAN_STEP = 80;
 
@@ -347,8 +368,8 @@ export default function MapScreen() {
           // arrowhead at the target node's edge, pointing into it
           const ux = len > 0 ? dx / len : 0;
           const uy = len > 0 ? dy / len : 0;
-          const tipX = b.x - ux * (NODE_SIZE / 2);
-          const tipY = b.y - uy * (NODE_SIZE / 2);
+          const tipX = b.x - ux * (nodeSize(b.kind) / 2);
+          const tipY = b.y - uy * (nodeSize(b.kind) / 2);
           const wing = 6;
           const back = 12;
           const baseX = tipX - ux * back;
@@ -381,22 +402,34 @@ export default function MapScreen() {
         </G>
       </Svg>
 
-      {vm.nodes.map((n) => (
+      {vm.nodes.map((n) => {
+        const size = nodeSize(n.kind);
+        return (
         <Pressable
           key={n.id}
           onPress={() => onNodePress(n.id)}
           style={[
             styles.node,
             {
-              left: n.x + viewport.x - NODE_SIZE / 2,
-              top: n.y + viewport.y - NODE_SIZE / 2,
+              width: size,
+              height: size,
+              borderRadius: n.kind === "task" ? 12 : size / 2,
+              left: n.x + viewport.x - size / 2,
+              top: n.y + viewport.y - size / 2,
             },
+            n.kind === "task" && styles.nodeTask,
+            n.kind === "record" && styles.nodeRecord,
             n.id === selectedId && styles.nodeSelected,
           ]}
         >
-          <Text style={styles.nodeTitle}>{n.title}</Text>
+          <Text
+            style={[styles.nodeTitle, n.kind === "record" && styles.nodeTitleRecord]}
+          >
+            {n.title}
+          </Text>
         </Pressable>
-      ))}
+        );
+      })}
 
       <View style={styles.layerControls}>
         <Pressable style={styles.layerButton} onPress={showLessDetail}>
@@ -479,9 +512,21 @@ const styles = StyleSheet.create({
     borderColor: "#f59e0b",
     backgroundColor: "#fef3c7",
   },
+  nodeTask: {
+    borderColor: "#16a34a",
+  },
+  nodeRecord: {
+    borderColor: "#9aa5b1",
+    borderWidth: 1,
+    backgroundColor: "#e2e8f0",
+    padding: 2,
+  },
   nodeTitle: {
     fontSize: 12,
     textAlign: "center",
+  },
+  nodeTitleRecord: {
+    fontSize: 8,
   },
   layerControls: {
     position: "absolute",

@@ -1,7 +1,10 @@
 
 import { v4 } from "uuid";
 import { Edge } from "./edge";
-import { Node } from "./node";
+import Goal from "./goal";
+import { Task } from "./task";
+import { Record as RecordNode } from "./record";
+import { isTaskNode, Node } from "./node";
 
 export class LayerView {
     map: LifeMap;
@@ -204,6 +207,20 @@ export class LifeMap {
         }
     }
 
+    // a task belongs to exactly one goal: link them with an edge
+    addTask(goal: Goal, task: Task): Edge {
+        return this.addEdge(goal, task)
+    }
+
+    // a record logs progress on a goal or task and stays a leaf node
+    attachRecord(target: Node, record: RecordNode): Edge {
+        return this.addEdge(target, record)
+    }
+
+    getTasks(goal: Goal): Task[] {
+        return goal.startEdges.map(e => e.node2).filter(isTaskNode)
+    }
+
     // expand a edge with only 2 points,generate 2 new edge whose parent is the edge
     expand(edge: Edge) {
         if (edge.childrenEdges.length > 0) {
@@ -215,6 +232,7 @@ export class LifeMap {
             y: 0,
             id: v4(),
             title: newTitle,
+            kind: "task",
             startEdges: [],
             endEdges: []
         }

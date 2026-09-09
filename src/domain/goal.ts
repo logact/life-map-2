@@ -1,22 +1,26 @@
 import { v4 } from "uuid";
 import { Edge } from "./edge";
-import { Node } from "./node";
+import { Node, NodeKind } from "./node";
 
-export default class Goal implements Node{
+export default class Goal implements Node {
     x: number;
     y: number;
     id: string;
     title: string;
+    kind: NodeKind = "goal";
+    description?: string;
+    targetDate?: Date;
     startEdges: Edge[];
     endEdges: Edge[];
-    constructor(x:number,y:number,title:string,startEdges:Edge[],endEdges:Edge[]){
+    constructor(x: number, y: number, title: string, startEdges: Edge[], endEdges: Edge[], description?: string, targetDate?: Date) {
         this.x = x;
-        this.y= y;
+        this.y = y;
         this.title = title
         this.id = v4()
         this.startEdges = startEdges
         this.endEdges = endEdges
-
+        this.description = description
+        this.targetDate = targetDate
     }
 
 }

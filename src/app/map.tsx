@@ -1,12 +1,13 @@
 import { useRef, useState } from "react";
 import {
+  Alert,
   Pressable,
   StyleSheet,
   Text,
   useWindowDimensions,
   View,
 } from "react-native";
-import Svg, { Line } from "react-native-svg";
+import Svg, { G, Line } from "react-native-svg";
 
 import { Edge } from "@/domain/edge";
 import Goal from "@/domain/goal";
@@ -174,14 +175,17 @@ export default function MapScreen() {
   // Layer changes touch only the view, not the domain.
   const showMoreDetail = () => {
     layerView.nextLayer();
+    setSelectedEdgeIds([]); // the selected edges may no longer be visible
     setVersion((v) => v + 1);
   };
   const showLessDetail = () => {
     layerView.prevLayer();
+    setSelectedEdgeIds([]);
     setVersion((v) => v + 1);
   };
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
 
   // domain -> UI: derive plain view models on every render
   const vm = mapDomainToViewModel(layerView);
@@ -225,6 +229,65 @@ export default function MapScreen() {
     );
   };
 
+  // edge tap toggles selection (UI state only); the domain mutation
+  // happens later via the Expand / Summarize buttons
+  const onEdgePress = (id: string) => {
+    setSelectedEdgeIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  };
+
+  const expandSelected = () => {
+    const edge = layerView.edges.find((e) => e.id === selectedEdgeIds[0]);
+    if (!edge) return;
+    console.log("[FLOW] tap -> expand edge (goes through run())");
+    // expand = drill into this edge: navigate the view to the layer
+    // where the new children live (edge.layer + 1). A visible edge can
+    // be shallower than the view's bottom (e.g. a layer-0 edge shown at
+    // the layer-3 view), in which case the view comes back UP to the
+    // children's layer — that is the navigation.
+    const targetLayer = edge.layer + 1;
+    run((m) => {
+      m.expand(edge);
+      placeSubNode(edge, -40); // offset so the bend is visible
+    });
+    layerView.refresh(targetLayer);
+    setVersion((v) => v + 1);
+    setSelectedEdgeIds([]);
+  };
+
+  const summarizeSelected = () => {
+    const edges = layerView.edges.filter((e) => selectedEdgeIds.includes(e.id));
+    if (edges.length < 2) return;
+
+    const parentId = (e: Edge) => e.parentEdge?.id ?? "";
+    if (edges.some((e) => parentId(e) !== parentId(edges[0]))) {
+      Alert.alert("Cannot summarize", "Selected edges must share the same parent.");
+      return;
+    }
+
+    // endpoints of the summarized edge: the boundary nodes of the
+    // selection, i.e. the nodes touched by exactly one selected edge
+    const touched = new Map<string, { node: Node; count: number }>();
+    for (const e of edges) {
+      for (const n of [e.node1, e.node2]) {
+        const entry = touched.get(n.id);
+        touched.set(n.id, { node: n, count: (entry?.count ?? 0) + 1 });
+      }
+    }
+    const boundary = [...touched.values()]
+      .filter((t) => t.count === 1)
+      .map((t) => t.node);
+    if (boundary.length < 2) {
+      Alert.alert("Cannot summarize", "Selected edges need two open end nodes.");
+      return;
+    }
+
+    console.log("[FLOW] tap -> summarize edges (goes through run())");
+    run((m) => m.summarize(boundary[0], boundary[1], edges));
+    setSelectedEdgeIds([]);
+  };
+
   return (
     <View style={styles.container}>
       <Svg style={StyleSheet.absoluteFill}>
@@ -232,16 +295,28 @@ export default function MapScreen() {
           const a = posById.get(e.fromId);
           const b = posById.get(e.toId);
           if (!a || !b) return null;
+          const selected = selectedEdgeIds.includes(e.id);
           return (
-            <Line
-              key={e.id}
-              x1={a.x}
-              y1={a.y}
-              x2={b.x}
-              y2={b.y}
-              stroke="#9aa5b1"
-              strokeWidth={Math.max(1.5, 3 - e.layer)}
-            />
+            <G key={e.id}>
+              <Line
+                x1={a.x}
+                y1={a.y}
+                x2={b.x}
+                y2={b.y}
+                stroke={selected ? "#f59e0b" : "#9aa5b1"}
+                strokeWidth={selected ? 4 : Math.max(1.5, 3 - e.layer)}
+              />
+              {/* wide invisible hit area so thin lines are tappable */}
+              <Line
+                x1={a.x}
+                y1={a.y}
+                x2={b.x}
+                y2={b.y}
+                stroke="transparent"
+                strokeWidth={24}
+                onPress={() => onEdgePress(e.id)}
+              />
+            </G>
           );
         })}
       </Svg>
@@ -269,6 +344,31 @@ export default function MapScreen() {
           <Text style={styles.layerButtonText}>+</Text>
         </Pressable>
       </View>
+
+      {selectedEdgeIds.length > 0 && (
+        <View style={styles.edgeControls} pointerEvents="box-none">
+          <Pressable
+            style={[
+              styles.edgeButton,
+              selectedEdgeIds.length !== 1 && styles.edgeButtonDisabled,
+            ]}
+            disabled={selectedEdgeIds.length !== 1}
+            onPress={expandSelected}
+          >
+            <Text style={styles.edgeButtonText}>Expand</Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.edgeButton,
+              selectedEdgeIds.length < 2 && styles.edgeButtonDisabled,
+            ]}
+            disabled={selectedEdgeIds.length < 2}
+            onPress={summarizeSelected}
+          >
+            <Text style={styles.edgeButtonText}>Summarize</Text>
+          </Pressable>
+        </View>
+      )}
 
       <Pressable style={styles.addButton} onPress={addGoal}>
         <Text style={styles.addButtonText}>+ Add goal</Text>
@@ -336,6 +436,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 24,
+  },
+  edgeControls: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 100, // sits above the bottom row (layer controls / add button)
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 8,
+  },
+  edgeButton: {
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "#208AEF",
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  edgeButtonDisabled: {
+    opacity: 0.4,
+  },
+  edgeButtonText: {
+    color: "#208AEF",
+    fontWeight: "600",
   },
   addButtonText: {
     color: "#ffffff",

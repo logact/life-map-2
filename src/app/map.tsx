@@ -8,7 +8,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import Svg, { G, Line } from "react-native-svg";
+import Svg, { G, Line, Polygon } from "react-native-svg";
 
 import { Edge } from "@/domain/edge";
 import Goal from "@/domain/goal";
@@ -340,6 +340,20 @@ export default function MapScreen() {
           const b = posById.get(e.toId);
           if (!a || !b) return null;
           const selected = selectedEdgeIds.includes(e.id);
+          const color = selected ? "#f59e0b" : "#9aa5b1";
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const len = Math.hypot(dx, dy);
+          // arrowhead at the target node's edge, pointing into it
+          const ux = len > 0 ? dx / len : 0;
+          const uy = len > 0 ? dy / len : 0;
+          const tipX = b.x - ux * (NODE_SIZE / 2);
+          const tipY = b.y - uy * (NODE_SIZE / 2);
+          const wing = 6;
+          const back = 12;
+          const baseX = tipX - ux * back;
+          const baseY = tipY - uy * back;
+          const arrowPoints = `${tipX},${tipY} ${baseX - uy * wing},${baseY + ux * wing} ${baseX + uy * wing},${baseY - ux * wing}`;
           return (
             <G key={e.id}>
               <Line
@@ -347,9 +361,10 @@ export default function MapScreen() {
                 y1={a.y}
                 x2={b.x}
                 y2={b.y}
-                stroke={selected ? "#f59e0b" : "#9aa5b1"}
+                stroke={color}
                 strokeWidth={selected ? 4 : Math.max(1.5, 3 - e.layer)}
               />
+              <Polygon points={arrowPoints} fill={color} />
               {/* wide invisible hit area so thin lines are tappable */}
               <Line
                 x1={a.x}

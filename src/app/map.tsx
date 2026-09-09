@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import {
   Alert,
+  PanResponder,
   Pressable,
   StyleSheet,
   Text,
@@ -138,6 +139,8 @@ function createDemoMap(cx: number, cy: number): LifeMap {
 // ---------- Screen ----------
 
 const NODE_SIZE = 72;
+// how far one arrow-pad press moves the viewport, in screen pixels
+const PAN_STEP = 80;
 
 
 /**
@@ -194,6 +197,36 @@ export default function MapScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
 
+  // Viewport = the camera. Domain coordinates never change when panning;
+  // screen position = world position + viewport offset. The offset lives
+  // in state so every pan re-renders from the same view models.
+  const [viewport, setViewport] = useState({ x: 0, y: 0 });
+  const viewportRef = useRef(viewport);
+  viewportRef.current = viewport;
+  const panStart = useRef({ x: 0, y: 0 });
+
+  // Capture only real drags (capture phase, past a small threshold) so
+  // taps still reach nodes and edges.
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponderCapture: (_e, g) =>
+        Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4,
+      onPanResponderGrant: () => {
+        panStart.current = viewportRef.current;
+      },
+      onPanResponderMove: (_e, g) => {
+        setViewport({
+          x: panStart.current.x + g.dx,
+          y: panStart.current.y + g.dy,
+        });
+      },
+    }),
+  ).current;
+
+  // the arrow pad pans by a fixed step; dx/dy shift the visible content
+  const panBy = (dx: number, dy: number) =>
+    setViewport((v) => ({ x: v.x + dx, y: v.y + dy }));
+
   // domain -> UI: derive plain view models on every render
   const vm = mapDomainToViewModel(layerView);
   const posById = new Map(vm.nodes.map((n) => [n.id, n]));
@@ -223,11 +256,13 @@ export default function MapScreen() {
 
   const addGoal = () => {
     console.log("[FLOW] tap -> add goal (goes through run())");
+    // place the new goal near the center of the current viewport:
+    // world position = screen position - viewport offset
     run((m) =>
       m.addNode(
         new Goal(
-          width / 2 + (Math.random() - 0.5) * 160,
-          height / 2 + (Math.random() - 0.5) * 160,
+          width / 2 - viewport.x + (Math.random() - 0.5) * 160,
+          height / 2 - viewport.y + (Math.random() - 0.5) * 160,
           `Goal ${vm.nodes.length + 1}`,
           [],
           [],
@@ -296,9 +331,11 @@ export default function MapScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} {...panResponder.panHandlers}>
       <Svg style={StyleSheet.absoluteFill}>
-        {vm.edges.map((e) => {
+        {/* the whole edge layer shifts with the viewport */}
+        <G transform={`translate(${viewport.x}, ${viewport.y})`}>
+          {vm.edges.map((e) => {
           const a = posById.get(e.fromId);
           const b = posById.get(e.toId);
           if (!a || !b) return null;
@@ -325,7 +362,8 @@ export default function MapScreen() {
               />
             </G>
           );
-        })}
+          })}
+        </G>
       </Svg>
 
       {vm.nodes.map((n) => (
@@ -334,7 +372,10 @@ export default function MapScreen() {
           onPress={() => onNodePress(n.id)}
           style={[
             styles.node,
-            { left: n.x - NODE_SIZE / 2, top: n.y - NODE_SIZE / 2 },
+            {
+              left: n.x + viewport.x - NODE_SIZE / 2,
+              top: n.y + viewport.y - NODE_SIZE / 2,
+            },
             n.id === selectedId && styles.nodeSelected,
           ]}
         >
@@ -349,6 +390,24 @@ export default function MapScreen() {
         <Text style={styles.layerLabel}>Layer {layerView.forwardSteps}</Text>
         <Pressable style={styles.layerButton} onPress={showMoreDetail}>
           <Text style={styles.layerButtonText}>+</Text>
+        </Pressable>
+      </View>
+
+      {/* arrow pad: button-driven viewport panning, same offset as drag */}
+      <View style={styles.panPad}>
+        <Pressable style={styles.panButton} onPress={() => panBy(0, PAN_STEP)}>
+          <Text style={styles.panButtonText}>↑</Text>
+        </Pressable>
+        <View style={styles.panPadRow}>
+          <Pressable style={styles.panButton} onPress={() => panBy(PAN_STEP, 0)}>
+            <Text style={styles.panButtonText}>←</Text>
+          </Pressable>
+          <Pressable style={styles.panButton} onPress={() => panBy(-PAN_STEP, 0)}>
+            <Text style={styles.panButtonText}>→</Text>
+          </Pressable>
+        </View>
+        <Pressable style={styles.panButton} onPress={() => panBy(0, -PAN_STEP)}>
+          <Text style={styles.panButtonText}>↓</Text>
         </Pressable>
       </View>
 
@@ -434,6 +493,32 @@ const styles = StyleSheet.create({
   layerLabel: {
     fontSize: 13,
     color: "#333333",
+  },
+  panPad: {
+    position: "absolute",
+    top: 60,
+    right: 20,
+    alignItems: "center",
+    gap: 4,
+  },
+  panPadRow: {
+    flexDirection: "row",
+    gap: 36, // leaves room for the middle cell of the cross layout
+  },
+  panButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#d0d7de",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  panButtonText: {
+    fontSize: 16,
+    color: "#208AEF",
+    fontWeight: "600",
   },
   addButton: {
     position: "absolute",

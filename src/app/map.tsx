@@ -17,6 +17,13 @@ import { Node } from "@/domain/node";
 // ---------- View models: plain data describing what to draw ----------
 // The UI renders ONLY from these. It never renders domain objects directly.
 
+
+/**
+ * TODO render the segement with different color 
+ * 
+ * 
+ * 
+ */
 interface NodeViewModel {
   id: string;
   x: number;

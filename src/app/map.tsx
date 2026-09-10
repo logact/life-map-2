@@ -14,7 +14,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import Svg, { G, Line, Polygon } from "react-native-svg";
+import Svg, { Circle, G, Line, Polygon, Polyline } from "react-native-svg";
 import Animated, {
   Easing,
   useAnimatedProps,
@@ -36,13 +36,6 @@ import { edgeStatus, goalStatus, nodeStatus, Status, startTask, pauseTask, compl
 // ---------- View models: plain data describing what to draw ----------
 // The UI renders ONLY from these. It never renders domain objects directly.
 
-
-/**
- * TODO render the segement with different color 
- * 
- * 
- * 
- */
 interface NodeViewModel {
   id: string;
   x: number;
@@ -58,6 +51,7 @@ interface EdgeViewModel {
   toId: string;
   layer: number;
   status: Status | null;
+  bend?: { x: number; y: number };
 }
 
 interface MapViewModel {
@@ -75,7 +69,7 @@ function mapDomainToViewModel(layerView: LayerView): MapViewModel {
   const edges: EdgeViewModel[] = [];
 
   for (const e of layerView.edges) {
-    edges.push({ id: e.id, fromId: e.node1.id, toId: e.node2.id, layer: e.layer, status: edgeStatus(e) });
+    edges.push({ id: e.id, fromId: e.node1.id, toId: e.node2.id, layer: e.layer, status: edgeStatus(e), bend: e.bend });
     for (const n of [e.node1, e.node2]) {
       if (!nodes.has(n.id)) {
         nodes.set(n.id, { id: n.id, x: n.x, y: n.y, title: n.title, kind: n.kind, status: nodeStatus(n) ?? undefined });
@@ -200,15 +194,25 @@ function nodeSize(kind: NodeKind): number {
 // how far one arrow-pad press moves the viewport, in screen pixels
 const PAN_STEP = 80;
 
-// long-press = "create something here": on empty canvas a goal, on a
-// node something attached to it
+// long-press on empty canvas = create a goal there; long-press on a node or
+// edge arms it for dragging (move the node / place the edge's bend point)
 const LONG_PRESS_MS = 500;
 
-// what the create form is making: a free goal at a world position, or a
-// task/record attached to a parent node
+// two taps on the same target within this window = double tap
+const DOUBLE_TAP_MS = 300;
+
+// what the create form is making: a free goal at a world position, a goal
+// attached to a parent node (create + connect), or a task/record attached
+// to a parent node
 type CreateTarget =
   | { mode: "goal"; x: number; y: number }
+  | { mode: "goal"; parentId: string }
   | { mode: "task" | "record"; parentId: string };
+
+// what the info card shows: the last single-tapped node or edge
+type InfoTarget =
+  | { kind: "node"; id: string }
+  | { kind: "edge"; id: string };
 
 // golden angle: successive children fan out around the parent without
 // landing on top of each other
@@ -227,6 +231,7 @@ function fmtDate(d: Date): string {
 }
 
 const AnimatedLine = Animated.createAnimatedComponent(Line);
+const AnimatedPolyline = Animated.createAnimatedComponent(Polyline);
 
 // in-progress node outline: a dotted ring breathing between 0.4 and 1.0
 // opacity, drawn behind the node so the title stays still
@@ -284,12 +289,91 @@ function MarchingLine(props: { x1: number; y1: number; x2: number; y2: number; c
   );
 }
 
+// marching variant for bent edges (from -> bend -> to)
+function MarchingPolyline(props: { points: string; color: string; width: number }) {
+  const offset = useSharedValue(0);
+  useEffect(() => {
+    offset.value = withRepeat(withTiming(-10, { duration: 800, easing: Easing.linear }), -1, false);
+  }, [offset]);
+  const animatedProps = useAnimatedProps(() => ({ strokeDashoffset: offset.value }));
+  return (
+    <AnimatedPolyline
+      points={props.points}
+      fill="none"
+      stroke={props.color}
+      strokeWidth={props.width}
+      strokeDasharray="2 8"
+      animatedProps={animatedProps}
+    />
+  );
+}
+
 // small outlined pill used for the inspector's status actions
 function SheetButton(props: { label: string; onPress: () => void }) {
   return (
     <Pressable style={styles.inspectorButton} onPress={props.onPress}>
       <Text style={styles.inspectorButtonText}>{props.label}</Text>
     </Pressable>
+  );
+}
+
+// read-only peek card for a single tap: title plus a few fact lines.
+// pointerEvents="none" so canvas touches pass through and dismiss it.
+function InfoCard(props: { title: string; lines: string[] }) {
+  return (
+    <View style={styles.infoCard} pointerEvents="none">
+      <Text style={styles.infoTitle}>{props.title}</Text>
+      {props.lines.map((l, i) => (
+        <Text key={i} style={styles.infoMeta}>
+          {l}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
+// bottom sheet of mutation actions for a node or edge (double-tap target)
+interface SheetAction {
+  label: string;
+  destructive?: boolean;
+  onPress: () => void;
+}
+
+function ActionSheet(props: { title: string; actions: SheetAction[]; onClose: () => void }) {
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={props.onClose}>
+      <View style={styles.formBackdrop}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={props.onClose} />
+        <View style={styles.formSheet}>
+          <Text style={styles.formTitle}>{props.title}</Text>
+          {props.actions.map((a) => (
+            <Pressable key={a.label} style={styles.actionItem} onPress={a.onPress}>
+              <Text style={[styles.actionItemText, a.destructive && styles.actionItemDestructive]}>
+                {a.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// top banner for modes that retarget canvas taps/drags: connect mode,
+// summarize mode, bend-drag mode
+function ModeBanner(props: { text: string; confirmLabel?: string; onConfirm?: () => void; onCancel: () => void }) {
+  return (
+    <View style={styles.modeBanner}>
+      <Text style={styles.modeBannerText}>{props.text}</Text>
+      {props.onConfirm && props.confirmLabel && (
+        <Pressable onPress={props.onConfirm}>
+          <Text style={styles.modeBannerAction}>{props.confirmLabel}</Text>
+        </Pressable>
+      )}
+      <Pressable onPress={props.onCancel}>
+        <Text style={styles.modeBannerAction}>Cancel</Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -368,8 +452,9 @@ function RoutePanel(props: {
   );
 }
 
-// one node on the canvas: tap selects, long-press opens its menu, and a
-// move past the threshold becomes a drag that repositions it in the domain
+// one node on the canvas: tap shows info / double-tap opens its sheet
+// (handled by the parent), long-press arms it so a following movement
+// becomes a drag that repositions it in the domain
 function DraggableNode(props: {
   n: NodeViewModel;
   screenX: number;
@@ -377,9 +462,10 @@ function DraggableNode(props: {
   selected: boolean;
   pulsing: boolean;
   dimmed: boolean;
+  armed: boolean;
   borderStyle: "dashed" | "dotted" | "solid";
   onPress: (id: string) => void;
-  onLongPress: (id: string) => void;
+  onArm: (id: string) => void;
   onDragStart: (id: string, x: number, y: number) => void;
   onDragMove: (id: string, x: number, y: number) => void;
   onDragEnd: (id: string, x: number, y: number) => void;
@@ -393,10 +479,10 @@ function DraggableNode(props: {
   const dragOrigin = useRef({ x: 0, y: 0 });
   const dragResponder = useRef(
     PanResponder.create({
-      // the Pressable owns the touch at first; claim it only once the
-      // finger has moved enough that this is a drag, not a tap/long-press
+      // drag is only possible after a long-press armed this node; the
+      // Pressable owns the touch until then (tap / double-tap / long-press)
       onMoveShouldSetPanResponder: (_e, g) =>
-        Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4,
+        latest.current.armed && (Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4),
       onPanResponderGrant: () => {
         const { n, onDragStart } = latest.current;
         dragOrigin.current = { x: n.x, y: n.y };
@@ -429,7 +515,7 @@ function DraggableNode(props: {
     >
       <Pressable
         onPress={() => props.onPress(props.n.id)}
-        onLongPress={() => props.onLongPress(props.n.id)}
+        onLongPress={() => props.onArm(props.n.id)}
         delayLongPress={LONG_PRESS_MS}
         style={[
           styles.node,
@@ -443,6 +529,7 @@ function DraggableNode(props: {
           // the pulsing ring draws the border; keep the base invisible
           props.pulsing && styles.nodePulsingBase,
           props.selected && styles.nodeSelected,
+          props.armed && styles.nodeArmed,
         ]}
       >
         <Text
@@ -499,22 +586,57 @@ export default function MapScreen() {
     setVersion((v) => v + 1);
   };
 
+  // ---------- interaction state ----------
+  // single tap -> read-only info card; double tap -> action sheet
+  const [infoTarget, setInfoTarget] = useState<InfoTarget | null>(null);
+  const [sheetNodeId, setSheetNodeId] = useState<string | null>(null);
+  const [sheetEdgeId, setSheetEdgeId] = useState<string | null>(null);
+  // connect mode: next node tap becomes the target of a new edge
+  const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
+  // summarize mode: edge taps accumulate a selection to summarize
+  const [summarizeMode, setSummarizeMode] = useState(false);
+  const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
+  // long-press arms a node for dragging; the drag itself lives in `drag`
+  const [dragArmedId, setDragArmedId] = useState<string | null>(null);
+  // long-press on an edge arms bend-drag: the next canvas drag places the
+  // edge's bend point (live position kept here, committed on release)
+  const [bendDrag, setBendDrag] = useState<{ edgeId: string; x: number; y: number } | null>(null);
+  const bendDragRef = useRef(bendDrag);
+  bendDragRef.current = bendDrag;
+
+  const closeOverlays = () => {
+    setInfoTarget(null);
+    setSheetNodeId(null);
+    setSheetEdgeId(null);
+    setInspectorNodeId(null);
+  };
+  // the pan responder is created once; it reaches the latest closer via ref
+  const closeOverlaysRef = useRef(closeOverlays);
+  closeOverlaysRef.current = closeOverlays;
+
   // Layer changes touch only the view, not the domain.
   const showMoreDetail = () => {
     layerView.nextLayer();
     setSelectedEdgeIds([]); // the selected edges may no longer be visible
+    setSummarizeMode(false);
+    setConnectSourceId(null);
+    setBendDrag(null);
+    setDragArmedId(null);
+    closeOverlays();
     clearRouteState(); // routes were computed over the old visible edges
     setVersion((v) => v + 1);
   };
   const showLessDetail = () => {
     layerView.prevLayer();
     setSelectedEdgeIds([]);
+    setSummarizeMode(false);
+    setConnectSourceId(null);
+    setBendDrag(null);
+    setDragArmedId(null);
+    closeOverlays();
     clearRouteState();
     setVersion((v) => v + 1);
   };
-
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
 
   // respect the OS reduce-motion setting: pulse/march fall back to static outlines
   const [reduceMotion, setReduceMotion] = useState(false);
@@ -524,8 +646,7 @@ export default function MapScreen() {
     return () => sub.remove();
   }, []);
 
-  // creation flow: which node's menu is open, and what the form is making
-  const [menuNodeId, setMenuNodeId] = useState<string | null>(null);
+  // creation flow: what the form is making
   const [createTarget, setCreateTarget] = useState<CreateTarget | null>(null);
   const [draft, setDraft] = useState({ title: "", detail: "" });
 
@@ -555,10 +676,12 @@ export default function MapScreen() {
   };
 
   const enterRouteMode = () => {
-    setSelectedId(null);
     setSelectedEdgeIds([]);
-    setMenuNodeId(null);
-    setInspectorNodeId(null);
+    setSummarizeMode(false);
+    setConnectSourceId(null);
+    setBendDrag(null);
+    setDragArmedId(null);
+    closeOverlays();
     clearRouteState();
     setRouteMode(true);
   };
@@ -661,9 +784,7 @@ export default function MapScreen() {
   // long-press on empty canvas opens the goal form at that point
   // (world position = screen position - viewport offset)
   const openGoalFormAt = (screenX: number, screenY: number) => {
-    setSelectedId(null);
-    setMenuNodeId(null);
-    setInspectorNodeId(null);
+    closeOverlays();
     setDraft({ title: "", detail: "" });
     setCreateTarget({
       mode: "goal",
@@ -674,13 +795,15 @@ export default function MapScreen() {
 
   // The container claims empty-space touches immediately (node Pressables
   // still win on their own area) so it can start a long-press timer. Any
-  // movement past the threshold cancels the timer and becomes a pan.
+  // movement past the threshold cancels the timer and becomes a pan —
+  // unless a bend drag is armed, in which case the drag moves the bend.
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onPanResponderGrant: (e) => {
         panStart.current = viewportRef.current;
         panMoved.current = false;
+        if (bendDragRef.current) return; // bend drag: no create-goal timer
         const { pageX, pageY } = e.nativeEvent;
         cancelLongPress();
         longPressTimer.current = setTimeout(
@@ -689,23 +812,56 @@ export default function MapScreen() {
         );
       },
       onPanResponderMove: (_e, g) => {
+        const bd = bendDragRef.current;
+        if (bd) {
+          // bend drag: the bend point follows the finger (world coords)
+          if (Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4) {
+            panMoved.current = true;
+            setBendDrag({
+              edgeId: bd.edgeId,
+              x: g.moveX - viewportRef.current.x,
+              y: g.moveY - viewportRef.current.y,
+            });
+          }
+          return;
+        }
         if (Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4) {
           panMoved.current = true;
           cancelLongPress();
-          setMenuNodeId(null);
-          setInspectorNodeId(null);
+          closeOverlaysRef.current();
           setViewport({
             x: panStart.current.x + g.dx,
             y: panStart.current.y + g.dy,
           });
         }
       },
-      // a touch that never moved is a tap on empty canvas: deselect
+      // a touch that never moved is a tap on empty canvas: dismiss overlays;
+      // a bend drag commits its bend point here if the finger moved
       onPanResponderRelease: () => {
         cancelLongPress();
-        if (!panMoved.current) setSelectedId(null);
+        const bd = bendDragRef.current;
+        if (bd) {
+          if (panMoved.current) {
+            const edge = layerView.edges.find((e) => e.id === bd.edgeId);
+            if (edge) {
+              console.log("[FLOW] bend drag -> set edge bend (goes through run())");
+              run(() => {
+                edge.bend = { x: bd.x, y: bd.y };
+              });
+            }
+          }
+          setBendDrag(null); // release without a move cancels the bend drag
+          return;
+        }
+        if (!panMoved.current) {
+          setInfoTarget(null);
+          setDragArmedId(null);
+        }
       },
-      onPanResponderTerminate: cancelLongPress,
+      onPanResponderTerminate: () => {
+        cancelLongPress();
+        setBendDrag(null);
+      },
     }),
   ).current;
 
@@ -715,18 +871,18 @@ export default function MapScreen() {
 
   // node drag = "reposition one node": the live position is UI state so
   // the node and its edges follow the finger, then on release the new
-  // world position is committed to the domain through run()
+  // world position is committed to the domain through run(). Only an
+  // armed (long-pressed) node can be dragged.
   const [drag, setDrag] = useState<{ id: string; x: number; y: number } | null>(null);
 
   const onNodeDragStart = (id: string, x: number, y: number) => {
-    setSelectedId(null);
-    setMenuNodeId(null);
-    setInspectorNodeId(null);
+    closeOverlays();
     setDrag({ id, x, y });
   };
   const onNodeDragMove = (id: string, x: number, y: number) => setDrag({ id, x, y });
   const onNodeDragEnd = (id: string, x: number, y: number) => {
     setDrag(null);
+    setDragArmedId(null);
     const node = findDomainNode(map, id);
     if (!node || (node.x === x && node.y === y)) return;
     console.log("[FLOW] drag -> move node (goes through run())");
@@ -749,13 +905,11 @@ export default function MapScreen() {
     `[FLOW]   render step 3: drawing ${vm.nodes.length} nodes, ${vm.edges.length} edges, layer ${layerView.forwardSteps}`,
   );
 
-  // tap a selected node again -> open its inspector to edit title/status.
-  // Selection is cleared so a later tap can't fire a surprise connect.
+  // the inspector is the "Edit…" destination from the node action sheet
   const openInspector = (id: string) => {
     const node = findDomainNode(map, id);
     if (!node) return;
-    setSelectedId(null);
-    setMenuNodeId(null);
+    closeOverlays();
     setInspectorDraft({
       title: node.title,
       detail: isGoalNode(node)
@@ -782,6 +936,30 @@ export default function MapScreen() {
     setInspectorNodeId(null);
   };
 
+  // ---------- single/double tap routing ----------
+  // A tap starts a timer: if a second tap on the same target lands within
+  // DOUBLE_TAP_MS it becomes a double tap, otherwise the single-tap action
+  // fires when the timer expires. A tap on a DIFFERENT target flushes the
+  // pending one immediately so the info card stays responsive.
+  const nodeTapRef = useRef<{ id: string; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const edgeTapRef = useRef<{ id: string; timer: ReturnType<typeof setTimeout> } | null>(null);
+
+  const onNodeSingleTap = (id: string) => {
+    console.log("[FLOW] tap -> node info card (UI state only)");
+    setDragArmedId(null);
+    setSheetNodeId(null);
+    setSheetEdgeId(null);
+    setInspectorNodeId(null);
+    setInfoTarget({ kind: "node", id });
+  };
+
+  const onNodeDoubleTap = (id: string) => {
+    console.log("[FLOW] double tap -> node action sheet (UI state only)");
+    setInfoTarget(null);
+    setSheetEdgeId(null);
+    setSheetNodeId(id);
+  };
+
   const onNodePress = (id: string) => {
     // route mode: taps only fill the From/To fields, never select/connect
     if (routeMode) {
@@ -792,51 +970,137 @@ export default function MapScreen() {
       pickRouteNode(field, id, node?.title ?? "");
       return;
     }
-    if (selectedId === null) {
-      console.log("[FLOW] tap -> select node (UI state only)");
-      setSelectedId(id); // first tap: select
+    if (bendDrag) return; // bend drag owns the canvas until released/cancelled
+    // connect mode: this tap picks the edge target; duplicates allowed
+    if (connectSourceId) {
+      if (id !== connectSourceId) {
+        console.log("[FLOW] connect mode -> add edge (goes through run())");
+        const from = findDomainNode(map, connectSourceId);
+        const to = findDomainNode(map, id);
+        if (from && to) {
+          run((m) => m.addEdge(from, to));
+        }
+      }
+      setConnectSourceId(null);
       return;
     }
-    if (selectedId === id) {
-      openInspector(id); // tap same node: open its inspector
+    const pending = nodeTapRef.current;
+    if (pending && pending.id === id) {
+      clearTimeout(pending.timer);
+      nodeTapRef.current = null;
+      onNodeDoubleTap(id);
       return;
     }
-    // second tap on another node: connect them in the domain
-    console.log("[FLOW] tap -> connect two nodes (goes through run())");
-    const from = findDomainNode(map, selectedId);
-    const to = findDomainNode(map, id);
-    if (from && to) {
-      run((m) => m.addEdge(from, to));
+    if (pending) {
+      clearTimeout(pending.timer);
+      onNodeSingleTap(pending.id);
     }
-    setSelectedId(null);
+    nodeTapRef.current = {
+      id,
+      timer: setTimeout(() => {
+        nodeTapRef.current = null;
+        onNodeSingleTap(id);
+      }, DOUBLE_TAP_MS),
+    };
+  };
+
+  const onEdgeSingleTap = (id: string) => {
+    console.log("[FLOW] tap -> edge info card (UI state only)");
+    setSheetNodeId(null);
+    setSheetEdgeId(null);
+    setInfoTarget({ kind: "edge", id });
+  };
+
+  const onEdgeDoubleTap = (id: string) => {
+    console.log("[FLOW] double tap -> edge action sheet (UI state only)");
+    setInfoTarget(null);
+    setSheetNodeId(null);
+    setSheetEdgeId(id);
+  };
+
+  const onEdgePress = (id: string) => {
+    if (routeMode || connectSourceId || bendDrag) return;
+    // summarize mode: edge taps only grow/shrink the selection
+    if (summarizeMode) {
+      setSelectedEdgeIds((prev) =>
+        prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+      );
+      return;
+    }
+    const pending = edgeTapRef.current;
+    if (pending && pending.id === id) {
+      clearTimeout(pending.timer);
+      edgeTapRef.current = null;
+      onEdgeDoubleTap(id);
+      return;
+    }
+    if (pending) {
+      clearTimeout(pending.timer);
+      onEdgeSingleTap(pending.id);
+    }
+    edgeTapRef.current = {
+      id,
+      timer: setTimeout(() => {
+        edgeTapRef.current = null;
+        onEdgeSingleTap(id);
+      }, DOUBLE_TAP_MS),
+    };
+  };
+
+  // long-press an edge arms bend-drag: the bend handle appears at the
+  // current bend (or the midpoint) and the next canvas drag places it
+  const onEdgeLongPress = (id: string) => {
+    if (routeMode || summarizeMode || connectSourceId) return;
+    const edge = layerView.edges.find((e) => e.id === id);
+    if (!edge) return;
+    console.log("[FLOW] long-press edge -> arm bend drag (UI state only)");
+    setInfoTarget(null);
+    setSheetEdgeId(null);
+    const mid = edge.bend ?? {
+      x: (edge.node1.x + edge.node2.x) / 2,
+      y: (edge.node1.y + edge.node2.y) / 2,
+    };
+    setBendDrag({ edgeId: id, x: mid.x, y: mid.y });
   };
 
   // the + button is a fallback for the canvas long-press: same form,
   // placed at the center of the current viewport
   const addGoal = () => openGoalFormAt(width / 2, height / 2);
 
-  // long-press a node -> menu of things that can attach to it.
-  // Records are leaves, so they get no menu. Cancels any pending
-  // tap-to-connect selection so it can't fire by surprise later.
+  // long-press a node arms it for dragging; a following movement becomes
+  // the drag (see DraggableNode's armed pan responder)
   const onNodeLongPress = (id: string) => {
-    if (routeMode) return; // no context menu while routing
+    if (routeMode || connectSourceId) return;
     const node = findDomainNode(map, id);
-    if (!node || node.kind === "record") return;
-    setSelectedId(null);
-    setInspectorNodeId(null);
-    setMenuNodeId(id);
+    if (!node) return;
+    console.log("[FLOW] long-press node -> arm drag (UI state only)");
+    closeOverlays();
+    setDragArmedId(id);
   };
 
   const startCreate = (mode: "task" | "record", parentId: string) => {
-    setMenuNodeId(null);
-    setInspectorNodeId(null);
+    closeOverlays();
     setDraft({ title: "", detail: "" });
     setCreateTarget({ mode, parentId });
   };
 
+  // "Add goal" on a node: create a goal AND connect it to the parent
+  const startCreateAttachedGoal = (parentId: string) => {
+    closeOverlays();
+    setDraft({ title: "", detail: "" });
+    setCreateTarget({ mode: "goal", parentId });
+  };
+
+  // connect mode: sheet closes, source stays highlighted, next node tap
+  // becomes the target
+  const startConnect = (sourceId: string) => {
+    closeOverlays();
+    setConnectSourceId(sourceId);
+  };
+
   // cycle a task through the status machine: todo -> in-progress -> done -> todo
   const advanceTaskStatus = (id: string) => {
-    setMenuNodeId(null);
+    setSheetNodeId(null);
     const node = findDomainNode(map, id);
     if (!node || !isTaskNode(node)) return;
     run(() => {
@@ -846,6 +1110,39 @@ export default function MapScreen() {
     });
   };
 
+  const confirmRemoveNode = (node: Node) => {
+    Alert.alert("Remove node", `Remove "${node.title}" and all its edges?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: () => {
+          console.log("[FLOW] sheet -> remove node (goes through run())");
+          run((m) => m.removeNode(node));
+          setSheetNodeId(null);
+          setInfoTarget(null);
+          if (connectSourceId === node.id) setConnectSourceId(null);
+        },
+      },
+    ]);
+  };
+
+  const confirmRemoveEdge = (edge: Edge) => {
+    Alert.alert("Remove edge", `Remove "${edge.node1.title} → ${edge.node2.title}"?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: () => {
+          console.log("[FLOW] sheet -> remove edge (goes through run())");
+          run((m) => m.removeEdge(edge));
+          setSheetEdgeId(null);
+          setInfoTarget(null);
+        },
+      },
+    ]);
+  };
+
   const saveCreate = () => {
     if (!createTarget) return;
     const title = draft.title.trim();
@@ -853,13 +1150,13 @@ export default function MapScreen() {
     const detail = draft.detail.trim();
 
     console.log("[FLOW] create form -> save (goes through run())");
-    if (createTarget.mode === "goal") {
+    if (createTarget.mode === "goal" && !("parentId" in createTarget)) {
       run((m) =>
         m.addNode(
           new Goal(createTarget.x, createTarget.y, title, [], [], detail || undefined),
         ),
       );
-    } else {
+    } else if ("parentId" in createTarget) {
       const parent = findDomainNode(map, createTarget.parentId);
       if (!parent) return;
       // fan children around the parent; index from existing links so
@@ -869,30 +1166,24 @@ export default function MapScreen() {
       run((m) => {
         if (createTarget.mode === "task") {
           m.addTask(parent as Goal, new Task(pos.x, pos.y, title, [], []));
-        } else {
+        } else if (createTarget.mode === "record") {
           m.attachRecord(
             parent,
             new RecordNode(pos.x, pos.y, title, [], [], detail, new Date()),
           );
+        } else {
+          // attached goal: create + connect
+          m.addEdge(parent, new Goal(pos.x, pos.y, title, [], [], detail || undefined));
         }
       });
     }
     setCreateTarget(null);
   };
 
-  // edge tap toggles selection (UI state only); the domain mutation
-  // happens later via the Expand / Summarize buttons
-  const onEdgePress = (id: string) => {
-    if (routeMode) return; // edges are not selectable while routing
-    setSelectedEdgeIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
-  };
-
-  const expandSelected = () => {
-    const edge = layerView.edges.find((e) => e.id === selectedEdgeIds[0]);
+  const expandEdge = (edgeId: string) => {
+    const edge = layerView.edges.find((e) => e.id === edgeId);
     if (!edge) return;
-    console.log("[FLOW] tap -> expand edge (goes through run())");
+    console.log("[FLOW] sheet -> expand edge (goes through run())");
     // expand = drill into this edge: navigate the view to the layer
     // where the new children live (edge.layer + 1). A visible edge can
     // be shallower than the view's bottom (e.g. a layer-0 edge shown at
@@ -905,6 +1196,22 @@ export default function MapScreen() {
     });
     layerView.refresh(targetLayer);
     setVersion((v) => v + 1);
+    setSelectedEdgeIds([]);
+    setSheetEdgeId(null);
+    setInfoTarget(null);
+  };
+
+  // summarize mode: the sheet's edge is pre-selected, further edge taps
+  // extend the selection, Confirm runs the domain summarize
+  const startSummarize = (edgeId: string) => {
+    setSheetEdgeId(null);
+    setInfoTarget(null);
+    setSelectedEdgeIds([edgeId]);
+    setSummarizeMode(true);
+  };
+
+  const cancelSummarize = () => {
+    setSummarizeMode(false);
     setSelectedEdgeIds([]);
   };
 
@@ -935,9 +1242,28 @@ export default function MapScreen() {
       return;
     }
 
-    console.log("[FLOW] tap -> summarize edges (goes through run())");
+    console.log("[FLOW] banner -> summarize edges (goes through run())");
     run((m) => m.summarize(boundary[0], boundary[1], edges));
     setSelectedEdgeIds([]);
+    setSummarizeMode(false);
+  };
+
+  // info card content for a single-tapped node
+  const nodeInfoLines = (node: Node): string[] => {
+    const s = nodeStatus(node);
+    const lines = [s ? `${node.kind} · ${s}` : node.kind];
+    if (isGoalNode(node)) {
+      if (node.description) lines.push(node.description);
+      if (node.targetDate) lines.push(`Target ${fmtDate(node.targetDate)}`);
+      if (node.completedAt) lines.push(`Done ${fmtDate(node.completedAt)}`);
+    } else if (isTaskNode(node)) {
+      if (node.startedAt) lines.push(`Started ${fmtDate(node.startedAt)}`);
+      if (node.completedAt) lines.push(`Done ${fmtDate(node.completedAt)}`);
+    } else if (isRecordNode(node)) {
+      if (node.note) lines.push(node.note);
+      lines.push(`Occurred ${fmtDate(node.occuredAt)}`);
+    }
+    return lines;
   };
 
   // autocomplete suggestions for the focused route search field
@@ -960,6 +1286,10 @@ export default function MapScreen() {
         : [],
   };
 
+  // node highlight: the connect source, the info-card node, or route focus
+  const highlightedNodeId =
+    connectSourceId ?? (infoTarget?.kind === "node" ? infoTarget.id : null);
+
   return (
     <View style={styles.container} {...panResponder.panHandlers}>
       <Svg style={StyleSheet.absoluteFill}>
@@ -969,15 +1299,22 @@ export default function MapScreen() {
           const a = posById.get(e.fromId);
           const b = posById.get(e.toId);
           if (!a || !b) return null;
-          const selected = selectedEdgeIds.includes(e.id);
+          const selected =
+            selectedEdgeIds.includes(e.id) ||
+            (infoTarget?.kind === "edge" && infoTarget.id === e.id);
           const onRoute = routeEdgeIds.has(e.id);
           const dimmed = routeFocusOn && !onRoute;
           const color = onRoute ? "#1a73e8" : selected ? "#333333" : "#9aa5b1";
           const edgeWidth = onRoute || selected ? 4 : Math.max(1.5, 3 - e.layer);
-          const dx = b.x - a.x;
-          const dy = b.y - a.y;
+          // a bend drag in progress overrides the stored bend point
+          const bend = bendDrag && bendDrag.edgeId === e.id ? { x: bendDrag.x, y: bendDrag.y } : e.bend;
+          // arrowhead at the target node's edge, pointing into it; the
+          // direction comes from the LAST segment (bend -> target when bent)
+          const ax = bend ? bend.x : a.x;
+          const ay = bend ? bend.y : a.y;
+          const dx = b.x - ax;
+          const dy = b.y - ay;
           const len = Math.hypot(dx, dy);
-          // arrowhead at the target node's edge, pointing into it
           const ux = len > 0 ? dx / len : 0;
           const uy = len > 0 ? dy / len : 0;
           const tipX = b.x - ux * (nodeSize(b.kind) / 2);
@@ -987,12 +1324,27 @@ export default function MapScreen() {
           const baseX = tipX - ux * back;
           const baseY = tipY - uy * back;
           const arrowPoints = `${tipX},${tipY} ${baseX - uy * wing},${baseY + ux * wing} ${baseX + uy * wing},${baseY - ux * wing}`;
+          const dash =
+            e.status === "todo" ? "6 6" : e.status === "in-progress" ? "2 8" : undefined;
+          const bentPoints = bend ? `${a.x},${a.y} ${bend.x},${bend.y} ${b.x},${b.y}` : "";
           return (
             <G key={e.id} opacity={dimmed ? 0.15 : 1}>
               {/* line style carries the edge's frontier status:
                   todo=dashed, in-progress=dotted marching toward the
                   target, done/records=solid */}
-              {e.status === "in-progress" && !reduceMotion ? (
+              {bend ? (
+                e.status === "in-progress" && !reduceMotion ? (
+                  <MarchingPolyline points={bentPoints} color={color} width={edgeWidth} />
+                ) : (
+                  <Polyline
+                    points={bentPoints}
+                    fill="none"
+                    stroke={color}
+                    strokeWidth={edgeWidth}
+                    strokeDasharray={dash}
+                  />
+                )
+              ) : e.status === "in-progress" && !reduceMotion ? (
                 <MarchingLine
                   x1={a.x}
                   y1={a.y}
@@ -1009,22 +1361,43 @@ export default function MapScreen() {
                   y2={b.y}
                   stroke={color}
                   strokeWidth={edgeWidth}
-                  strokeDasharray={
-                    e.status === "todo" ? "6 6" : e.status === "in-progress" ? "2 8" : undefined
-                  }
+                  strokeDasharray={dash}
                 />
               )}
               <Polygon points={arrowPoints} fill={color} />
               {/* wide invisible hit area so thin lines are tappable */}
-              <Line
-                x1={a.x}
-                y1={a.y}
-                x2={b.x}
-                y2={b.y}
-                stroke="transparent"
-                strokeWidth={24}
-                onPress={() => onEdgePress(e.id)}
-              />
+              {bend ? (
+                <Polyline
+                  points={bentPoints}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth={24}
+                  onPress={() => onEdgePress(e.id)}
+                  onLongPress={() => onEdgeLongPress(e.id)}
+                />
+              ) : (
+                <Line
+                  x1={a.x}
+                  y1={a.y}
+                  x2={b.x}
+                  y2={b.y}
+                  stroke="transparent"
+                  strokeWidth={24}
+                  onPress={() => onEdgePress(e.id)}
+                  onLongPress={() => onEdgeLongPress(e.id)}
+                />
+              )}
+              {/* bend handle: visible while a bend drag is armed */}
+              {bendDrag && bendDrag.edgeId === e.id && (
+                <Circle
+                  cx={bendDrag.x}
+                  cy={bendDrag.y}
+                  r={10}
+                  fill="#ffffff"
+                  stroke="#333333"
+                  strokeWidth={2}
+                />
+              )}
             </G>
           );
           })}
@@ -1057,12 +1430,13 @@ export default function MapScreen() {
           n={n}
           screenX={pos.x + viewport.x}
           screenY={pos.y + viewport.y}
-          selected={n.id === selectedId || (routeFocusOn && routeNodeIds.has(n.id))}
+          selected={n.id === highlightedNodeId || (routeFocusOn && routeNodeIds.has(n.id))}
           pulsing={pulsing}
           dimmed={nodeDimmed}
+          armed={dragArmedId === n.id}
           borderStyle={borderStyle}
           onPress={onNodePress}
-          onLongPress={onNodeLongPress}
+          onArm={onNodeLongPress}
           onDragStart={onNodeDragStart}
           onDragMove={onNodeDragMove}
           onDragEnd={onNodeDragEnd}
@@ -1099,31 +1473,6 @@ export default function MapScreen() {
         </Pressable>
       </View>
 
-      {selectedEdgeIds.length > 0 && (
-        <View style={styles.edgeControls} pointerEvents="box-none">
-          <Pressable
-            style={[
-              styles.edgeButton,
-              selectedEdgeIds.length !== 1 && styles.edgeButtonDisabled,
-            ]}
-            disabled={selectedEdgeIds.length !== 1}
-            onPress={expandSelected}
-          >
-            <Text style={styles.edgeButtonText}>Expand</Text>
-          </Pressable>
-          <Pressable
-            style={[
-              styles.edgeButton,
-              selectedEdgeIds.length < 2 && styles.edgeButtonDisabled,
-            ]}
-            disabled={selectedEdgeIds.length < 2}
-            onPress={summarizeSelected}
-          >
-            <Text style={styles.edgeButtonText}>Summarize</Text>
-          </Pressable>
-        </View>
-      )}
-
       <Pressable style={styles.addButton} onPress={addGoal}>
         <Text style={styles.addButtonText}>+ Add goal</Text>
       </Pressable>
@@ -1133,6 +1482,139 @@ export default function MapScreen() {
           <Text style={styles.addButtonText}>Route</Text>
         </Pressable>
       )}
+
+      {/* mode banners: connect mode and summarize mode retarget taps;
+          bend mode retargets the next canvas drag */}
+      {connectSourceId && (
+        <ModeBanner
+          text="Tap a node to connect"
+          onCancel={() => setConnectSourceId(null)}
+        />
+      )}
+      {summarizeMode && (
+        <ModeBanner
+          text={`Tap edges to summarize (${selectedEdgeIds.length} selected)`}
+          confirmLabel="Summarize"
+          onConfirm={summarizeSelected}
+          onCancel={cancelSummarize}
+        />
+      )}
+      {bendDrag && (
+        <ModeBanner
+          text="Drag anywhere to bend the edge"
+          onCancel={() => setBendDrag(null)}
+        />
+      )}
+
+      {/* single-tap info card: read-only peek at a node or edge */}
+      {infoTarget && !sheetNodeId && !sheetEdgeId && !inspectorNodeId &&
+        (() => {
+          if (infoTarget.kind === "node") {
+            const node = findDomainNode(map, infoTarget.id);
+            if (!node) return null;
+            return <InfoCard title={node.title} lines={nodeInfoLines(node)} />;
+          }
+          const edge = layerView.edges.find((e) => e.id === infoTarget.id);
+          if (!edge) return null;
+          const s = edgeStatus(edge);
+          const lines = [s ? `Layer ${edge.layer} · ${s}` : `Layer ${edge.layer}`];
+          if (edge.childrenEdges.length > 0) {
+            lines.push(
+              `${edge.childrenEdges.length} hidden sub-edge${edge.childrenEdges.length === 1 ? "" : "s"}`,
+            );
+          }
+          return (
+            <InfoCard
+              title={`${edge.node1.title} → ${edge.node2.title}`}
+              lines={lines}
+            />
+          );
+        })()}
+
+      {/* double-tap node sheet: everything that mutates this node */}
+      {sheetNodeId &&
+        (() => {
+          const node = findDomainNode(map, sheetNodeId);
+          if (!node) return null;
+          const actions: SheetAction[] = [];
+          if (isGoalNode(node)) {
+            actions.push({ label: "Add task", onPress: () => startCreate("task", node.id) });
+            actions.push({ label: "Add goal", onPress: () => startCreateAttachedGoal(node.id) });
+            actions.push({ label: "Add record", onPress: () => startCreate("record", node.id) });
+            actions.push({ label: "Connect…", onPress: () => startConnect(node.id) });
+            actions.push({ label: "Edit…", onPress: () => openInspector(node.id) });
+            actions.push({
+              label: node.completedAt ? "Reopen goal" : "Mark done",
+              onPress: () => {
+                run(() => (node.completedAt ? reopenGoal(node) : completeGoal(node)));
+                setSheetNodeId(null);
+              },
+            });
+          } else if (isTaskNode(node)) {
+            actions.push({ label: "Add record", onPress: () => startCreate("record", node.id) });
+            actions.push({ label: "Connect…", onPress: () => startConnect(node.id) });
+            actions.push({ label: "Edit…", onPress: () => openInspector(node.id) });
+            actions.push({
+              label:
+                node.status === "todo"
+                  ? "Start task"
+                  : node.status === "in-progress"
+                    ? "Complete task"
+                    : "Reopen task",
+              onPress: () => advanceTaskStatus(node.id),
+            });
+          } else {
+            // records are leaves: no attach/connect actions
+            actions.push({ label: "Edit…", onPress: () => openInspector(node.id) });
+          }
+          actions.push({
+            label: "Remove node",
+            destructive: true,
+            onPress: () => confirmRemoveNode(node),
+          });
+          return (
+            <ActionSheet
+              title={node.title}
+              actions={actions}
+              onClose={() => setSheetNodeId(null)}
+            />
+          );
+        })()}
+
+      {/* double-tap edge sheet: expand / summarize / straighten / remove */}
+      {sheetEdgeId &&
+        (() => {
+          const edge = layerView.edges.find((e) => e.id === sheetEdgeId);
+          if (!edge) return null;
+          const actions: SheetAction[] = [
+            { label: "Expand", onPress: () => expandEdge(edge.id) },
+            { label: "Summarize with…", onPress: () => startSummarize(edge.id) },
+          ];
+          if (edge.bend) {
+            actions.push({
+              label: "Straighten",
+              onPress: () => {
+                console.log("[FLOW] sheet -> straighten edge (goes through run())");
+                run(() => {
+                  edge.bend = undefined;
+                });
+                setSheetEdgeId(null);
+              },
+            });
+          }
+          actions.push({
+            label: "Remove edge",
+            destructive: true,
+            onPress: () => confirmRemoveEdge(edge),
+          });
+          return (
+            <ActionSheet
+              title={`${edge.node1.title} → ${edge.node2.title}`}
+              actions={actions}
+              onClose={() => setSheetEdgeId(null)}
+            />
+          );
+        })()}
 
       {/* route query panel: type a node name (or tap it on the canvas) to
           fill From/To; both ends set -> candidate routes sheet opens */}
@@ -1193,58 +1675,7 @@ export default function MapScreen() {
         </View>
       </Modal>
 
-      {/* long-press context menu: what can be attached to this node */}
-      {menuNodeId &&
-        (() => {
-          const n = posById.get(menuNodeId);
-          if (!n) return null;
-          const size = nodeSize(n.kind);
-          // prefer the right side of the node, flip left near the edge
-          const menuWidth = 150;
-          let left = n.x + viewport.x + size / 2 + 8;
-          if (left + menuWidth > width) left = n.x + viewport.x - size / 2 - 8 - menuWidth;
-          const top = Math.max(20, n.y + viewport.y - size / 2);
-          return (
-            <>
-              <Pressable
-                style={styles.menuBackdrop}
-                onPress={() => setMenuNodeId(null)}
-              />
-              <View style={[styles.contextMenu, { left, top, width: menuWidth }]}>
-                {n.kind === "goal" && (
-                  <Pressable
-                    style={styles.menuItem}
-                    onPress={() => startCreate("task", n.id)}
-                  >
-                    <Text style={styles.menuItemText}>Add task</Text>
-                  </Pressable>
-                )}
-                {n.kind === "task" && (
-                  <Pressable
-                    style={styles.menuItem}
-                    onPress={() => advanceTaskStatus(n.id)}
-                  >
-                    <Text style={styles.menuItemText}>
-                      {n.status === "todo"
-                        ? "Start task"
-                        : n.status === "in-progress"
-                          ? "Complete task"
-                          : "Reopen task"}
-                    </Text>
-                  </Pressable>
-                )}
-                <Pressable
-                  style={styles.menuItem}
-                  onPress={() => startCreate("record", n.id)}
-                >
-                  <Text style={styles.menuItemText}>Add record</Text>
-                </Pressable>
-              </View>
-            </>
-          );
-        })()}
-
-      {/* inspector: edit the tapped node's info. Status buttons act at
+      {/* inspector: edit the node's info. Status buttons act at
           once through run(); text edits stay local until Save */}
       {inspectorNodeId &&
         (() => {
@@ -1484,6 +1915,14 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     backgroundColor: "#e5e7eb",
   },
+  // long-pressed (armed) node lifts: a following movement drags it
+  nodeArmed: {
+    shadowColor: "#000",
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
   nodePulsingBase: {
     borderColor: "transparent",
   },
@@ -1564,35 +2003,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 24,
-  },
-  edgeControls: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 100, // sits above the bottom row (layer controls / add button)
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 8,
-  },
-  edgeButton: {
-    backgroundColor: "#ffffff",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: "#333333",
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-  },
-  edgeButtonDisabled: {
-    opacity: 0.4,
-  },
-  edgeButtonText: {
-    color: "#333333",
-    fontWeight: "600",
   },
   addButtonText: {
     color: "#ffffff",
@@ -1703,28 +2113,6 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
   },
-  contextMenu: {
-    position: "absolute",
-    backgroundColor: "#ffffff",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#d0d7de",
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-    overflow: "hidden",
-  },
-  menuItem: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  menuItemText: {
-    fontSize: 14,
-    color: "#333333",
-    fontWeight: "600",
-  },
   formBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.3)",
@@ -1822,5 +2210,67 @@ const styles = StyleSheet.create({
   inspectorMeta: {
     fontSize: 12,
     color: "#666666",
+  },
+  infoCard: {
+    position: "absolute",
+    left: 20,
+    right: 20,
+    bottom: 100, // sits above the bottom row (layer controls / add button)
+    backgroundColor: "#ffffff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#d0d7de",
+    padding: 12,
+    gap: 4,
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  infoTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#333333",
+  },
+  infoMeta: {
+    fontSize: 13,
+    color: "#666666",
+  },
+  modeBanner: {
+    position: "absolute",
+    top: 110, // below the route panel row
+    left: 76, // clears the arrow pad
+    right: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+    backgroundColor: "#333333",
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  modeBannerText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "600",
+    flexShrink: 1,
+  },
+  modeBannerAction: {
+    color: "#9ecbff",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  actionItem: {
+    paddingVertical: 12,
+  },
+  actionItemText: {
+    fontSize: 15,
+    color: "#333333",
+    fontWeight: "600",
+  },
+  actionItemDestructive: {
+    color: "#c0392b",
   },
 });

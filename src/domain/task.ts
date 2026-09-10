@@ -1,6 +1,7 @@
 import { v4 } from "uuid";
 import { Edge } from "./edge";
 import { Node, NodeKind } from "./node";
+import { Status } from "./status";
 
 export class Task implements Node {
     x: number;
@@ -8,7 +9,9 @@ export class Task implements Node {
     id: string;
     title: string;
     kind: NodeKind = "task";
-    completed: boolean = false;
+    status: Status = "todo";
+    startedAt?: Date;
+    completedAt?: Date;
     startEdges: Edge[];
     endEdges: Edge[];
     constructor(x: number, y: number, title: string, startEdges: Edge[], endEdges: Edge[]) {

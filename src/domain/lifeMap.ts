@@ -1,5 +1,4 @@
 
-import { v4 } from "uuid";
 import { Edge } from "./edge";
 import Goal from "./goal";
 import { Task } from "./task";
@@ -227,15 +226,7 @@ export class LifeMap {
             return
         }
         const newTitle = `${edge.node1.title}-${edge.node2.title}`
-        const newSubNode: Node = {
-            x: 0,
-            y: 0,
-            id: v4(),
-            title: newTitle,
-            kind: "task",
-            startEdges: [],
-            endEdges: []
-        }
+        const newSubNode = new Task(0, 0, newTitle, [], [])
         this.addEdge(edge.node1, newSubNode, edge)
         this.addEdge(newSubNode, edge.node2, edge)
 

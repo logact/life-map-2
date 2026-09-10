@@ -10,6 +10,7 @@ export default class Goal implements Node {
     kind: NodeKind = "goal";
     description?: string;
     targetDate?: Date;
+    completedAt?: Date;
     startEdges: Edge[];
     endEdges: Edge[];
     constructor(x: number, y: number, title: string, startEdges: Edge[], endEdges: Edge[], description?: string, targetDate?: Date) {

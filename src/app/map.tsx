@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   PanResponder,
@@ -29,6 +30,7 @@ import { Task } from "@/domain/task";
 import { Record as RecordNode } from "@/domain/record";
 import { LayerView, LifeMap } from "@/domain/lifeMap";
 import { isGoalNode, isRecordNode, isTaskNode, Node, NodeKind } from "@/domain/node";
+import { findRoutes, RouteResult } from "@/domain/route";
 import { edgeStatus, goalStatus, nodeStatus, Status, startTask, pauseTask, completeTask, completeGoal, reopenTask, reopenGoal } from "@/domain/status";
 
 // ---------- View models: plain data describing what to draw ----------
@@ -291,6 +293,81 @@ function SheetButton(props: { label: string; onPress: () => void }) {
   );
 }
 
+// route query panel: two search inputs with autocomplete suggestions.
+// Each field can also be filled by tapping a node on the canvas.
+function RoutePanel(props: {
+  query: { from: string; to: string };
+  pickerField: "from" | "to" | null;
+  suggestions: { from: NodeViewModel[]; to: NodeViewModel[] };
+  hasRoutes: boolean;
+  onFocusField: (field: "from" | "to") => void;
+  onChangeQuery: (field: "from" | "to", text: string) => void;
+  onPickSuggestion: (field: "from" | "to", id: string, title: string) => void;
+  onSwap: () => void;
+  onShowRoutes: () => void;
+  onClose: () => void;
+}) {
+  const renderField = (field: "from" | "to") => (
+    <View key={field}>
+      <View
+        style={[
+          styles.routeRow,
+          props.pickerField === field && styles.routeRowActive,
+        ]}
+      >
+        <Text style={styles.routeRowLabel}>
+          {field === "from" ? "From" : "To"}
+        </Text>
+        <TextInput
+          style={styles.routeInput}
+          placeholder="Type a node name, or tap it on the map"
+          value={props.query[field]}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          onFocus={() => props.onFocusField(field)}
+          onChangeText={(t) => props.onChangeQuery(field, t)}
+        />
+      </View>
+      {props.pickerField === field &&
+        props.suggestions[field].map((n) => (
+          <Pressable
+            key={n.id}
+            style={styles.routeSuggestion}
+            onPress={() => props.onPickSuggestion(field, n.id, n.title)}
+          >
+            <Text style={styles.routeSuggestionText}>
+              {n.title}
+              <Text style={styles.routeSuggestionKind}>
+                {"  "}
+                {n.kind}
+              </Text>
+            </Text>
+          </Pressable>
+        ))}
+    </View>
+  );
+  return (
+    <View style={styles.routePanel}>
+      <View style={styles.routeFields}>
+        {renderField("from")}
+        {renderField("to")}
+      </View>
+      <Pressable style={styles.routeIconButton} onPress={props.onSwap}>
+        <Text style={styles.routeIconButtonText}>⇅</Text>
+      </Pressable>
+      {props.hasRoutes && (
+        <Pressable style={styles.routeIconButton} onPress={props.onShowRoutes}>
+          <Text style={styles.routeIconButtonText}>☰</Text>
+        </Pressable>
+      )}
+      <Pressable style={styles.routeIconButton} onPress={props.onClose}>
+        <Text style={styles.routeIconButtonText}>✕</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 // one node on the canvas: tap selects, long-press opens its menu, and a
 // move past the threshold becomes a drag that repositions it in the domain
 function DraggableNode(props: {
@@ -299,6 +376,7 @@ function DraggableNode(props: {
   screenY: number;
   selected: boolean;
   pulsing: boolean;
+  dimmed: boolean;
   borderStyle: "dashed" | "dotted" | "solid";
   onPress: (id: string) => void;
   onLongPress: (id: string) => void;
@@ -346,6 +424,7 @@ function DraggableNode(props: {
         position: "absolute",
         left: props.screenX - size / 2,
         top: props.screenY - size / 2,
+        opacity: props.dimmed ? 0.2 : 1,
       }}
     >
       <Pressable
@@ -424,11 +503,13 @@ export default function MapScreen() {
   const showMoreDetail = () => {
     layerView.nextLayer();
     setSelectedEdgeIds([]); // the selected edges may no longer be visible
+    clearRouteState(); // routes were computed over the old visible edges
     setVersion((v) => v + 1);
   };
   const showLessDetail = () => {
     layerView.prevLayer();
     setSelectedEdgeIds([]);
+    clearRouteState();
     setVersion((v) => v + 1);
   };
 
@@ -452,6 +533,112 @@ export default function MapScreen() {
   // Status buttons act immediately; title/description/note wait for Save.
   const [inspectorNodeId, setInspectorNodeId] = useState<string | null>(null);
   const [inspectorDraft, setInspectorDraft] = useState({ title: "", detail: "" });
+
+  // route query flow: pick From/To nodes, list candidate routes, then
+  // focus the chosen one (center it, highlight it, dim everything else)
+  const [routeMode, setRouteMode] = useState(false);
+  const [routeFromId, setRouteFromId] = useState<string | null>(null);
+  const [routeToId, setRouteToId] = useState<string | null>(null);
+  const [routePickerField, setRoutePickerField] = useState<"from" | "to" | null>(null);
+  // the text typed into the From/To search inputs
+  const [routeQuery, setRouteQuery] = useState({ from: "", to: "" });
+  const [routes, setRoutes] = useState<RouteResult[]>([]);
+  const [selectedRouteIndex, setSelectedRouteIndex] = useState<number | null>(null);
+
+  const clearRouteState = () => {
+    setRouteFromId(null);
+    setRouteToId(null);
+    setRoutePickerField(null);
+    setRouteQuery({ from: "", to: "" });
+    setRoutes([]);
+    setSelectedRouteIndex(null);
+  };
+
+  const enterRouteMode = () => {
+    setSelectedId(null);
+    setSelectedEdgeIds([]);
+    setMenuNodeId(null);
+    setInspectorNodeId(null);
+    clearRouteState();
+    setRouteMode(true);
+  };
+
+  const exitRouteMode = () => {
+    clearRouteState();
+    setRouteMode(false);
+  };
+
+  // search over the currently visible edges so every route edge can be
+  // rendered and highlighted
+  const searchRoutes = (fromId: string, toId: string) => {
+    const found = findRoutes(layerView.edges, fromId, toId);
+    if (found.length === 0) {
+      setRoutes([]);
+      setSelectedRouteIndex(null);
+      Alert.alert("No route", "No directed path connects these two nodes.");
+      return;
+    }
+    setRoutes(found);
+    setSelectedRouteIndex(null);
+  };
+
+  // confirm a candidate: focus it — center its bounding box on screen,
+  // the renderer highlights its edges and dims everything else
+  const confirmRoute = (index: number) => {
+    const route = routes[index];
+    if (!route) return;
+    setSelectedRouteIndex(index);
+    const xs = route.nodes.map((n) => n.x);
+    const ys = route.nodes.map((n) => n.y);
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    setViewport({ x: width / 2 - cx, y: height / 2 - cy });
+  };
+
+  // fill one route end from a suggestion tap or a canvas tap, then
+  // search as soon as both ends are known
+  const pickRouteNode = (field: "from" | "to", id: string, title: string) => {
+    if (field === "from") {
+      setRouteFromId(id);
+      setRouteQuery((q) => ({ ...q, from: title }));
+    } else {
+      setRouteToId(id);
+      setRouteQuery((q) => ({ ...q, to: title }));
+    }
+    setRoutePickerField(null);
+    Keyboard.dismiss();
+    const from = field === "from" ? id : routeFromId;
+    const to = field === "to" ? id : routeToId;
+    if (from && to) {
+      if (from === to) {
+        Alert.alert("Same node", "Choose two different nodes for a route.");
+        return;
+      }
+      searchRoutes(from, to);
+    }
+  };
+
+  const swapRouteEnds = () => {
+    const from = routeFromId;
+    const to = routeToId;
+    setRouteFromId(to);
+    setRouteToId(from);
+    setRouteQuery((q) => ({ from: q.to, to: q.from }));
+    if (from && to) searchRoutes(to, from);
+  };
+
+  // the route shown on the canvas: the confirmed one, or the shortest
+  // candidate as a preview while the alternatives sheet is open
+  const activeRoute =
+    selectedRouteIndex !== null
+      ? (routes[selectedRouteIndex] ?? null)
+      : routeMode && routes.length > 0
+        ? routes[0]
+        : null;
+  const routeEdgeIds = new Set((activeRoute?.edges ?? []).map((e) => e.id));
+  const routeNodeIds = new Set((activeRoute?.nodes ?? []).map((n) => n.id));
+  // dim everything off the route only once a candidate is confirmed
+  const routeFocusOn = routeMode && selectedRouteIndex !== null;
 
   // Viewport = the camera. Domain coordinates never change when panning;
   // screen position = world position + viewport offset. The offset lives
@@ -596,6 +783,15 @@ export default function MapScreen() {
   };
 
   const onNodePress = (id: string) => {
+    // route mode: taps only fill the From/To fields, never select/connect
+    if (routeMode) {
+      const field =
+        routePickerField ?? (routeFromId === null ? "from" : routeToId === null ? "to" : null);
+      if (!field) return;
+      const node = findDomainNode(map, id);
+      pickRouteNode(field, id, node?.title ?? "");
+      return;
+    }
     if (selectedId === null) {
       console.log("[FLOW] tap -> select node (UI state only)");
       setSelectedId(id); // first tap: select
@@ -623,6 +819,7 @@ export default function MapScreen() {
   // Records are leaves, so they get no menu. Cancels any pending
   // tap-to-connect selection so it can't fire by surprise later.
   const onNodeLongPress = (id: string) => {
+    if (routeMode) return; // no context menu while routing
     const node = findDomainNode(map, id);
     if (!node || node.kind === "record") return;
     setSelectedId(null);
@@ -686,6 +883,7 @@ export default function MapScreen() {
   // edge tap toggles selection (UI state only); the domain mutation
   // happens later via the Expand / Summarize buttons
   const onEdgePress = (id: string) => {
+    if (routeMode) return; // edges are not selectable while routing
     setSelectedEdgeIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
@@ -742,6 +940,26 @@ export default function MapScreen() {
     setSelectedEdgeIds([]);
   };
 
+  // autocomplete suggestions for the focused route search field
+  const routeSuggestions = {
+    from:
+      routePickerField === "from"
+        ? [...posById.values()]
+            .filter((n) =>
+              n.title.toLowerCase().includes(routeQuery.from.trim().toLowerCase()),
+            )
+            .slice(0, 5)
+        : [],
+    to:
+      routePickerField === "to"
+        ? [...posById.values()]
+            .filter((n) =>
+              n.title.toLowerCase().includes(routeQuery.to.trim().toLowerCase()),
+            )
+            .slice(0, 5)
+        : [],
+  };
+
   return (
     <View style={styles.container} {...panResponder.panHandlers}>
       <Svg style={StyleSheet.absoluteFill}>
@@ -752,7 +970,10 @@ export default function MapScreen() {
           const b = posById.get(e.toId);
           if (!a || !b) return null;
           const selected = selectedEdgeIds.includes(e.id);
-          const color = selected ? "#333333" : "#9aa5b1";
+          const onRoute = routeEdgeIds.has(e.id);
+          const dimmed = routeFocusOn && !onRoute;
+          const color = onRoute ? "#1a73e8" : selected ? "#333333" : "#9aa5b1";
+          const edgeWidth = onRoute || selected ? 4 : Math.max(1.5, 3 - e.layer);
           const dx = b.x - a.x;
           const dy = b.y - a.y;
           const len = Math.hypot(dx, dy);
@@ -767,7 +988,7 @@ export default function MapScreen() {
           const baseY = tipY - uy * back;
           const arrowPoints = `${tipX},${tipY} ${baseX - uy * wing},${baseY + ux * wing} ${baseX + uy * wing},${baseY - ux * wing}`;
           return (
-            <G key={e.id}>
+            <G key={e.id} opacity={dimmed ? 0.15 : 1}>
               {/* line style carries the edge's frontier status:
                   todo=dashed, in-progress=dotted marching toward the
                   target, done/records=solid */}
@@ -778,7 +999,7 @@ export default function MapScreen() {
                   x2={b.x}
                   y2={b.y}
                   color={color}
-                  width={selected ? 4 : Math.max(1.5, 3 - e.layer)}
+                  width={edgeWidth}
                 />
               ) : (
                 <Line
@@ -787,7 +1008,7 @@ export default function MapScreen() {
                   x2={b.x}
                   y2={b.y}
                   stroke={color}
-                  strokeWidth={selected ? 4 : Math.max(1.5, 3 - e.layer)}
+                  strokeWidth={edgeWidth}
                   strokeDasharray={
                     e.status === "todo" ? "6 6" : e.status === "in-progress" ? "2 8" : undefined
                   }
@@ -820,9 +1041,10 @@ export default function MapScreen() {
           n.status === "todo" ? "dashed" : n.status === "in-progress" ? "dotted" : "solid";
         // live position: the drag override while dragging, else the domain
         const pos = posById.get(n.id) ?? n;
+        const nodeDimmed = routeFocusOn && !routeNodeIds.has(n.id);
         return (
         <Fragment key={n.id}>
-          {pulsing && (
+          {pulsing && !nodeDimmed && (
             <PulsingRing
               x={pos.x + viewport.x}
               y={pos.y + viewport.y}
@@ -835,8 +1057,9 @@ export default function MapScreen() {
           n={n}
           screenX={pos.x + viewport.x}
           screenY={pos.y + viewport.y}
-          selected={n.id === selectedId}
+          selected={n.id === selectedId || (routeFocusOn && routeNodeIds.has(n.id))}
           pulsing={pulsing}
+          dimmed={nodeDimmed}
           borderStyle={borderStyle}
           onPress={onNodePress}
           onLongPress={onNodeLongPress}
@@ -904,6 +1127,71 @@ export default function MapScreen() {
       <Pressable style={styles.addButton} onPress={addGoal}>
         <Text style={styles.addButtonText}>+ Add goal</Text>
       </Pressable>
+
+      {!routeMode && (
+        <Pressable style={styles.routeButton} onPress={enterRouteMode}>
+          <Text style={styles.addButtonText}>Route</Text>
+        </Pressable>
+      )}
+
+      {/* route query panel: type a node name (or tap it on the canvas) to
+          fill From/To; both ends set -> candidate routes sheet opens */}
+      {routeMode && (
+        <RoutePanel
+          query={routeQuery}
+          pickerField={routePickerField}
+          suggestions={routeSuggestions}
+          hasRoutes={routes.length > 0}
+          onFocusField={setRoutePickerField}
+          onChangeQuery={(field, t) => {
+            setRouteQuery((q) => ({ ...q, [field]: t }));
+            // edited text no longer matches the picked node
+            if (field === "from") setRouteFromId(null);
+            else setRouteToId(null);
+            setRoutePickerField(field);
+            setRoutes([]);
+            setSelectedRouteIndex(null);
+          }}
+          onPickSuggestion={pickRouteNode}
+          onSwap={swapRouteEnds}
+          onShowRoutes={() => setSelectedRouteIndex(null)}
+          onClose={exitRouteMode}
+        />
+      )}
+
+      {/* candidate routes: pick one to focus it on the canvas */}
+      <Modal
+        visible={routeMode && routes.length > 0 && selectedRouteIndex === null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setRoutes([])}
+      >
+        <View style={styles.formBackdrop}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setRoutes([])}
+          />
+          <View style={styles.formSheet}>
+            <Text style={styles.formTitle}>Routes</Text>
+            {routes.map((r, i) => (
+              <Pressable
+                key={r.nodes.map((n) => n.id).join(">")}
+                style={styles.routeCard}
+                onPress={() => confirmRoute(i)}
+              >
+                <Text style={styles.routeCardTitle}>
+                  Route {i + 1} · {r.edges.length}{" "}
+                  {r.edges.length === 1 ? "step" : "steps"} · ~
+                  {Math.round(r.length)} px
+                </Text>
+                <Text style={styles.routeCardPath} numberOfLines={2}>
+                  {r.nodes.map((n) => n.title).join(" → ")}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      </Modal>
 
       {/* long-press context menu: what can be attached to this node */}
       {menuNodeId &&
@@ -1309,6 +1597,104 @@ const styles = StyleSheet.create({
   addButtonText: {
     color: "#ffffff",
     fontWeight: "600",
+  },
+  routeButton: {
+    position: "absolute",
+    right: 20,
+    bottom: 92, // stacked above the add button
+    backgroundColor: "#1a73e8",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 24,
+  },
+  routePanel: {
+    position: "absolute",
+    top: 60,
+    left: 76, // clears the arrow pad
+    right: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#ffffff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#d0d7de",
+    padding: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  routeFields: {
+    flex: 1,
+    gap: 4,
+  },
+  routeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "#d0d7de",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  routeRowActive: {
+    borderColor: "#1a73e8",
+    borderWidth: 2,
+  },
+  routeRowLabel: {
+    fontSize: 13,
+    color: "#666666",
+    fontWeight: "600",
+    width: 36,
+  },
+  routeInput: {
+    flex: 1,
+    fontSize: 14,
+    color: "#333333",
+    paddingVertical: 0,
+  },
+  routeSuggestion: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#eef1f4",
+  },
+  routeSuggestionText: {
+    fontSize: 14,
+    color: "#333333",
+  },
+  routeSuggestionKind: {
+    fontSize: 12,
+    color: "#9aa5b1",
+  },
+  routeIconButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+  },
+  routeIconButtonText: {
+    fontSize: 16,
+    color: "#333333",
+    fontWeight: "600",
+  },
+  routeCard: {
+    borderWidth: 1,
+    borderColor: "#d0d7de",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  routeCardTitle: {
+    fontSize: 14,
+    color: "#1a73e8",
+    fontWeight: "600",
+  },
+  routeCardPath: {
+    fontSize: 13,
+    color: "#666666",
   },
   menuBackdrop: {
     position: "absolute",

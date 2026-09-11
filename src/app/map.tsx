@@ -201,13 +201,14 @@ const LONG_PRESS_MS = 500;
 // two taps on the same target within this window = double tap
 const DOUBLE_TAP_MS = 300;
 
-// what the create form is making: a free goal at a world position, a goal
-// attached to a parent node (create + connect), or a task/record attached
-// to a parent node
+// what the create form is making: a free goal at a world position, a node
+// attached under a parent node (create + connect), or — the "Be added to"
+// direction — a new node that becomes the PARENT of an existing child
 type CreateTarget =
   | { mode: "goal"; x: number; y: number }
   | { mode: "goal"; parentId: string }
-  | { mode: "task" | "record"; parentId: string };
+  | { mode: "task" | "record"; parentId: string }
+  | { mode: "goal" | "task" | "record"; childId: string };
 
 // what the info card shows: the last single-tapped node or edge
 type InfoTarget =
@@ -332,27 +333,40 @@ function InfoCard(props: { title: string; lines: string[] }) {
   );
 }
 
-// bottom sheet of mutation actions for a node or edge (double-tap target)
+// bottom sheet of mutation actions for a node or edge (double-tap target).
+// Actions render as a wrap grid of icon tiles, destructive ones tinted red.
 interface SheetAction {
   label: string;
+  icon: string;
   destructive?: boolean;
   onPress: () => void;
 }
 
-function ActionSheet(props: { title: string; actions: SheetAction[]; onClose: () => void }) {
+function ActionSheet(props: { title: string; subtitle?: string; actions: SheetAction[]; onClose: () => void }) {
   return (
     <Modal visible transparent animationType="fade" onRequestClose={props.onClose}>
       <View style={styles.formBackdrop}>
         <Pressable style={StyleSheet.absoluteFill} onPress={props.onClose} />
         <View style={styles.formSheet}>
-          <Text style={styles.formTitle}>{props.title}</Text>
-          {props.actions.map((a) => (
-            <Pressable key={a.label} style={styles.actionItem} onPress={a.onPress}>
-              <Text style={[styles.actionItemText, a.destructive && styles.actionItemDestructive]}>
-                {a.label}
-              </Text>
-            </Pressable>
-          ))}
+          <View style={styles.sheetHandle} />
+          <Text style={styles.sheetTitle}>{props.title}</Text>
+          {props.subtitle && <Text style={styles.sheetSubtitle}>{props.subtitle}</Text>}
+          <View style={styles.actionGrid}>
+            {props.actions.map((a) => (
+              <Pressable
+                key={a.label}
+                style={[styles.actionTile, a.destructive && styles.actionTileDestructive]}
+                onPress={a.onPress}
+              >
+                <Text style={styles.actionTileIcon}>{a.icon}</Text>
+                <Text
+                  style={[styles.actionTileLabel, a.destructive && styles.actionTileLabelDestructive]}
+                >
+                  {a.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
         </View>
       </View>
     </Modal>
@@ -593,6 +607,12 @@ export default function MapScreen() {
   const [sheetEdgeId, setSheetEdgeId] = useState<string | null>(null);
   // connect mode: next node tap becomes the target of a new edge
   const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
+  // reverse connect mode ("Be connected to"): next node tap becomes the
+  // SOURCE of a new edge whose target is this node
+  const [connectTargetId, setConnectTargetId] = useState<string | null>(null);
+  // kind-picker step of the node sheet: "Add to" creates a child of the
+  // chosen kind, "Be added to" creates a parent of the chosen kind
+  const [kindPicker, setKindPicker] = useState<{ nodeId: string; direction: "child" | "parent" } | null>(null);
   // summarize mode: edge taps accumulate a selection to summarize
   const [summarizeMode, setSummarizeMode] = useState(false);
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
@@ -609,6 +629,7 @@ export default function MapScreen() {
     setSheetNodeId(null);
     setSheetEdgeId(null);
     setInspectorNodeId(null);
+    setKindPicker(null);
   };
   // the pan responder is created once; it reaches the latest closer via ref
   const closeOverlaysRef = useRef(closeOverlays);
@@ -620,6 +641,8 @@ export default function MapScreen() {
     setSelectedEdgeIds([]); // the selected edges may no longer be visible
     setSummarizeMode(false);
     setConnectSourceId(null);
+    setConnectTargetId(null);
+    setKindPicker(null);
     setBendDrag(null);
     setDragArmedId(null);
     closeOverlays();
@@ -631,6 +654,8 @@ export default function MapScreen() {
     setSelectedEdgeIds([]);
     setSummarizeMode(false);
     setConnectSourceId(null);
+    setConnectTargetId(null);
+    setKindPicker(null);
     setBendDrag(null);
     setDragArmedId(null);
     closeOverlays();
@@ -679,6 +704,8 @@ export default function MapScreen() {
     setSelectedEdgeIds([]);
     setSummarizeMode(false);
     setConnectSourceId(null);
+    setConnectTargetId(null);
+    setKindPicker(null);
     setBendDrag(null);
     setDragArmedId(null);
     closeOverlays();
@@ -905,22 +932,6 @@ export default function MapScreen() {
     `[FLOW]   render step 3: drawing ${vm.nodes.length} nodes, ${vm.edges.length} edges, layer ${layerView.forwardSteps}`,
   );
 
-  // the inspector is the "Edit…" destination from the node action sheet
-  const openInspector = (id: string) => {
-    const node = findDomainNode(map, id);
-    if (!node) return;
-    closeOverlays();
-    setInspectorDraft({
-      title: node.title,
-      detail: isGoalNode(node)
-        ? node.description ?? ""
-        : isRecordNode(node)
-          ? node.note
-          : "",
-    });
-    setInspectorNodeId(id);
-  };
-
   const saveInspector = () => {
     if (!inspectorNodeId) return;
     const node = findDomainNode(map, inspectorNodeId);
@@ -971,6 +982,19 @@ export default function MapScreen() {
       return;
     }
     if (bendDrag) return; // bend drag owns the canvas until released/cancelled
+    // reverse connect mode: this tap picks the edge source; duplicates allowed
+    if (connectTargetId) {
+      if (id !== connectTargetId) {
+        console.log("[FLOW] reverse connect mode -> add edge (goes through run())");
+        const from = findDomainNode(map, id);
+        const to = findDomainNode(map, connectTargetId);
+        if (from && to) {
+          run((m) => m.addEdge(from, to));
+        }
+      }
+      setConnectTargetId(null);
+      return;
+    }
     // connect mode: this tap picks the edge target; duplicates allowed
     if (connectSourceId) {
       if (id !== connectSourceId) {
@@ -1019,7 +1043,7 @@ export default function MapScreen() {
   };
 
   const onEdgePress = (id: string) => {
-    if (routeMode || connectSourceId || bendDrag) return;
+    if (routeMode || connectSourceId || connectTargetId || bendDrag) return;
     // summarize mode: edge taps only grow/shrink the selection
     if (summarizeMode) {
       setSelectedEdgeIds((prev) =>
@@ -1050,7 +1074,7 @@ export default function MapScreen() {
   // long-press an edge arms bend-drag: the bend handle appears at the
   // current bend (or the midpoint) and the next canvas drag places it
   const onEdgeLongPress = (id: string) => {
-    if (routeMode || summarizeMode || connectSourceId) return;
+    if (routeMode || summarizeMode || connectSourceId || connectTargetId) return;
     const edge = layerView.edges.find((e) => e.id === id);
     if (!edge) return;
     console.log("[FLOW] long-press edge -> arm bend drag (UI state only)");
@@ -1070,7 +1094,7 @@ export default function MapScreen() {
   // long-press a node arms it for dragging; a following movement becomes
   // the drag (see DraggableNode's armed pan responder)
   const onNodeLongPress = (id: string) => {
-    if (routeMode || connectSourceId) return;
+    if (routeMode || connectSourceId || connectTargetId) return;
     const node = findDomainNode(map, id);
     if (!node) return;
     console.log("[FLOW] long-press node -> arm drag (UI state only)");
@@ -1098,16 +1122,19 @@ export default function MapScreen() {
     setConnectSourceId(sourceId);
   };
 
-  // cycle a task through the status machine: todo -> in-progress -> done -> todo
-  const advanceTaskStatus = (id: string) => {
-    setSheetNodeId(null);
-    const node = findDomainNode(map, id);
-    if (!node || !isTaskNode(node)) return;
-    run(() => {
-      if (node.status === "todo") startTask(node);
-      else if (node.status === "in-progress") completeTask(node);
-      else reopenTask(node);
-    });
+  // reverse connect mode ("Be connected to"): sheet closes, target stays
+  // highlighted, next node tap becomes the source
+  const startConnectReverse = (targetId: string) => {
+    closeOverlays();
+    setConnectTargetId(targetId);
+  };
+
+  // "Be added to": create a node of the chosen kind and make it the parent
+  // of the current node (edge new -> current)
+  const startCreateReverse = (mode: "goal" | "task" | "record", childId: string) => {
+    closeOverlays();
+    setDraft({ title: "", detail: "" });
+    setCreateTarget({ mode, childId });
   };
 
   const confirmRemoveNode = (node: Node) => {
@@ -1122,6 +1149,7 @@ export default function MapScreen() {
           setSheetNodeId(null);
           setInfoTarget(null);
           if (connectSourceId === node.id) setConnectSourceId(null);
+          if (connectTargetId === node.id) setConnectTargetId(null);
         },
       },
     ]);
@@ -1150,7 +1178,22 @@ export default function MapScreen() {
     const detail = draft.detail.trim();
 
     console.log("[FLOW] create form -> save (goes through run())");
-    if (createTarget.mode === "goal" && !("parentId" in createTarget)) {
+    if ("childId" in createTarget) {
+      // "Be added to": the new node becomes the PARENT of the current one
+      const child = findDomainNode(map, createTarget.childId);
+      if (!child) return;
+      const index = child.startEdges.length + child.endEdges.length;
+      const pos = childPosition(child, index);
+      run((m) => {
+        const newNode =
+          createTarget.mode === "task"
+            ? new Task(pos.x, pos.y, title, [], [])
+            : createTarget.mode === "record"
+              ? new RecordNode(pos.x, pos.y, title, [], [], detail, new Date())
+              : new Goal(pos.x, pos.y, title, [], [], detail || undefined);
+        m.addEdge(newNode, child);
+      });
+    } else if (createTarget.mode === "goal" && !("parentId" in createTarget)) {
       run((m) =>
         m.addNode(
           new Goal(createTarget.x, createTarget.y, title, [], [], detail || undefined),
@@ -1286,9 +1329,9 @@ export default function MapScreen() {
         : [],
   };
 
-  // node highlight: the connect source, the info-card node, or route focus
+  // node highlight: the connect source/target, the info-card node, or route focus
   const highlightedNodeId =
-    connectSourceId ?? (infoTarget?.kind === "node" ? infoTarget.id : null);
+    connectSourceId ?? connectTargetId ?? (infoTarget?.kind === "node" ? infoTarget.id : null);
 
   return (
     <View style={styles.container} {...panResponder.panHandlers}>
@@ -1491,6 +1534,12 @@ export default function MapScreen() {
           onCancel={() => setConnectSourceId(null)}
         />
       )}
+      {connectTargetId && (
+        <ModeBanner
+          text="Tap a node to connect it here"
+          onCancel={() => setConnectTargetId(null)}
+        />
+      )}
       {summarizeMode && (
         <ModeBanner
           text={`Tap edges to summarize (${selectedEdgeIds.length} selected)`}
@@ -1537,46 +1586,77 @@ export default function MapScreen() {
           const node = findDomainNode(map, sheetNodeId);
           if (!node) return null;
           const actions: SheetAction[] = [];
-          if (isGoalNode(node)) {
-            actions.push({ label: "Add task", onPress: () => startCreate("task", node.id) });
-            actions.push({ label: "Add goal", onPress: () => startCreateAttachedGoal(node.id) });
-            actions.push({ label: "Add record", onPress: () => startCreate("record", node.id) });
-            actions.push({ label: "Connect…", onPress: () => startConnect(node.id) });
-            actions.push({ label: "Edit…", onPress: () => openInspector(node.id) });
+          // records are leaves: nothing can be added under them
+          if (!isRecordNode(node)) {
             actions.push({
-              label: node.completedAt ? "Reopen goal" : "Mark done",
+              label: "Add to",
+              icon: "➕",
               onPress: () => {
-                run(() => (node.completedAt ? reopenGoal(node) : completeGoal(node)));
                 setSheetNodeId(null);
+                setKindPicker({ nodeId: node.id, direction: "child" });
               },
             });
-          } else if (isTaskNode(node)) {
-            actions.push({ label: "Add record", onPress: () => startCreate("record", node.id) });
-            actions.push({ label: "Connect…", onPress: () => startConnect(node.id) });
-            actions.push({ label: "Edit…", onPress: () => openInspector(node.id) });
-            actions.push({
-              label:
-                node.status === "todo"
-                  ? "Start task"
-                  : node.status === "in-progress"
-                    ? "Complete task"
-                    : "Reopen task",
-              onPress: () => advanceTaskStatus(node.id),
-            });
-          } else {
-            // records are leaves: no attach/connect actions
-            actions.push({ label: "Edit…", onPress: () => openInspector(node.id) });
           }
           actions.push({
-            label: "Remove node",
+            label: "Be added to",
+            icon: "⤴️",
+            onPress: () => {
+              setSheetNodeId(null);
+              setKindPicker({ nodeId: node.id, direction: "parent" });
+            },
+          });
+          actions.push({
+            label: "Connect to",
+            icon: "→",
+            onPress: () => startConnect(node.id),
+          });
+          actions.push({
+            label: "Be connected to",
+            icon: "←",
+            onPress: () => startConnectReverse(node.id),
+          });
+          actions.push({
+            label: "Remove",
+            icon: "🗑",
             destructive: true,
             onPress: () => confirmRemoveNode(node),
           });
           return (
             <ActionSheet
               title={node.title}
+              subtitle={node.kind}
               actions={actions}
               onClose={() => setSheetNodeId(null)}
+            />
+          );
+        })()}
+
+      {/* kind picker: second step of "Add to" / "Be added to" — pick the
+          kind of the new node, then the create form opens */}
+      {kindPicker &&
+        (() => {
+          const anchor = findDomainNode(map, kindPicker.nodeId);
+          if (!anchor) return null;
+          const pick = (mode: "goal" | "task" | "record") => {
+            const { nodeId, direction } = kindPicker;
+            setKindPicker(null);
+            if (direction === "child") {
+              if (mode === "goal") startCreateAttachedGoal(nodeId);
+              else startCreate(mode, nodeId);
+            } else {
+              startCreateReverse(mode, nodeId);
+            }
+          };
+          return (
+            <ActionSheet
+              title={anchor.title}
+              subtitle={kindPicker.direction === "child" ? "Add to" : "Be added to"}
+              actions={[
+                { label: "Goal", icon: "◎", onPress: () => pick("goal") },
+                { label: "Task", icon: "☑", onPress: () => pick("task") },
+                { label: "Record", icon: "✎", onPress: () => pick("record") },
+              ]}
+              onClose={() => setKindPicker(null)}
             />
           );
         })()}
@@ -1587,12 +1667,13 @@ export default function MapScreen() {
           const edge = layerView.edges.find((e) => e.id === sheetEdgeId);
           if (!edge) return null;
           const actions: SheetAction[] = [
-            { label: "Expand", onPress: () => expandEdge(edge.id) },
-            { label: "Summarize with…", onPress: () => startSummarize(edge.id) },
+            { label: "Expand", icon: "⤢", onPress: () => expandEdge(edge.id) },
+            { label: "Summarize with…", icon: "🧩", onPress: () => startSummarize(edge.id) },
           ];
           if (edge.bend) {
             actions.push({
               label: "Straighten",
+              icon: "📏",
               onPress: () => {
                 console.log("[FLOW] sheet -> straighten edge (goes through run())");
                 run(() => {
@@ -1604,12 +1685,14 @@ export default function MapScreen() {
           }
           actions.push({
             label: "Remove edge",
+            icon: "🗑",
             destructive: true,
             onPress: () => confirmRemoveEdge(edge),
           });
           return (
             <ActionSheet
               title={`${edge.node1.title} → ${edge.node2.title}`}
+              subtitle={`Layer ${edge.layer}`}
               actions={actions}
               onClose={() => setSheetEdgeId(null)}
             />
@@ -2262,15 +2345,53 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
   },
-  actionItem: {
-    paddingVertical: 12,
+  sheetHandle: {
+    alignSelf: "center",
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#d8dade",
   },
-  actionItemText: {
-    fontSize: 15,
-    color: "#333333",
+  sheetTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#222222",
+    textAlign: "center",
+  },
+  sheetSubtitle: {
+    fontSize: 12,
+    color: "#8a8f98",
+    textAlign: "center",
+    marginTop: -6,
+  },
+  actionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  actionTile: {
+    flexGrow: 1,
+    flexBasis: "28%",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#f2f3f7",
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 6,
+  },
+  actionTileDestructive: {
+    backgroundColor: "#fdeceb",
+  },
+  actionTileIcon: {
+    fontSize: 20,
+  },
+  actionTileLabel: {
+    fontSize: 12,
     fontWeight: "600",
+    color: "#333333",
+    textAlign: "center",
   },
-  actionItemDestructive: {
+  actionTileLabelDestructive: {
     color: "#c0392b",
   },
 });

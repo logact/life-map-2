@@ -281,9 +281,14 @@ function pointAlongPath(path: { x: number; y: number }[], t: number): { x: numbe
 
 // split a path into n equal-length segments, leaving a gap at each
 // breakpoint; bend corners falling inside a segment are kept as
-// intermediate points so bent edges keep their shape
-function splitPath(path: { x: number; y: number }[], n: number): { x: number; y: number }[][] {
-  if (n <= 1 || path.length < 2) return [path];
+// intermediate points so bent edges keep their shape. Also returns the
+// breakpoint positions so the renderer can mark them (needed on dashed
+// or dotted edges, where a bare gap blends into the dash pattern)
+function splitPath(
+  path: { x: number; y: number }[],
+  n: number,
+): { segments: { x: number; y: number }[][]; breakpoints: { x: number; y: number }[] } {
+  if (n <= 1 || path.length < 2) return { segments: [path], breakpoints: [] };
   const lengths: number[] = [];
   let total = 0;
   for (let i = 0; i < path.length - 1; i++) {
@@ -291,7 +296,7 @@ function splitPath(path: { x: number; y: number }[], n: number): { x: number; y:
     lengths.push(seg);
     total += seg;
   }
-  if (total === 0) return [path];
+  if (total === 0) return { segments: [path], breakpoints: [] };
   const segLen = total / n;
   // the gap shrinks when segments are short so every break stays visible
   const gap = Math.min(BREAKPOINT_GAP, segLen * 0.3);
@@ -299,7 +304,9 @@ function splitPath(path: { x: number; y: number }[], n: number): { x: number; y:
   const vertexAt: number[] = [0];
   for (const l of lengths) vertexAt.push(vertexAt[vertexAt.length - 1] + l);
   const segments: { x: number; y: number }[][] = [];
+  const breakpoints: { x: number; y: number }[] = [];
   for (let i = 0; i < n; i++) {
+    if (i > 0) breakpoints.push(pointAlongPath(path, (i * segLen) / total));
     const d0 = i * segLen + (i === 0 ? 0 : gap / 2);
     const d1 = (i + 1) * segLen - (i === n - 1 ? 0 : gap / 2);
     if (d1 <= d0) continue;
@@ -310,7 +317,7 @@ function splitPath(path: { x: number; y: number }[], n: number): { x: number; y:
     points.push(pointAlongPath(path, d1 / total));
     segments.push(points);
   }
-  return segments;
+  return { segments, breakpoints };
 }
 
 const AnimatedPolyline = Animated.createAnimatedComponent(Polyline);
@@ -1572,7 +1579,7 @@ export default function MapScreen() {
           const bentPoints = bend ? `${a.x},${a.y} ${bend.x},${bend.y} ${b.x},${b.y}` : "";
           // a collapsed edge breaks into one equal-length segment per
           // hidden child edge; the gaps between segments are the breakpoints
-          const segments = splitPath(bend ? [a, bend, b] : [a, b], Math.max(1, e.hiddenCount));
+          const { segments, breakpoints } = splitPath(bend ? [a, bend, b] : [a, b], Math.max(1, e.hiddenCount));
           // each segment of a collapsed edge takes its child edge's own
           // color and status; a leaf edge takes its own color
           const segStyles = segments.map((_, i) => {
@@ -1608,6 +1615,12 @@ export default function MapScreen() {
                 );
               })}
               <Polygon points={arrowPoints} fill={lastSeg.color} />
+              {/* solid marker at each breakpoint: the bare gap blends into
+                  the dash pattern of todo/in-progress edges, so the break
+                  needs its own mark */}
+              {breakpoints.map((p, i) => (
+                <Circle key={i} cx={p.x} cy={p.y} r={edgeWidth + 1} fill={(segStyles[i + 1] ?? lastSeg).color} />
+              ))}
               {/* wide invisible hit area so thin lines are tappable */}
               {bend ? (
                 <Polyline

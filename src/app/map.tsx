@@ -212,21 +212,21 @@ function nodeSize(kind: NodeKind): number {
   if (kind === "record") return RECORD_SIZE;
   return NODE_SIZE;
 }
-// how far one arrow-pad press moves the viewport, in screen pixels
-const PAN_STEP = 80;
 
-// long-press on empty canvas = create a goal there; long-press on a node or
-// edge arms it for dragging (move the node / place the edge's bend point)
+// long-press on empty canvas = pick a node kind and create it there;
+// long-press on a node or edge arms it for dragging (move the node /
+// place the edge's bend point)
 const LONG_PRESS_MS = 500;
 
 // two taps on the same target within this window = double tap
 const DOUBLE_TAP_MS = 300;
 
-// what the create form is making: a free goal at a world position, a node
-// attached under a parent node (create + connect), or — the "Be added to"
-// direction — a new node that becomes the PARENT of an existing child
+// what the create form is making: a free node of any kind at a world
+// position, a node attached under a parent node (create + connect), or —
+// the "Be added to" direction — a new node that becomes the PARENT of an
+// existing child
 type CreateTarget =
-  | { mode: "goal"; x: number; y: number }
+  | { mode: "goal" | "task" | "record"; x: number; y: number }
   | { mode: "goal"; parentId: string }
   | { mode: "task" | "record"; parentId: string }
   | { mode: "goal" | "task" | "record"; childId: string };
@@ -989,13 +989,13 @@ export default function MapScreen() {
     }
   };
 
-  // long-press on empty canvas opens the goal form at that point
-  // (world position = screen position - viewport offset)
-  const openGoalFormAt = (screenX: number, screenY: number) => {
+  // long-press on empty canvas opens a kind picker at that point; picking
+  // a kind opens the create form there (world position = screen position -
+  // viewport offset)
+  const [freeSpacePicker, setFreeSpacePicker] = useState<{ x: number; y: number } | null>(null);
+  const openCreatePickerAt = (screenX: number, screenY: number) => {
     closeOverlays();
-    setDraft({ title: "", detail: "" });
-    setCreateTarget({
-      mode: "goal",
+    setFreeSpacePicker({
       x: screenX - viewportRef.current.x,
       y: screenY - viewportRef.current.y,
     });
@@ -1011,11 +1011,11 @@ export default function MapScreen() {
       onPanResponderGrant: (e) => {
         panStart.current = viewportRef.current;
         panMoved.current = false;
-        if (bendDragRef.current) return; // bend drag: no create-goal timer
+        if (bendDragRef.current) return; // bend drag: no create-picker timer
         const { pageX, pageY } = e.nativeEvent;
         cancelLongPress();
         longPressTimer.current = setTimeout(
-          () => openGoalFormAt(pageX, pageY),
+          () => openCreatePickerAt(pageX, pageY),
           LONG_PRESS_MS,
         );
       },
@@ -1072,10 +1072,6 @@ export default function MapScreen() {
       },
     }),
   ).current;
-
-  // the arrow pad pans by a fixed step; dx/dy shift the visible content
-  const panBy = (dx: number, dy: number) =>
-    setViewport((v) => ({ x: v.x + dx, y: v.y + dy }));
 
   // node drag = "reposition one node": the live position is UI state so
   // the node and its edges follow the finger, then on release the new
@@ -1273,10 +1269,6 @@ export default function MapScreen() {
     setBendDrag({ edgeId: id, x: mid.x, y: mid.y });
   };
 
-  // the + button is a fallback for the canvas long-press: same form,
-  // placed at the center of the current viewport
-  const addGoal = () => openGoalFormAt(width / 2, height / 2);
-
   // long-press a node arms it for dragging; a following movement becomes
   // the drag (see DraggableNode's armed pan responder)
   const onNodeLongPress = (id: string) => {
@@ -1392,10 +1384,15 @@ export default function MapScreen() {
               : new Goal(pos.x, pos.y, title, [], [], detail || undefined);
         m.addEdge(newNode, child);
       });
-    } else if (createTarget.mode === "goal" && !("parentId" in createTarget)) {
+    } else if ("x" in createTarget) {
+      // free node at the long-pressed position
       run((m) =>
         m.addNode(
-          new Goal(createTarget.x, createTarget.y, title, [], [], detail || undefined),
+          createTarget.mode === "task"
+            ? new Task(createTarget.x, createTarget.y, title, [], [])
+            : createTarget.mode === "record"
+              ? new RecordNode(createTarget.x, createTarget.y, title, [], [], detail, new Date())
+              : new Goal(createTarget.x, createTarget.y, title, [], [], detail || undefined),
         ),
       );
     } else if ("parentId" in createTarget) {
@@ -1711,37 +1708,9 @@ export default function MapScreen() {
         </Pressable>
       </View>
 
-      {/* arrow pad: button-driven viewport panning, same offset as drag */}
-      <View style={styles.panPad}>
-        <Pressable style={styles.panButton} onPress={() => panBy(0, PAN_STEP)}>
-          <Text style={styles.panButtonText}>↑</Text>
-        </Pressable>
-        <View style={styles.panPadRow}>
-          <Pressable style={styles.panButton} onPress={() => panBy(PAN_STEP, 0)}>
-            <Text style={styles.panButtonText}>←</Text>
-          </Pressable>
-          <Pressable style={styles.panButton} onPress={() => panBy(-PAN_STEP, 0)}>
-            <Text style={styles.panButtonText}>→</Text>
-          </Pressable>
-        </View>
-        <Pressable style={styles.panButton} onPress={() => panBy(0, -PAN_STEP)}>
-          <Text style={styles.panButtonText}>↓</Text>
-        </Pressable>
-      </View>
-
-      <Pressable style={styles.addButton} onPress={addGoal}>
-        <Text style={styles.addButtonText}>+ Add goal</Text>
-      </Pressable>
-
       {!routeMode && !noteSearchMode && (
-        <Pressable style={styles.routeButton} onPress={enterRouteMode}>
-          <Text style={styles.addButtonText}>Route</Text>
-        </Pressable>
-      )}
-
-      {!routeMode && !noteSearchMode && (
-        <Pressable style={styles.noteSearchButton} onPress={enterNoteSearchMode}>
-          <Text style={styles.addButtonText}>Notes</Text>
+        <Pressable style={styles.queryButton} onPress={enterRouteMode}>
+          <Text style={styles.queryButtonText}>🔍</Text>
         </Pressable>
       )}
 
@@ -1875,6 +1844,31 @@ export default function MapScreen() {
               subtitle={node.kind}
               actions={actions}
               onClose={() => setSheetNodeId(null)}
+            />
+          );
+        })()}
+
+      {/* free-space kind picker: first step of a long-press on empty
+          canvas — pick the kind of the new node, then the create form
+          opens at the pressed position */}
+      {freeSpacePicker &&
+        (() => {
+          const { x, y } = freeSpacePicker;
+          const pick = (mode: "goal" | "task" | "record") => {
+            setFreeSpacePicker(null);
+            setDraft({ title: "", detail: "" });
+            setCreateTarget({ mode, x, y });
+          };
+          return (
+            <ActionSheet
+              title="Create"
+              subtitle="Free space"
+              actions={[
+                { label: "Goal", icon: "◎", onPress: () => pick("goal") },
+                { label: "Task", icon: "☑", onPress: () => pick("task") },
+                { label: "Record", icon: "✎", onPress: () => pick("record") },
+              ]}
+              onClose={() => setFreeSpacePicker(null)}
             />
           );
         })()}
@@ -2517,62 +2511,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#333333",
   },
-  panPad: {
+  queryButton: {
     position: "absolute",
+    right: 20,
     top: 60,
-    left: 20,
-    alignItems: "center",
-    gap: 4,
-  },
-  panPadRow: {
-    flexDirection: "row",
-    gap: 36, // leaves room for the middle cell of the cross layout
-  },
-  panButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#ffffff",
-    borderWidth: 1,
-    borderColor: "#d0d7de",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#1a73e8",
     alignItems: "center",
     justifyContent: "center",
   },
-  panButtonText: {
-    fontSize: 16,
-    color: "#333333",
-    fontWeight: "600",
-  },
-  addButton: {
-    position: "absolute",
-    right: 20,
-    bottom: 40,
-    backgroundColor: "#333333",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 24,
-  },
-  addButtonText: {
-    color: "#ffffff",
-    fontWeight: "600",
-  },
-  routeButton: {
-    position: "absolute",
-    right: 20,
-    bottom: 92, // stacked above the add button
-    backgroundColor: "#1a73e8",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 24,
-  },
-  noteSearchButton: {
-    position: "absolute",
-    right: 20,
-    bottom: 144, // stacked above the route button
-    backgroundColor: "#5a6572",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 24,
+  queryButtonText: {
+    fontSize: 18,
   },
   noteResults: {
     maxHeight: 240,
@@ -2617,7 +2568,7 @@ const styles = StyleSheet.create({
   routePanel: {
     position: "absolute",
     top: 60,
-    left: 76, // clears the arrow pad
+    left: 20,
     right: 20,
     flexDirection: "row",
     alignItems: "center",
@@ -2837,7 +2788,7 @@ const styles = StyleSheet.create({
   modeBanner: {
     position: "absolute",
     top: 110, // below the route panel row
-    left: 76, // clears the arrow pad
+    left: 20,
     right: 20,
     flexDirection: "row",
     alignItems: "center",

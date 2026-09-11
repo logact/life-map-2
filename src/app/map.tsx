@@ -52,6 +52,9 @@ interface EdgeViewModel {
   layer: number;
   status: Status | null;
   bend?: { x: number; y: number };
+  // hidden sub-edges of a collapsed edge; the line is broken into this
+  // many equal-length segments
+  hiddenCount: number;
 }
 
 interface MapViewModel {
@@ -69,7 +72,7 @@ function mapDomainToViewModel(layerView: LayerView): MapViewModel {
   const edges: EdgeViewModel[] = [];
 
   for (const e of layerView.edges) {
-    edges.push({ id: e.id, fromId: e.node1.id, toId: e.node2.id, layer: e.layer, status: edgeStatus(e), bend: e.bend });
+    edges.push({ id: e.id, fromId: e.node1.id, toId: e.node2.id, layer: e.layer, status: edgeStatus(e), bend: e.bend, hiddenCount: e.childrenEdges.length });
     for (const n of [e.node1, e.node2]) {
       if (!nodes.has(n.id)) {
         nodes.set(n.id, { id: n.id, x: n.x, y: n.y, title: n.title, kind: n.kind, status: nodeStatus(n) ?? undefined });
@@ -231,7 +234,67 @@ function fmtDate(d: Date): string {
   return d.toDateString().slice(4); // drop the weekday prefix
 }
 
-const AnimatedLine = Animated.createAnimatedComponent(Line);
+// a collapsed edge is broken into one segment per hidden child edge;
+// the gaps between the equal-length segments are the breakpoints
+const BREAKPOINT_GAP = 6;
+
+// interpolate a point along a polyline, t = fraction of its total length
+function pointAlongPath(path: { x: number; y: number }[], t: number): { x: number; y: number } {
+  const lengths: number[] = [];
+  let total = 0;
+  for (let i = 0; i < path.length - 1; i++) {
+    const seg = Math.hypot(path[i + 1].x - path[i].x, path[i + 1].y - path[i].y);
+    lengths.push(seg);
+    total += seg;
+  }
+  let d = Math.max(0, Math.min(1, t)) * total;
+  for (let i = 0; i < lengths.length; i++) {
+    if (d <= lengths[i] || i === lengths.length - 1) {
+      const f = lengths[i] > 0 ? d / lengths[i] : 0;
+      return {
+        x: path[i].x + (path[i + 1].x - path[i].x) * f,
+        y: path[i].y + (path[i + 1].y - path[i].y) * f,
+      };
+    }
+    d -= lengths[i];
+  }
+  return path[path.length - 1];
+}
+
+// split a path into n equal-length segments, leaving a gap at each
+// breakpoint; bend corners falling inside a segment are kept as
+// intermediate points so bent edges keep their shape
+function splitPath(path: { x: number; y: number }[], n: number): { x: number; y: number }[][] {
+  if (n <= 1 || path.length < 2) return [path];
+  const lengths: number[] = [];
+  let total = 0;
+  for (let i = 0; i < path.length - 1; i++) {
+    const seg = Math.hypot(path[i + 1].x - path[i].x, path[i + 1].y - path[i].y);
+    lengths.push(seg);
+    total += seg;
+  }
+  if (total === 0) return [path];
+  const segLen = total / n;
+  // the gap shrinks when segments are short so every break stays visible
+  const gap = Math.min(BREAKPOINT_GAP, segLen * 0.3);
+  // arc position of each original vertex (to preserve bend corners)
+  const vertexAt: number[] = [0];
+  for (const l of lengths) vertexAt.push(vertexAt[vertexAt.length - 1] + l);
+  const segments: { x: number; y: number }[][] = [];
+  for (let i = 0; i < n; i++) {
+    const d0 = i * segLen + (i === 0 ? 0 : gap / 2);
+    const d1 = (i + 1) * segLen - (i === n - 1 ? 0 : gap / 2);
+    if (d1 <= d0) continue;
+    const points = [pointAlongPath(path, d0 / total)];
+    for (let v = 1; v < path.length - 1; v++) {
+      if (vertexAt[v] > d0 && vertexAt[v] < d1) points.push(path[v]);
+    }
+    points.push(pointAlongPath(path, d1 / total));
+    segments.push(points);
+  }
+  return segments;
+}
+
 const AnimatedPolyline = Animated.createAnimatedComponent(Polyline);
 
 // in-progress node outline: a dotted ring breathing between 0.4 and 1.0
@@ -268,32 +331,11 @@ function PulsingRing(props: { x: number; y: number; size: number; borderRadius: 
 }
 
 // in-progress edge: dotted line whose dashes march toward the target node
-function MarchingLine(props: { x1: number; y1: number; x2: number; y2: number; color: string; width: number }) {
-  const offset = useSharedValue(0);
-  useEffect(() => {
-    // dash period of "2 8" is 10, so -10 loops seamlessly; negative moves
-    // the pattern toward (x2, y2)
-    offset.value = withRepeat(withTiming(-10, { duration: 800, easing: Easing.linear }), -1, false);
-  }, [offset]);
-  const animatedProps = useAnimatedProps(() => ({ strokeDashoffset: offset.value }));
-  return (
-    <AnimatedLine
-      x1={props.x1}
-      y1={props.y1}
-      x2={props.x2}
-      y2={props.y2}
-      stroke={props.color}
-      strokeWidth={props.width}
-      strokeDasharray="2 8"
-      animatedProps={animatedProps}
-    />
-  );
-}
-
-// marching variant for bent edges (from -> bend -> to)
 function MarchingPolyline(props: { points: string; color: string; width: number }) {
   const offset = useSharedValue(0);
   useEffect(() => {
+    // dash period of "2 8" is 10, so -10 loops seamlessly; negative moves
+    // the pattern toward the target end of the path
     offset.value = withRepeat(withTiming(-10, { duration: 800, easing: Easing.linear }), -1, false);
   }, [offset]);
   const animatedProps = useAnimatedProps(() => ({ strokeDashoffset: offset.value }));
@@ -613,6 +655,9 @@ export default function MapScreen() {
   // kind-picker step of the node sheet: "Add to" creates a child of the
   // chosen kind, "Be added to" creates a parent of the chosen kind
   const [kindPicker, setKindPicker] = useState<{ nodeId: string; direction: "child" | "parent" } | null>(null);
+  // status-picker step of the node sheet: offers only the statuses the
+  // state machine allows from the node's current one
+  const [statusPickerNodeId, setStatusPickerNodeId] = useState<string | null>(null);
   // summarize mode: edge taps accumulate a selection to summarize
   const [summarizeMode, setSummarizeMode] = useState(false);
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
@@ -630,6 +675,7 @@ export default function MapScreen() {
     setSheetEdgeId(null);
     setInspectorNodeId(null);
     setKindPicker(null);
+    setStatusPickerNodeId(null);
   };
   // the pan responder is created once; it reaches the latest closer via ref
   const closeOverlaysRef = useRef(closeOverlays);
@@ -1370,43 +1416,29 @@ export default function MapScreen() {
           const dash =
             e.status === "todo" ? "6 6" : e.status === "in-progress" ? "2 8" : undefined;
           const bentPoints = bend ? `${a.x},${a.y} ${bend.x},${bend.y} ${b.x},${b.y}` : "";
+          // a collapsed edge breaks into one equal-length segment per
+          // hidden child edge; the gaps between segments are the breakpoints
+          const segments = splitPath(bend ? [a, bend, b] : [a, b], Math.max(1, e.hiddenCount));
           return (
             <G key={e.id} opacity={dimmed ? 0.15 : 1}>
               {/* line style carries the edge's frontier status:
                   todo=dashed, in-progress=dotted marching toward the
                   target, done/records=solid */}
-              {bend ? (
-                e.status === "in-progress" && !reduceMotion ? (
-                  <MarchingPolyline points={bentPoints} color={color} width={edgeWidth} />
+              {segments.map((pts, i) => {
+                const points = pts.map((p) => `${p.x},${p.y}`).join(" ");
+                return e.status === "in-progress" && !reduceMotion ? (
+                  <MarchingPolyline key={i} points={points} color={color} width={edgeWidth} />
                 ) : (
                   <Polyline
-                    points={bentPoints}
+                    key={i}
+                    points={points}
                     fill="none"
                     stroke={color}
                     strokeWidth={edgeWidth}
                     strokeDasharray={dash}
                   />
-                )
-              ) : e.status === "in-progress" && !reduceMotion ? (
-                <MarchingLine
-                  x1={a.x}
-                  y1={a.y}
-                  x2={b.x}
-                  y2={b.y}
-                  color={color}
-                  width={edgeWidth}
-                />
-              ) : (
-                <Line
-                  x1={a.x}
-                  y1={a.y}
-                  x2={b.x}
-                  y2={b.y}
-                  stroke={color}
-                  strokeWidth={edgeWidth}
-                  strokeDasharray={dash}
-                />
-              )}
+                );
+              })}
               <Polygon points={arrowPoints} fill={color} />
               {/* wide invisible hit area so thin lines are tappable */}
               {bend ? (
@@ -1615,6 +1647,17 @@ export default function MapScreen() {
             icon: "←",
             onPress: () => startConnectReverse(node.id),
           });
+          // records carry no status, so the change-status step is skipped
+          if (!isRecordNode(node)) {
+            actions.push({
+              label: "Status",
+              icon: "◐",
+              onPress: () => {
+                setSheetNodeId(null);
+                setStatusPickerNodeId(node.id);
+              },
+            });
+          }
           actions.push({
             label: "Remove",
             icon: "🗑",
@@ -1657,6 +1700,53 @@ export default function MapScreen() {
                 { label: "Record", icon: "✎", onPress: () => pick("record") },
               ]}
               onClose={() => setKindPicker(null)}
+            />
+          );
+        })()}
+
+      {/* status picker: second step of the node sheet's "Status" action —
+          offers only the statuses the state machine allows from the
+          current one; picking one applies the transition immediately */}
+      {statusPickerNodeId &&
+        (() => {
+          const node = findDomainNode(map, statusPickerNodeId);
+          if (!node) return null;
+          const change = (label: string, mutate: () => void): SheetAction => ({
+            label,
+            icon: "◐",
+            onPress: () => {
+              console.log("[FLOW] sheet -> change status (goes through run())");
+              run(mutate);
+              setStatusPickerNodeId(null);
+            },
+          });
+          const actions: SheetAction[] = [];
+          if (isTaskNode(node)) {
+            if (node.status === "todo") {
+              actions.push(change("In progress", () => startTask(node)));
+              actions.push(change("Done", () => completeTask(node)));
+            } else if (node.status === "in-progress") {
+              actions.push(change("Todo", () => pauseTask(node)));
+              actions.push(change("Done", () => completeTask(node)));
+            } else {
+              actions.push(change("Todo", () => reopenTask(node)));
+            }
+          } else if (isGoalNode(node)) {
+            // a goal's status is derived from its tasks; the only stored
+            // override is the manual completion flag
+            if (node.completedAt) {
+              actions.push(change("Reopen", () => reopenGoal(node)));
+            } else {
+              actions.push(change("Done", () => completeGoal(node)));
+            }
+          }
+          if (actions.length === 0) return null;
+          return (
+            <ActionSheet
+              title={node.title}
+              subtitle={`Status: ${nodeStatus(node)}`}
+              actions={actions}
+              onClose={() => setStatusPickerNodeId(null)}
             />
           );
         })()}

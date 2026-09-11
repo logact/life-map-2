@@ -1,6 +1,7 @@
 import { v4 } from "uuid";
 import { Edge } from "./edge";
 import { Node, NodeKind } from "./node";
+import { Note } from "./note";
 import { Status } from "./status";
 
 export class Task implements Node {
@@ -9,6 +10,8 @@ export class Task implements Node {
     id: string;
     title: string;
     kind: NodeKind = "task";
+    color: string | undefined;
+    notes: Note[] = [];
     status: Status = "todo";
     startedAt?: Date;
     completedAt?: Date;

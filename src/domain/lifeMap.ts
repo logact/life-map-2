@@ -3,6 +3,7 @@ import { Edge } from "./edge";
 import Goal from "./goal";
 import { Task } from "./task";
 import { Record as RecordNode } from "./record";
+import { createNote, Note } from "./note";
 import { isTaskNode, Node } from "./node";
 
 export class LayerView {
@@ -109,6 +110,41 @@ export class LifeMap {
         }
     }
 
+    private findNode(id: string): Node | undefined {
+        const stack: Edge[] = [...this.rootEdges];
+        while (stack.length > 0) {
+            const e = stack.pop()!;
+            if (e.node1.id === id) return e.node1;
+            if (e.node2.id === id) return e.node2;
+            stack.push(...e.childrenEdges);
+        }
+        return this.rootNodes.find(n => n.id === id);
+    }
+
+    private findEdge(id: string): Edge | undefined {
+        const stack: Edge[] = [...this.rootEdges];
+        while (stack.length > 0) {
+            const e = stack.pop()!;
+            if (e.id === id) return e;
+            stack.push(...e.childrenEdges);
+        }
+        return undefined;
+    }
+
+    setNodeColor(id: string, color?: string) {
+        const node = this.findNode(id);
+        if (node) {
+            node.color = color;
+        }
+    }
+
+    setEdgeColor(id: string, color?: string) {
+        const edge = this.findEdge(id);
+        if (edge) {
+            edge.color = color;
+        }
+    }
+
     updateEdgeLayer(rootEdge: Edge, change: number) {
         rootEdge.layer = rootEdge.layer + change
         const children = rootEdge.childrenEdges
@@ -209,6 +245,65 @@ export class LifeMap {
     // a task belongs to exactly one goal: link them with an edge
     addTask(goal: Goal, task: Task): Edge {
         return this.addEdge(goal, task)
+    }
+
+    // every node in the map: the edge tree plus the isolated root nodes
+    allNodes(): Node[] {
+        const nodes = new Map<string, Node>()
+        const stack: Edge[] = [...this.rootEdges]
+        while (stack.length > 0) {
+            const e = stack.pop()!
+            nodes.set(e.node1.id, e.node1)
+            nodes.set(e.node2.id, e.node2)
+            stack.push(...e.childrenEdges)
+        }
+        for (const n of this.rootNodes) {
+            nodes.set(n.id, n)
+        }
+        return [...nodes.values()]
+    }
+
+    // notes live on the node itself, so removeNode() takes them down with it
+    addNote(node: Node, text: string): Note | null {
+        const trimmed = text.trim()
+        if (!trimmed) {
+            return null
+        }
+        const note = createNote(trimmed)
+        node.notes.unshift(note) // newest first
+        return note
+    }
+
+    updateNote(note: Note, text: string): boolean {
+        const trimmed = text.trim()
+        if (!trimmed) {
+            return false
+        }
+        note.text = trimmed
+        note.updatedAt = new Date()
+        return true
+    }
+
+    removeNote(node: Node, noteId: string) {
+        node.notes = node.notes.filter(n => n.id !== noteId)
+    }
+
+    // case-insensitive keyword search over every note in the map,
+    // including notes on nodes hidden in collapsed layers
+    searchNotes(keyword: string): { note: Note; node: Node }[] {
+        const query = keyword.trim().toLowerCase()
+        if (!query) {
+            return []
+        }
+        const results: { note: Note; node: Node }[] = []
+        for (const node of this.allNodes()) {
+            for (const note of node.notes) {
+                if (note.text.toLowerCase().includes(query)) {
+                    results.push({ note, node })
+                }
+            }
+        }
+        return results
     }
 
     // a record logs progress on a goal or task and stays a leaf node

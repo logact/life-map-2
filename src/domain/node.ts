@@ -1,5 +1,6 @@
 import { Edge } from "./edge";
 import type Goal from "./goal";
+import type { Note } from "./note";
 import type { Task } from "./task";
 import type { Record as RecordNode } from "./record";
 
@@ -11,6 +12,8 @@ export interface Node {
     id: string,
     title: string,
     kind: NodeKind,
+    color: string | undefined,
+    notes: Note[],
     startEdges: Edge[],
     endEdges: Edge[],
 }
@@ -34,6 +37,8 @@ export function createEmptyNode(kind: NodeKind = "goal"): Node {
         id: "",
         title: "",
         kind,
+        color: undefined,
+        notes: [],
         startEdges: [],
         endEdges: []
     }

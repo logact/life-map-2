@@ -8,6 +8,7 @@ export class Edge {
     childrenEdges: Edge[] = [] 
     id: string = ""
     layer: number = 0
+    color?: string
     // optional bend point in world coordinates; when set the edge renders
     // as two segments node1 -> bend -> node2 instead of a straight line
     bend?: { x: number; y: number }

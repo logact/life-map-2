@@ -8,6 +8,7 @@ import {
   PanResponder,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -32,6 +33,7 @@ import { LayerView, LifeMap } from "@/domain/lifeMap";
 import { isGoalNode, isRecordNode, isTaskNode, Node, NodeKind } from "@/domain/node";
 import { findRoutes, RouteResult } from "@/domain/route";
 import { edgeStatus, goalStatus, nodeStatus, Status, startTask, pauseTask, completeTask, completeGoal, reopenTask, reopenGoal } from "@/domain/status";
+import { PALETTE } from "@/app/palette";
 
 // ---------- View models: plain data describing what to draw ----------
 // The UI renders ONLY from these. It never renders domain objects directly.
@@ -43,6 +45,7 @@ interface NodeViewModel {
   title: string;
   kind: NodeKind;
   status?: Status;
+  color?: string;
 }
 
 interface EdgeViewModel {
@@ -52,9 +55,12 @@ interface EdgeViewModel {
   layer: number;
   status: Status | null;
   bend?: { x: number; y: number };
+  color?: string;
   // hidden sub-edges of a collapsed edge; the line is broken into this
   // many equal-length segments
   hiddenCount: number;
+  // one entry per direct child edge, in order: its own color and status
+  segments?: { color?: string; status: Status | null }[];
 }
 
 interface MapViewModel {
@@ -72,17 +78,29 @@ function mapDomainToViewModel(layerView: LayerView): MapViewModel {
   const edges: EdgeViewModel[] = [];
 
   for (const e of layerView.edges) {
-    edges.push({ id: e.id, fromId: e.node1.id, toId: e.node2.id, layer: e.layer, status: edgeStatus(e), bend: e.bend, hiddenCount: e.childrenEdges.length });
+    edges.push({
+      id: e.id,
+      fromId: e.node1.id,
+      toId: e.node2.id,
+      layer: e.layer,
+      status: edgeStatus(e),
+      bend: e.bend,
+      color: e.color,
+      hiddenCount: e.childrenEdges.length,
+      segments: e.childrenEdges.length > 0
+        ? e.childrenEdges.map((c) => ({ color: c.color, status: edgeStatus(c) }))
+        : undefined,
+    });
     for (const n of [e.node1, e.node2]) {
       if (!nodes.has(n.id)) {
-        nodes.set(n.id, { id: n.id, x: n.x, y: n.y, title: n.title, kind: n.kind, status: nodeStatus(n) ?? undefined });
+        nodes.set(n.id, { id: n.id, x: n.x, y: n.y, title: n.title, kind: n.kind, status: nodeStatus(n) ?? undefined, color: n.color });
       }
     }
   }
 
   for (const n of layerView.map.rootNodes) {
     if (!nodes.has(n.id)) {
-      nodes.set(n.id, { id: n.id, x: n.x, y: n.y, title: n.title, kind: n.kind, status: nodeStatus(n) ?? undefined });
+      nodes.set(n.id, { id: n.id, x: n.x, y: n.y, title: n.title, kind: n.kind, status: nodeStatus(n) ?? undefined, color: n.color });
     }
   }
   return { nodes: [...nodes.values()], edges };
@@ -381,6 +399,8 @@ interface SheetAction {
   label: string;
   icon: string;
   destructive?: boolean;
+  // tints the icon; used by the color picker's swatches
+  color?: string;
   onPress: () => void;
 }
 
@@ -400,7 +420,7 @@ function ActionSheet(props: { title: string; subtitle?: string; actions: SheetAc
                 style={[styles.actionTile, a.destructive && styles.actionTileDestructive]}
                 onPress={a.onPress}
               >
-                <Text style={styles.actionTileIcon}>{a.icon}</Text>
+                <Text style={[styles.actionTileIcon, a.color && { color: a.color }]}>{a.icon}</Text>
                 <Text
                   style={[styles.actionTileLabel, a.destructive && styles.actionTileLabelDestructive]}
                 >
@@ -508,6 +528,60 @@ function RoutePanel(props: {
   );
 }
 
+// note query panel: one search input over every note on the map; each
+// result shows the note excerpt and its owning node
+function NoteSearchPanel(props: {
+  query: string;
+  results: { noteId: string; nodeId: string; excerpt: string; nodeTitle: string; nodeKind: NodeKind; createdAt: Date }[];
+  onChangeQuery: (text: string) => void;
+  onPickResult: (nodeId: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <View style={styles.routePanel}>
+      <View style={styles.routeFields}>
+        <View style={styles.routeRow}>
+          <Text style={styles.routeRowLabel}>Note</Text>
+          <TextInput
+            style={styles.routeInput}
+            placeholder="Search notes…"
+            value={props.query}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            autoFocus
+            onChangeText={props.onChangeQuery}
+          />
+        </View>
+        {props.query.trim() !== "" && props.results.length === 0 && (
+          <Text style={styles.noteSearchEmpty}>No notes match</Text>
+        )}
+        <ScrollView style={styles.noteResults}>
+          {props.results.map((r) => (
+            <Pressable
+              key={r.noteId}
+              style={styles.routeSuggestion}
+              onPress={() => props.onPickResult(r.nodeId)}
+            >
+              <Text style={styles.routeSuggestionText} numberOfLines={1}>
+                {r.excerpt}
+              </Text>
+              <Text style={styles.routeSuggestionKind}>
+                {r.nodeTitle}
+                {"  "}
+                {r.nodeKind} · {fmtDate(r.createdAt)}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </View>
+      <Pressable style={styles.routeIconButton} onPress={props.onClose}>
+        <Text style={styles.routeIconButtonText}>✕</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 // one node on the canvas: tap shows info / double-tap opens its sheet
 // (handled by the parent), long-press arms it so a following movement
 // becomes a drag that repositions it in the domain
@@ -582,6 +656,9 @@ function DraggableNode(props: {
             borderStyle: props.borderStyle,
           },
           props.n.kind === "record" && styles.nodeRecord,
+          // user color: colored border over a faint fill; selection,
+          // pulsing and armed styles below still win over it
+          props.n.color && { borderColor: props.n.color, backgroundColor: props.n.color + "40" },
           // the pulsing ring draws the border; keep the base invisible
           props.pulsing && styles.nodePulsingBase,
           props.selected && styles.nodeSelected,
@@ -658,6 +735,9 @@ export default function MapScreen() {
   // status-picker step of the node sheet: offers only the statuses the
   // state machine allows from the node's current one
   const [statusPickerNodeId, setStatusPickerNodeId] = useState<string | null>(null);
+  // color-picker step of the node/edge sheet: pick a palette color or
+  // Default (clear) for the target
+  const [colorPicker, setColorPicker] = useState<{ kind: "node" | "edge"; id: string; title: string } | null>(null);
   // summarize mode: edge taps accumulate a selection to summarize
   const [summarizeMode, setSummarizeMode] = useState(false);
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
@@ -676,6 +756,9 @@ export default function MapScreen() {
     setInspectorNodeId(null);
     setKindPicker(null);
     setStatusPickerNodeId(null);
+    setColorPicker(null);
+    setNotesNodeId(null);
+    setNoteDraft(null);
   };
   // the pan responder is created once; it reaches the latest closer via ref
   const closeOverlaysRef = useRef(closeOverlays);
@@ -726,6 +809,15 @@ export default function MapScreen() {
   const [inspectorNodeId, setInspectorNodeId] = useState<string | null>(null);
   const [inspectorDraft, setInspectorDraft] = useState({ title: "", detail: "" });
 
+  // notes flow: which node's note list is open, and the note being added
+  // or edited (noteId present = editing that existing note)
+  const [notesNodeId, setNotesNodeId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState<{ nodeId: string; noteId?: string; text: string } | null>(null);
+
+  // note query flow: keyword search across every note on the map
+  const [noteSearchMode, setNoteSearchMode] = useState(false);
+  const [noteQuery, setNoteQuery] = useState("");
+
   // route query flow: pick From/To nodes, list candidate routes, then
   // focus the chosen one (center it, highlight it, dim everything else)
   const [routeMode, setRouteMode] = useState(false);
@@ -756,12 +848,48 @@ export default function MapScreen() {
     setDragArmedId(null);
     closeOverlays();
     clearRouteState();
+    exitNoteSearchMode(); // modes are mutually exclusive
     setRouteMode(true);
   };
 
   const exitRouteMode = () => {
     clearRouteState();
     setRouteMode(false);
+  };
+
+  const enterNoteSearchMode = () => {
+    setSelectedEdgeIds([]);
+    setSummarizeMode(false);
+    setConnectSourceId(null);
+    setConnectTargetId(null);
+    setKindPicker(null);
+    setBendDrag(null);
+    setDragArmedId(null);
+    closeOverlays();
+    clearRouteState();
+    setRouteMode(false); // modes are mutually exclusive
+    setNoteQuery("");
+    setNoteSearchMode(true);
+  };
+
+  const exitNoteSearchMode = () => {
+    setNoteQuery("");
+    setNoteSearchMode(false);
+  };
+
+  // focus a search result's node: reveal the shallowest layer where one of
+  // its edges is visible, center it on screen, and open its info card
+  const focusNoteNode = (nodeId: string) => {
+    const node = findDomainNode(map, nodeId);
+    if (!node) return;
+    const edgeLayers = [...node.startEdges, ...node.endEdges].map((e) => e.layer);
+    if (edgeLayers.length > 0) {
+      layerView.refresh(Math.min(...edgeLayers));
+      setVersion((v) => v + 1);
+    }
+    setViewport({ x: width / 2 - node.x, y: height / 2 - node.y });
+    Keyboard.dismiss();
+    setInfoTarget({ kind: "node", id: node.id });
   };
 
   // search over the currently visible edges so every route edge can be
@@ -1027,6 +1155,11 @@ export default function MapScreen() {
       pickRouteNode(field, id, node?.title ?? "");
       return;
     }
+    // note search mode: results are picked in the panel, not on the canvas
+    if (noteSearchMode) {
+      Keyboard.dismiss();
+      return;
+    }
     if (bendDrag) return; // bend drag owns the canvas until released/cancelled
     // reverse connect mode: this tap picks the edge source; duplicates allowed
     if (connectTargetId) {
@@ -1089,7 +1222,7 @@ export default function MapScreen() {
   };
 
   const onEdgePress = (id: string) => {
-    if (routeMode || connectSourceId || connectTargetId || bendDrag) return;
+    if (routeMode || noteSearchMode || connectSourceId || connectTargetId || bendDrag) return;
     // summarize mode: edge taps only grow/shrink the selection
     if (summarizeMode) {
       setSelectedEdgeIds((prev) =>
@@ -1120,7 +1253,7 @@ export default function MapScreen() {
   // long-press an edge arms bend-drag: the bend handle appears at the
   // current bend (or the midpoint) and the next canvas drag places it
   const onEdgeLongPress = (id: string) => {
-    if (routeMode || summarizeMode || connectSourceId || connectTargetId) return;
+    if (routeMode || noteSearchMode || summarizeMode || connectSourceId || connectTargetId) return;
     const edge = layerView.edges.find((e) => e.id === id);
     if (!edge) return;
     console.log("[FLOW] long-press edge -> arm bend drag (UI state only)");
@@ -1140,7 +1273,7 @@ export default function MapScreen() {
   // long-press a node arms it for dragging; a following movement becomes
   // the drag (see DraggableNode's armed pan responder)
   const onNodeLongPress = (id: string) => {
-    if (routeMode || connectSourceId || connectTargetId) return;
+    if (routeMode || noteSearchMode || connectSourceId || connectTargetId) return;
     const node = findDomainNode(map, id);
     if (!node) return;
     console.log("[FLOW] long-press node -> arm drag (UI state only)");
@@ -1215,6 +1348,19 @@ export default function MapScreen() {
         },
       },
     ]);
+  };
+
+  // color picker: apply the chosen swatch (undefined = Default, clears the
+  // color) to the node or edge the picker was opened from
+  const pickColor = (color?: string) => {
+    if (!colorPicker) return;
+    console.log("[FLOW] sheet -> set color (goes through run())");
+    run((m) =>
+      colorPicker.kind === "node"
+        ? m.setNodeColor(colorPicker.id, color)
+        : m.setEdgeColor(colorPicker.id, color),
+    );
+    setColorPicker(null);
   };
 
   const saveCreate = () => {
@@ -1352,6 +1498,9 @@ export default function MapScreen() {
       if (node.note) lines.push(node.note);
       lines.push(`Occurred ${fmtDate(node.occuredAt)}`);
     }
+    if (node.notes.length > 0) {
+      lines.push(`${node.notes.length} note${node.notes.length === 1 ? "" : "s"}`);
+    }
     return lines;
   };
 
@@ -1379,6 +1528,10 @@ export default function MapScreen() {
   const highlightedNodeId =
     connectSourceId ?? connectTargetId ?? (infoTarget?.kind === "node" ? infoTarget.id : null);
 
+  // note search results over the whole map (hidden layers included),
+  // recomputed on every render while the panel is open
+  const noteResults = noteSearchMode ? map.searchNotes(noteQuery) : [];
+
   return (
     <View style={styles.container} {...panResponder.panHandlers}>
       <Svg style={StyleSheet.absoluteFill}>
@@ -1393,8 +1546,11 @@ export default function MapScreen() {
             (infoTarget?.kind === "edge" && infoTarget.id === e.id);
           const onRoute = routeEdgeIds.has(e.id);
           const dimmed = routeFocusOn && !onRoute;
+          // route and selection override everything: the whole edge draws
+          // in the single override color, no per-segment colors
+          const overridden = onRoute || selected;
           const color = onRoute ? "#1a73e8" : selected ? "#333333" : "#9aa5b1";
-          const edgeWidth = onRoute || selected ? 4 : Math.max(1.5, 3 - e.layer);
+          const edgeWidth = overridden ? 4 : Math.max(1.5, 3 - e.layer);
           // a bend drag in progress overrides the stored bend point
           const bend = bendDrag && bendDrag.edgeId === e.id ? { x: bendDrag.x, y: bendDrag.y } : e.bend;
           // arrowhead at the target node's edge, pointing into it; the
@@ -1413,12 +1569,21 @@ export default function MapScreen() {
           const baseX = tipX - ux * back;
           const baseY = tipY - uy * back;
           const arrowPoints = `${tipX},${tipY} ${baseX - uy * wing},${baseY + ux * wing} ${baseX + uy * wing},${baseY - ux * wing}`;
-          const dash =
-            e.status === "todo" ? "6 6" : e.status === "in-progress" ? "2 8" : undefined;
           const bentPoints = bend ? `${a.x},${a.y} ${bend.x},${bend.y} ${b.x},${b.y}` : "";
           // a collapsed edge breaks into one equal-length segment per
           // hidden child edge; the gaps between segments are the breakpoints
           const segments = splitPath(bend ? [a, bend, b] : [a, b], Math.max(1, e.hiddenCount));
+          // each segment of a collapsed edge takes its child edge's own
+          // color and status; a leaf edge takes its own color
+          const segStyles = segments.map((_, i) => {
+            if (overridden) return { color, status: e.status };
+            if (e.hiddenCount > 0) {
+              const s = e.segments?.[i];
+              return { color: s?.color ?? "#9aa5b1", status: s?.status ?? null };
+            }
+            return { color: e.color ?? "#9aa5b1", status: e.status };
+          });
+          const lastSeg = segStyles[segStyles.length - 1];
           return (
             <G key={e.id} opacity={dimmed ? 0.15 : 1}>
               {/* line style carries the edge's frontier status:
@@ -1426,20 +1591,23 @@ export default function MapScreen() {
                   target, done/records=solid */}
               {segments.map((pts, i) => {
                 const points = pts.map((p) => `${p.x},${p.y}`).join(" ");
-                return e.status === "in-progress" && !reduceMotion ? (
-                  <MarchingPolyline key={i} points={points} color={color} width={edgeWidth} />
+                const seg = segStyles[i] ?? lastSeg;
+                const segDash =
+                  seg.status === "todo" ? "6 6" : seg.status === "in-progress" ? "2 8" : undefined;
+                return seg.status === "in-progress" && !reduceMotion ? (
+                  <MarchingPolyline key={i} points={points} color={seg.color} width={edgeWidth} />
                 ) : (
                   <Polyline
                     key={i}
                     points={points}
                     fill="none"
-                    stroke={color}
+                    stroke={seg.color}
                     strokeWidth={edgeWidth}
-                    strokeDasharray={dash}
+                    strokeDasharray={segDash}
                   />
                 );
               })}
-              <Polygon points={arrowPoints} fill={color} />
+              <Polygon points={arrowPoints} fill={lastSeg.color} />
               {/* wide invisible hit area so thin lines are tappable */}
               {bend ? (
                 <Polyline
@@ -1552,9 +1720,15 @@ export default function MapScreen() {
         <Text style={styles.addButtonText}>+ Add goal</Text>
       </Pressable>
 
-      {!routeMode && (
+      {!routeMode && !noteSearchMode && (
         <Pressable style={styles.routeButton} onPress={enterRouteMode}>
           <Text style={styles.addButtonText}>Route</Text>
+        </Pressable>
+      )}
+
+      {!routeMode && !noteSearchMode && (
+        <Pressable style={styles.noteSearchButton} onPress={enterNoteSearchMode}>
+          <Text style={styles.addButtonText}>Notes</Text>
         </Pressable>
       )}
 
@@ -1647,6 +1821,15 @@ export default function MapScreen() {
             icon: "←",
             onPress: () => startConnectReverse(node.id),
           });
+          // every node kind can carry notes
+          actions.push({
+            label: "Notes",
+            icon: "📝",
+            onPress: () => {
+              setSheetNodeId(null);
+              setNotesNodeId(node.id);
+            },
+          });
           // records carry no status, so the change-status step is skipped
           if (!isRecordNode(node)) {
             actions.push({
@@ -1658,6 +1841,15 @@ export default function MapScreen() {
               },
             });
           }
+          actions.push({
+            label: "Color",
+            icon: "●",
+            color: node.color,
+            onPress: () => {
+              setSheetNodeId(null);
+              setColorPicker({ kind: "node", id: node.id, title: node.title });
+            },
+          });
           actions.push({
             label: "Remove",
             icon: "🗑",
@@ -1751,6 +1943,27 @@ export default function MapScreen() {
           );
         })()}
 
+      {/* color picker: second step of the node/edge sheet's "Color"
+          action — a palette of swatches plus Default (clear); picking one
+          applies it through run() and closes the sheet. The title is
+          captured when the picker opens, so render touches no refs */}
+      {colorPicker && (
+        <ActionSheet
+          title={colorPicker.title}
+          subtitle="Color"
+          actions={[
+            { label: "Default", icon: "∅", onPress: () => pickColor(undefined) },
+            ...PALETTE.map((c) => ({
+              label: c.label,
+              icon: "●",
+              color: c.color,
+              onPress: () => pickColor(c.color),
+            })),
+          ]}
+          onClose={() => setColorPicker(null)}
+        />
+      )}
+
       {/* double-tap edge sheet: expand / summarize / straighten / remove */}
       {sheetEdgeId &&
         (() => {
@@ -1774,6 +1987,19 @@ export default function MapScreen() {
             });
           }
           actions.push({
+            label: "Color",
+            icon: "●",
+            color: edge.color,
+            onPress: () => {
+              setSheetEdgeId(null);
+              setColorPicker({
+                kind: "edge",
+                id: edge.id,
+                title: `${edge.node1.title} → ${edge.node2.title}`,
+              });
+            },
+          });
+          actions.push({
             label: "Remove edge",
             icon: "🗑",
             destructive: true,
@@ -1788,6 +2014,142 @@ export default function MapScreen() {
             />
           );
         })()}
+
+      {/* notes sheet: the node's notes newest-first, with add/edit/delete */}
+      {notesNodeId &&
+        (() => {
+          const node = findDomainNode(map, notesNodeId);
+          if (!node) return null;
+          const confirmRemoveNote = (noteId: string) => {
+            Alert.alert("Remove note", "Remove this note?", [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Remove",
+                style: "destructive",
+                onPress: () => {
+                  console.log("[FLOW] notes -> remove note (goes through run())");
+                  run((m) => m.removeNote(node, noteId));
+                },
+              },
+            ]);
+          };
+          return (
+            <Modal visible transparent animationType="fade" onRequestClose={() => setNotesNodeId(null)}>
+              <View style={styles.formBackdrop}>
+                <Pressable style={StyleSheet.absoluteFill} onPress={() => setNotesNodeId(null)} />
+                <View style={styles.formSheet}>
+                  <Text style={styles.formTitle}>{node.title}</Text>
+                  <Text style={styles.noteSheetCount}>
+                    {node.notes.length === 0
+                      ? "No notes yet"
+                      : `${node.notes.length} note${node.notes.length === 1 ? "" : "s"}`}
+                  </Text>
+                  <ScrollView style={styles.notesList}>
+                    {node.notes.map((note) => (
+                      <View key={note.id} style={styles.noteRow}>
+                        <Text style={styles.noteRowText}>{note.text}</Text>
+                        <View style={styles.noteRowFooter}>
+                          <Text style={styles.noteRowMeta}>
+                            {fmtDate(note.createdAt)}
+                            {note.updatedAt > note.createdAt ? " · edited" : ""}
+                          </Text>
+                          <SheetButton
+                            label="Edit"
+                            onPress={() =>
+                              setNoteDraft({ nodeId: node.id, noteId: note.id, text: note.text })
+                            }
+                          />
+                          <SheetButton label="Delete" onPress={() => confirmRemoveNote(note.id)} />
+                        </View>
+                      </View>
+                    ))}
+                  </ScrollView>
+                  <View style={styles.formButtons}>
+                    <Pressable
+                      style={styles.formSave}
+                      onPress={() => setNoteDraft({ nodeId: node.id, text: "" })}
+                    >
+                      <Text style={styles.formSaveText}>+ Add note</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </View>
+            </Modal>
+          );
+        })()}
+
+      {/* note editor: add a new note or edit an existing one */}
+      {noteDraft &&
+        (() => {
+          const node = findDomainNode(map, noteDraft.nodeId);
+          if (!node) return null;
+          const saveNote = () => {
+            console.log("[FLOW] note editor -> save (goes through run())");
+            run((m) => {
+              if (noteDraft.noteId) {
+                const note = node.notes.find((n) => n.id === noteDraft.noteId);
+                if (note) m.updateNote(note, noteDraft.text);
+              } else {
+                m.addNote(node, noteDraft.text);
+              }
+            });
+            setNoteDraft(null);
+          };
+          return (
+            <Modal visible transparent animationType="fade" onRequestClose={() => setNoteDraft(null)}>
+              <KeyboardAvoidingView
+                style={styles.formBackdrop}
+                behavior={Platform.OS === "ios" ? "padding" : undefined}
+              >
+                <Pressable style={StyleSheet.absoluteFill} onPress={() => setNoteDraft(null)} />
+                <View style={styles.formSheet}>
+                  <Text style={styles.formTitle}>
+                    {noteDraft.noteId ? "Edit note" : `Note on ${node.title}`}
+                  </Text>
+                  <TextInput
+                    style={[styles.formInput, styles.formInputMultiline]}
+                    placeholder="Write a note…"
+                    value={noteDraft.text}
+                    onChangeText={(t) => setNoteDraft((d) => (d ? { ...d, text: t } : d))}
+                    multiline
+                    autoFocus
+                  />
+                  <View style={styles.formButtons}>
+                    <Pressable style={styles.formCancel} onPress={() => setNoteDraft(null)}>
+                      <Text style={styles.formCancelText}>Cancel</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.formSave, !noteDraft.text.trim() && styles.formSaveDisabled]}
+                      disabled={!noteDraft.text.trim()}
+                      onPress={saveNote}
+                    >
+                      <Text style={styles.formSaveText}>Save</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </KeyboardAvoidingView>
+            </Modal>
+          );
+        })()}
+
+      {/* note query panel: search every note on the map; tapping a result
+          focuses the owning node */}
+      {noteSearchMode && (
+        <NoteSearchPanel
+          query={noteQuery}
+          results={noteResults.map((r) => ({
+            noteId: r.note.id,
+            nodeId: r.node.id,
+            excerpt: r.note.text,
+            nodeTitle: r.node.title,
+            nodeKind: r.node.kind,
+            createdAt: r.note.createdAt,
+          }))}
+          onChangeQuery={setNoteQuery}
+          onPickResult={focusNoteNode}
+          onClose={exitNoteSearchMode}
+        />
+      )}
 
       {/* route query panel: type a node name (or tap it on the canvas) to
           fill From/To; both ends set -> candidate routes sheet opens */}
@@ -2189,6 +2551,55 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 24,
+  },
+  noteSearchButton: {
+    position: "absolute",
+    right: 20,
+    bottom: 144, // stacked above the route button
+    backgroundColor: "#5a6572",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 24,
+  },
+  noteResults: {
+    maxHeight: 240,
+  },
+  noteSearchEmpty: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+    color: "#666666",
+  },
+  noteSheetCount: {
+    fontSize: 12,
+    color: "#8a8f98",
+    marginTop: -6,
+  },
+  notesList: {
+    maxHeight: 280,
+  },
+  noteRow: {
+    borderWidth: 1,
+    borderColor: "#d0d7de",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 6,
+    marginBottom: 8,
+  },
+  noteRowText: {
+    fontSize: 14,
+    color: "#333333",
+  },
+  noteRowFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  noteRowMeta: {
+    flex: 1,
+    fontSize: 12,
+    color: "#666666",
   },
   routePanel: {
     position: "absolute",

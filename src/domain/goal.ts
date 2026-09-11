@@ -1,6 +1,7 @@
 import { v4 } from "uuid";
 import { Edge } from "./edge";
 import { Node, NodeKind } from "./node";
+import { Note } from "./note";
 
 export default class Goal implements Node {
     x: number;
@@ -8,6 +9,8 @@ export default class Goal implements Node {
     id: string;
     title: string;
     kind: NodeKind = "goal";
+    color: string | undefined;
+    notes: Note[] = [];
     description?: string;
     targetDate?: Date;
     completedAt?: Date;

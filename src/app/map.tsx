@@ -36,6 +36,7 @@ import { edgeStatus, goalStatus, nodeStatus, Status, startTask, pauseTask, compl
 import { PALETTE } from "@/app/palette";
 import { ACCENT, BACKDROP, CANVAS_BG, INK, SHADOW } from "@/app/theme";
 import { computeFitView, FitView } from "@/app/fitZoom";
+import { loadLifeMap, scheduleSave } from "@/data/lifeMapStore";
 
 // ---------- View models: plain data describing what to draw ----------
 // The UI renders ONLY from these. It never renders domain objects directly.
@@ -790,22 +791,26 @@ export default function MapScreen() {
   console.log("[FLOW] render step 1: React is running MapScreen()");
 
   // The domain object and its layer view are created once and survive re-renders.
+  // The map starts empty and is filled from the local sqlite database on
+  // mount; the demo map only seeds a first launch with an empty database.
   const mapRef = useRef<LifeMap | null>(null);
   const layerViewRef = useRef<LayerView | null>(null);
   if (mapRef.current === null) {
-    mapRef.current = createDemoMap(width / 2, height / 3);
+    mapRef.current = new LifeMap();
     layerViewRef.current = new LayerView(mapRef.current);
   }
   const map = mapRef.current;
   const layerView = layerViewRef.current!;
+  const [mapLoaded, setMapLoaded] = useState(false);
 
   // Every domain change goes through run(): mutate, re-sync the layer
-  // view, then bump state so React re-renders from fresh view models.
+  // view, persist, then bump state so React re-renders from fresh view models.
   const [, setVersion] = useState(0);
   const run = (mutate: (m: LifeMap) => void) => {
     console.log("[FLOW] event -> mutating domain now");
     mutate(map);
     layerView.refresh();
+    scheduleSave(map);
     // domain edits can hide or remove selected edges; prune the selection
     const visible = new Set(layerView.edges.map((e) => e.id));
     setZoomEdgeIds((prev) => prev.filter((id) => visible.has(id)));
@@ -919,6 +924,30 @@ export default function MapScreen() {
     AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
     const sub = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
     return () => sub.remove();
+  }, []);
+
+  // load the persisted map once on mount; seed the demo map (and persist
+  // it) only when the database is still empty
+  useEffect(() => {
+    let cancelled = false;
+    loadLifeMap()
+      .then((loaded) => {
+        if (cancelled) return;
+        if (loaded) {
+          mapRef.current = loaded;
+        } else {
+          mapRef.current = createDemoMap(width / 2, height / 3);
+          scheduleSave(mapRef.current);
+        }
+        layerViewRef.current = new LayerView(mapRef.current);
+        setMapLoaded(true);
+        setVersion((v) => v + 1);
+      })
+      .catch((err) => console.warn("[lifeMapStore] load failed", err));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // creation flow: what the form is making
@@ -1797,6 +1826,12 @@ export default function MapScreen() {
     for (let y = gridStartY; y <= worldBottom + gridSpacing; y += gridSpacing) {
       gridDots.push({ x, y });
     }
+  }
+
+  // render nothing until the persisted map (or the seeded demo map) is in
+  // place, so gestures never mutate a map that is about to be replaced
+  if (!mapLoaded) {
+    return <View style={styles.container} />;
   }
 
   return (

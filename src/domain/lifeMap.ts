@@ -109,12 +109,6 @@ export class LifeMap {
         this.rootNodes = nodes
         this.rootEdges = edges
     }
-    save() {
-        //TODO persist db/cloud
-    }
-    load() {
-        //TODO load from db/cloud
-    }
     removeNode(node: Node) {
         // removeEdge re-adds an isolated node to rootNodes, so the node
         // itself must be spliced out only after its edges are gone

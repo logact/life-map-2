@@ -872,20 +872,52 @@ export default function MapScreen() {
   const [zoomEdgeIds, setZoomEdgeIds] = useState<string[]>([]);
   const zoomEdgeIdsRef = useRef(zoomEdgeIds);
   zoomEdgeIdsRef.current = zoomEdgeIds;
+  // undo stack for selection-less pinch-in: each spread pushes the revealed
+  // child edge ids, so a squeeze with no lens collapses the last spread
+  // even after the selection was accidentally cleared
+  const zoomHistoryRef = useRef<string[][]>([]);
 
   // One zoom step on the selection, anchored at (mx, my) so the content
   // under the gesture stays put while the fit view reacts to the changed
   // node set. Selection is hereditary: revealed children inherit it on
-  // zoom-in, parents inherit it on collapse.
+  // zoom-in, parents inherit it on collapse. With no selection, a collapse
+  // pops the zoom history instead: a squeeze undoes the last spread even
+  // after the lens was accidentally cleared.
   const zoomSelectionStep = (deeper: boolean, mx: number, my: number) => {
-    const sel = zoomEdgeIdsRef.current;
-    if (sel.length === 0) return;
+    let sel = zoomEdgeIdsRef.current;
+    let fromHistory = false;
+    if (sel.length === 0) {
+      if (deeper) return; // no lens: a spread only moves the camera
+      fromHistory = true;
+      // drop stale entries (edges since removed, collapsed, or re-hidden)
+      // until the top of the stack names a collapsible group
+      while (zoomHistoryRef.current.length > 0) {
+        const top = zoomHistoryRef.current[zoomHistoryRef.current.length - 1];
+        const collapsible = top.some((id) =>
+          layerView.edges.some(
+            (e) => e.id === id && e.parentEdge && layerView.zoomedEdgeIds.has(e.parentEdge.id),
+          ),
+        );
+        if (collapsible) {
+          sel = top;
+          break;
+        }
+        zoomHistoryRef.current.pop();
+      }
+      if (sel.length === 0) return;
+    }
     const cam = fitRef.current;
     const vp = viewportRef.current;
     const wx = (mx - vp.x - cam.x) / cam.scale;
     const wy = (my - vp.y - cam.y) / cam.scale;
     const next = deeper ? layerView.zoomIn(sel) : layerView.zoomOut(sel);
     if (next.length === 0) return; // nothing to reveal/collapse: camera only
+    if (deeper) {
+      // remember the spread so a later selection-less squeeze can undo it
+      zoomHistoryRef.current.push(next.map((e) => e.id));
+    } else if (fromHistory) {
+      zoomHistoryRef.current.pop(); // the spread this collapse undoes
+    }
     const visible = new Set(layerView.edges.map((e) => e.id));
     setZoomEdgeIds([
       ...sel.filter((id) => visible.has(id)),
@@ -910,6 +942,7 @@ export default function MapScreen() {
   // the fit-to-screen camera
   const resetView = () => {
     layerView.reset();
+    zoomHistoryRef.current = [];
     userScaleRef.current = 1;
     setUserScale(1);
     setViewport({ x: 0, y: 0 });
@@ -1704,6 +1737,9 @@ export default function MapScreen() {
     });
     layerView.zoomedEdgeIds.add(edge.id);
     layerView.refresh();
+    // sheet-expand bypasses zoomSelectionStep; record it so a
+    // selection-less squeeze can undo this spread too
+    zoomHistoryRef.current.push(edge.childrenEdges.map((e) => e.id));
     setVersion((v) => v + 1);
     setSelectedEdgeIds([]);
     setSheetEdgeId(null);

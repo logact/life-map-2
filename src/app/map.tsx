@@ -34,6 +34,8 @@ import { isGoalNode, isRecordNode, isTaskNode, Node, NodeKind } from "@/domain/n
 import { findRoutes, RouteResult } from "@/domain/route";
 import { edgeStatus, goalStatus, nodeStatus, Status, startTask, pauseTask, completeTask, completeGoal, reopenTask, reopenGoal } from "@/domain/status";
 import { PALETTE } from "@/app/palette";
+import { ACCENT, BACKDROP, CANVAS_BG, INK, SHADOW } from "@/app/theme";
+import { computeFitView, FitView } from "@/app/fitZoom";
 
 // ---------- View models: plain data describing what to draw ----------
 // The UI renders ONLY from these. It never renders domain objects directly.
@@ -68,9 +70,23 @@ interface MapViewModel {
   edges: EdgeViewModel[];
 }
 
-// domain -> view model: walk the edges visible at the current layer,
+// the camera the user sees: the fit view scaled by their pinch zoom about
+// the screen center. screen = world * cam.scale + cam offset + viewport pan
+function composedCam(
+  base: FitView,
+  userScale: number,
+  screen: { width: number; height: number },
+): FitView {
+  return {
+    scale: base.scale * userScale,
+    x: (screen.width / 2) * (1 - userScale) + userScale * base.x,
+    y: (screen.height / 2) * (1 - userScale) + userScale * base.y,
+  };
+}
+
+// domain -> view model: walk the edges visible at the current zoom state,
 // then the isolated nodes. LayerView.edges is exactly the set of visible
-// edges (expanded edges are replaced by their children), so do NOT
+// edges (zoomed edges are replaced by their children), so do NOT
 // recurse into childrenEdges here — they are not visible until revealed.
 function mapDomainToViewModel(layerView: LayerView): MapViewModel {
   console.log("[FLOW]   render step 2: converting domain -> view models");
@@ -221,6 +237,18 @@ const LONG_PRESS_MS = 500;
 // two taps on the same target within this window = double tap
 const DOUBLE_TAP_MS = 300;
 
+// two fingers on the canvas zoom the camera continuously; with an active
+// selection, each time the finger distance accumulates this ratio the
+// selection also steps one detail level (spread = reveal children,
+// squeeze = collapse to parents). Steps stay anchored at the pinch
+// midpoint: the world point under it keeps its screen position
+const PINCH_RATIO = 1.3;
+
+// the pinch camera zoom multiplies the fit-zoom; clamped so the content
+// can't be lost at either extreme
+const MIN_USER_SCALE = 0.5;
+const MAX_USER_SCALE = 4;
+
 // what the create form is making: a free node of any kind at a world
 // position, a node attached under a parent node (create + connect), or —
 // the "Be added to" direction — a new node that becomes the PARENT of an
@@ -255,6 +283,9 @@ function fmtDate(d: Date): string {
 // a collapsed edge is broken into one segment per hidden child edge;
 // the gaps between the equal-length segments are the breakpoints
 const BREAKPOINT_GAP = 6;
+
+// world-anchored dot grid on the canvas: spacing between dots
+const GRID_SPACING = 28;
 
 // interpolate a point along a polyline, t = fraction of its total length
 function pointAlongPath(path: { x: number; y: number }[], t: number): { x: number; y: number } {
@@ -371,6 +402,11 @@ function MarchingPolyline(props: { points: string; color: string; width: number 
       stroke={props.color}
       strokeWidth={props.width}
       strokeDasharray="2 8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      // the edge layer scales with the fit-zoom; keep the stroke and its
+      // dash pattern at a constant screen size
+      vectorEffect="non-scaling-stroke"
       animatedProps={animatedProps}
     />
   );
@@ -385,17 +421,39 @@ function SheetButton(props: { label: string; onPress: () => void }) {
   );
 }
 
-// read-only peek card for a single tap: title plus a few fact lines.
-// pointerEvents="none" so canvas touches pass through and dismiss it.
-function InfoCard(props: { title: string; lines: string[] }) {
+// peek card for a single tap: title plus a few fact lines. Read-only by
+// default (pointerEvents="none", canvas touches pass through and dismiss
+// it); with actions/onClose it becomes interactive — the edge card's
+// zoom controls and close button
+function InfoCard(props: {
+  title: string;
+  lines: string[];
+  actions?: { label: string; onPress: () => void }[];
+  onClose?: () => void;
+}) {
+  const interactive = props.actions !== undefined || props.onClose !== undefined;
   return (
-    <View style={styles.infoCard} pointerEvents="none">
-      <Text style={styles.infoTitle}>{props.title}</Text>
+    <View style={styles.infoCard} pointerEvents={interactive ? "auto" : "none"}>
+      <View style={styles.infoHeader}>
+        <Text style={[styles.infoTitle, { flex: 1 }]}>{props.title}</Text>
+        {props.onClose && (
+          <Pressable onPress={props.onClose} hitSlop={8}>
+            <Text style={styles.infoClose}>✕</Text>
+          </Pressable>
+        )}
+      </View>
       {props.lines.map((l, i) => (
         <Text key={i} style={styles.infoMeta}>
           {l}
         </Text>
       ))}
+      {props.actions && props.actions.length > 0 && (
+        <View style={styles.infoActions}>
+          {props.actions.map((a) => (
+            <SheetButton key={a.label} label={a.label} onPress={a.onPress} />
+          ))}
+        </View>
+      )}
     </View>
   );
 }
@@ -424,7 +482,11 @@ function ActionSheet(props: { title: string; subtitle?: string; actions: SheetAc
             {props.actions.map((a) => (
               <Pressable
                 key={a.label}
-                style={[styles.actionTile, a.destructive && styles.actionTileDestructive]}
+                style={({ pressed }) => [
+                  styles.actionTile,
+                  a.destructive && styles.actionTileDestructive,
+                  pressed && { opacity: 0.6 },
+                ]}
                 onPress={a.onPress}
               >
                 <Text style={[styles.actionTileIcon, a.color && { color: a.color }]}>{a.icon}</Text>
@@ -596,6 +658,12 @@ function DraggableNode(props: {
   n: NodeViewModel;
   screenX: number;
   screenY: number;
+  // visual size in screen px (world size * pin scale)
+  size: number;
+  // camera zoom: gesture deltas are screen px, so world deltas = px / scale
+  scale: number;
+  // pin scale for the title: tracks the fit-zoom, not the pinch zoom
+  textScale: number;
   selected: boolean;
   pulsing: boolean;
   dimmed: boolean;
@@ -607,8 +675,17 @@ function DraggableNode(props: {
   onDragMove: (id: string, x: number, y: number) => void;
   onDragEnd: (id: string, x: number, y: number) => void;
 }) {
-  const size = nodeSize(props.n.kind);
-  const borderRadius = props.n.kind === "task" ? 12 : size / 2;
+  const size = props.size;
+  // task corners keep their 12/56 ratio under the zoom
+  const borderRadius = props.n.kind === "task" ? size * (12 / 56) : size / 2;
+  // the title shrinks with the fit-zoom, then drops out entirely when the
+  // node becomes a dot; the floor keeps it faintly readable meanwhile.
+  // Pinch zoom never inflates it (nodes are pins)
+  const baseFont = props.n.kind === "record" ? 9 : 13;
+  const fontSize = Math.max(6, Math.round(baseFont * props.textScale));
+  const showTitle = size >= 18;
+  // keep even the smallest node tappable at a comfortable touch target
+  const hitSlop = Math.max(0, (44 - size) / 2);
   // the pan responder is created once, so it reads the latest props
   // through a ref instead of closing over stale ones
   const latest = useRef(props);
@@ -626,16 +703,16 @@ function DraggableNode(props: {
         onDragStart(n.id, n.x, n.y);
       },
       onPanResponderMove: (_e, g) => {
-        const { n, onDragMove } = latest.current;
-        onDragMove(n.id, dragOrigin.current.x + g.dx, dragOrigin.current.y + g.dy);
+        const { n, scale, onDragMove } = latest.current;
+        onDragMove(n.id, dragOrigin.current.x + g.dx / scale, dragOrigin.current.y + g.dy / scale);
       },
       onPanResponderRelease: (_e, g) => {
-        const { n, onDragEnd } = latest.current;
-        onDragEnd(n.id, dragOrigin.current.x + g.dx, dragOrigin.current.y + g.dy);
+        const { n, scale, onDragEnd } = latest.current;
+        onDragEnd(n.id, dragOrigin.current.x + g.dx / scale, dragOrigin.current.y + g.dy / scale);
       },
       onPanResponderTerminate: (_e, g) => {
-        const { n, onDragEnd } = latest.current;
-        onDragEnd(n.id, dragOrigin.current.x + g.dx, dragOrigin.current.y + g.dy);
+        const { n, scale, onDragEnd } = latest.current;
+        onDragEnd(n.id, dragOrigin.current.x + g.dx / scale, dragOrigin.current.y + g.dy / scale);
       },
     }),
   ).current;
@@ -654,6 +731,7 @@ function DraggableNode(props: {
         onPress={() => props.onPress(props.n.id)}
         onLongPress={() => props.onArm(props.n.id)}
         delayLongPress={LONG_PRESS_MS}
+        hitSlop={hitSlop}
         style={[
           styles.node,
           {
@@ -663,24 +741,30 @@ function DraggableNode(props: {
             borderStyle: props.borderStyle,
           },
           props.n.kind === "record" && styles.nodeRecord,
+          // todo: dashed tertiary outline and title (grayscale status)
+          props.n.status === "todo" && styles.nodeTodo,
           // user color: colored border over a faint fill; selection,
           // pulsing and armed styles below still win over it
-          props.n.color && { borderColor: props.n.color, backgroundColor: props.n.color + "40" },
+          props.n.color && { borderColor: props.n.color, backgroundColor: props.n.color + "33" },
           // the pulsing ring draws the border; keep the base invisible
           props.pulsing && styles.nodePulsingBase,
           props.selected && styles.nodeSelected,
           props.armed && styles.nodeArmed,
         ]}
       >
-        <Text
-          style={[
-            styles.nodeTitle,
-            props.n.kind === "record" && styles.nodeTitleRecord,
-            props.n.status === "done" && styles.nodeTitleDone,
-          ]}
-        >
-          {props.n.title}
-        </Text>
+        {showTitle && (
+          <Text
+            style={[
+              styles.nodeTitle,
+              props.n.kind === "record" && styles.nodeTitleRecord,
+              { fontSize },
+              props.n.status === "todo" && styles.nodeTitleTodo,
+              props.n.status === "done" && styles.nodeTitleDone,
+            ]}
+          >
+            {props.n.title}
+          </Text>
+        )}
       </Pressable>
     </View>
   );
@@ -721,7 +805,10 @@ export default function MapScreen() {
   const run = (mutate: (m: LifeMap) => void) => {
     console.log("[FLOW] event -> mutating domain now");
     mutate(map);
-    layerView.refresh(layerView.forwardSteps);
+    layerView.refresh();
+    // domain edits can hide or remove selected edges; prune the selection
+    const visible = new Set(layerView.edges.map((e) => e.id));
+    setZoomEdgeIds((prev) => prev.filter((id) => visible.has(id)));
     console.log("[FLOW] calling setVersion -> tells React to re-render");
     setVersion((v) => v + 1);
   };
@@ -771,31 +858,58 @@ export default function MapScreen() {
   const closeOverlaysRef = useRef(closeOverlays);
   closeOverlaysRef.current = closeOverlays;
 
-  // Layer changes touch only the view, not the domain.
-  const showMoreDetail = () => {
-    layerView.nextLayer();
-    setSelectedEdgeIds([]); // the selected edges may no longer be visible
-    setSummarizeMode(false);
-    setConnectSourceId(null);
-    setConnectTargetId(null);
-    setKindPicker(null);
-    setBendDrag(null);
-    setDragArmedId(null);
-    closeOverlays();
-    clearRouteState(); // routes were computed over the old visible edges
+  // ---------- selection-scoped zoom ----------
+  // The selection is the lens for zoom/collapse: a single tap selects an
+  // edge, the route query selects a whole road. Zooming reveals the hidden
+  // children of selected edges one level at a time; collapsing folds the
+  // deepest selected frontier back into its parents. Pure view state —
+  // zoom never touches the domain.
+  const [zoomEdgeIds, setZoomEdgeIds] = useState<string[]>([]);
+  const zoomEdgeIdsRef = useRef(zoomEdgeIds);
+  zoomEdgeIdsRef.current = zoomEdgeIds;
+
+  // One zoom step on the selection, anchored at (mx, my) so the content
+  // under the gesture stays put while the fit view reacts to the changed
+  // node set. Selection is hereditary: revealed children inherit it on
+  // zoom-in, parents inherit it on collapse.
+  const zoomSelectionStep = (deeper: boolean, mx: number, my: number) => {
+    const sel = zoomEdgeIdsRef.current;
+    if (sel.length === 0) return;
+    const cam = fitRef.current;
+    const vp = viewportRef.current;
+    const wx = (mx - vp.x - cam.x) / cam.scale;
+    const wy = (my - vp.y - cam.y) / cam.scale;
+    const next = deeper ? layerView.zoomIn(sel) : layerView.zoomOut(sel);
+    if (next.length === 0) return; // nothing to reveal/collapse: camera only
+    const visible = new Set(layerView.edges.map((e) => e.id));
+    setZoomEdgeIds([
+      ...sel.filter((id) => visible.has(id)),
+      ...next.map((e) => e.id),
+    ]);
+    // the visible node set changed, so re-derive the camera and solve the
+    // pan that keeps the anchor world point fixed:
+    // viewport = screen - world * scale - camOffset
+    const newCam = composedCam(
+      computeFitView(mapDomainToViewModel(layerView).nodes, { width, height }),
+      userScaleRef.current,
+      { width, height },
+    );
+    setViewport({
+      x: mx - wx * newCam.scale - newCam.x,
+      y: my - wy * newCam.scale - newCam.y,
+    });
     setVersion((v) => v + 1);
   };
-  const showLessDetail = () => {
-    layerView.prevLayer();
-    setSelectedEdgeIds([]);
-    setSummarizeMode(false);
-    setConnectSourceId(null);
-    setConnectTargetId(null);
-    setKindPicker(null);
-    setBendDrag(null);
-    setDragArmedId(null);
+
+  // fit/reset: fold every zoomed edge back to the top layer and restore
+  // the fit-to-screen camera
+  const resetView = () => {
+    layerView.reset();
+    userScaleRef.current = 1;
+    setUserScale(1);
+    setViewport({ x: 0, y: 0 });
+    setZoomEdgeIds([]);
     closeOverlays();
-    clearRouteState();
     setVersion((v) => v + 1);
   };
 
@@ -884,17 +998,30 @@ export default function MapScreen() {
     setNoteSearchMode(false);
   };
 
-  // focus a search result's node: reveal the shallowest layer where one of
-  // its edges is visible, center it on screen, and open its info card
+  // focus a search result's node: zoom open the ancestors of its
+  // shallowest edge so the node becomes visible, center it on screen, and
+  // open its info card
   const focusNoteNode = (nodeId: string) => {
     const node = findDomainNode(map, nodeId);
     if (!node) return;
-    const edgeLayers = [...node.startEdges, ...node.endEdges].map((e) => e.layer);
-    if (edgeLayers.length > 0) {
-      layerView.refresh(Math.min(...edgeLayers));
+    const edges = [...node.startEdges, ...node.endEdges];
+    if (edges.length > 0) {
+      const shallowest = edges.reduce((a, b) => (a.layer <= b.layer ? a : b));
+      layerView.reveal(shallowest);
       setVersion((v) => v + 1);
     }
-    setViewport({ x: width / 2 - node.x, y: height / 2 - node.y });
+    // the reveal changed the visible nodes, so derive the new camera from
+    // them, then pan so the node lands at the screen center:
+    // userPan = (screenCenter - world * scale) - camOffset
+    const newCam = composedCam(
+      computeFitView(mapDomainToViewModel(layerView).nodes, { width, height }),
+      userScaleRef.current,
+      { width, height },
+    );
+    setViewport({
+      x: width / 2 - node.x * newCam.scale - newCam.x,
+      y: height / 2 - node.y * newCam.scale - newCam.y,
+    });
     Keyboard.dismiss();
     setInfoTarget({ kind: "node", id: node.id });
   };
@@ -914,16 +1041,23 @@ export default function MapScreen() {
   };
 
   // confirm a candidate: focus it — center its bounding box on screen,
-  // the renderer highlights its edges and dims everything else
+  // the renderer highlights its edges and dims everything else — and make
+  // its edges the zoom selection, so a following pinch reveals or
+  // collapses detail along the whole road at once
   const confirmRoute = (index: number) => {
     const route = routes[index];
     if (!route) return;
     setSelectedRouteIndex(index);
+    setZoomEdgeIds(route.edges.map((e) => e.id));
     const xs = route.nodes.map((n) => n.x);
     const ys = route.nodes.map((n) => n.y);
     const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
     const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-    setViewport({ x: width / 2 - cx, y: height / 2 - cy });
+    // userPan = (screenCenter - world * scale) - camOffset
+    setViewport({
+      x: width / 2 - cx * cam.scale - cam.x,
+      y: height / 2 - cy * cam.scale - cam.y,
+    });
   };
 
   // fill one route end from a suggestion tap or a canvas tap, then
@@ -970,16 +1104,59 @@ export default function MapScreen() {
   const routeNodeIds = new Set((activeRoute?.nodes ?? []).map((n) => n.id));
   // dim everything off the route only once a candidate is confirmed
   const routeFocusOn = routeMode && selectedRouteIndex !== null;
+  // the zoom selection: pinch reveals/collapses detail on exactly these edges
+  const zoomEdgeIdSet = new Set(zoomEdgeIds);
 
-  // Viewport = the camera. Domain coordinates never change when panning;
-  // screen position = world position + viewport offset. The offset lives
-  // in state so every pan re-renders from the same view models.
+  // Camera = fit-zoom × user pinch zoom + user pan. The fit view (scale +
+  // centering offset) is recomputed from the visible nodes on every
+  // render; `userScale` is the pinch zoom composed on top of it (about the
+  // screen center, see composedCam) and `viewport` is the user's pan.
+  // Domain coordinates never change: screen = world * cam.scale + cam
+  // offset + viewport.
   const [viewport, setViewport] = useState({ x: 0, y: 0 });
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
+  const [userScale, setUserScale] = useState(1);
+  const userScaleRef = useRef(userScale);
+  userScaleRef.current = userScale;
+  // the raw fit view and the latest composed camera (zoom + centering
+  // offset, without the pan), read by the once-created pan responder for
+  // world <-> screen conversion
+  const baseFitRef = useRef<FitView>({ scale: 1, x: 0, y: 0 });
+  const fitRef = useRef({ scale: 1, x: 0, y: 0 });
   const panStart = useRef({ x: 0, y: 0 });
+
+  // continuous pinch camera zoom, anchored at the pinch midpoint (mx, my):
+  // the world point under it keeps its screen position
+  const pinchCameraZoom = (ratio: number, mx: number, my: number) => {
+    const z = Math.min(MAX_USER_SCALE, Math.max(MIN_USER_SCALE, userScaleRef.current * ratio));
+    if (z === userScaleRef.current) return;
+    const cam = fitRef.current;
+    const vp = viewportRef.current;
+    const wx = (mx - vp.x - cam.x) / cam.scale;
+    const wy = (my - vp.y - cam.y) / cam.scale;
+    userScaleRef.current = z;
+    setUserScale(z);
+    const newCam = composedCam(baseFitRef.current, z, { width, height });
+    setViewport({
+      x: mx - wx * newCam.scale - newCam.x,
+      y: my - wy * newCam.scale - newCam.y,
+    });
+  };
+
+  // the pinch gesture lives in the canvas pan responder (created once),
+  // so it reaches the latest zoom functions through a ref
+  const pinchRef = useRef({ camera: pinchCameraZoom, detail: zoomSelectionStep });
+  pinchRef.current = { camera: pinchCameraZoom, detail: zoomSelectionStep };
+
   // whether the current touch has moved past the tap threshold
   const panMoved = useRef(false);
+  // pinch state: baseline distance between the two fingers, whether a
+  // pinch is currently active, and the accumulated ratio toward the next
+  // detail step
+  const pinchStart = useRef<number | null>(null);
+  const pinching = useRef(false);
+  const detailAcc = useRef(1);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const cancelLongPress = () => {
@@ -990,14 +1167,14 @@ export default function MapScreen() {
   };
 
   // long-press on empty canvas opens a kind picker at that point; picking
-  // a kind opens the create form there (world position = screen position -
-  // viewport offset)
+  // a kind opens the create form there (world position = (screen position
+  // - camera offset) / zoom)
   const [freeSpacePicker, setFreeSpacePicker] = useState<{ x: number; y: number } | null>(null);
   const openCreatePickerAt = (screenX: number, screenY: number) => {
     closeOverlays();
     setFreeSpacePicker({
-      x: screenX - viewportRef.current.x,
-      y: screenY - viewportRef.current.y,
+      x: (screenX - viewportRef.current.x - fitRef.current.x) / fitRef.current.scale,
+      y: (screenY - viewportRef.current.y - fitRef.current.y) / fitRef.current.scale,
     });
   };
 
@@ -1005,12 +1182,17 @@ export default function MapScreen() {
   // still win on their own area) so it can start a long-press timer. Any
   // movement past the threshold cancels the timer and becomes a pan —
   // unless a bend drag is armed, in which case the drag moves the bend.
+  // A second finger turns the gesture into a pinch: the camera zooms
+  // continuously with the finger distance, and the selection steps one
+  // detail level each time the accumulated distance crosses PINCH_RATIO.
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onPanResponderGrant: (e) => {
         panStart.current = viewportRef.current;
         panMoved.current = false;
+        pinchStart.current = null;
+        pinching.current = false;
         if (bendDragRef.current) return; // bend drag: no create-picker timer
         const { pageX, pageY } = e.nativeEvent;
         cancelLongPress();
@@ -1019,7 +1201,49 @@ export default function MapScreen() {
           LONG_PRESS_MS,
         );
       },
-      onPanResponderMove: (_e, g) => {
+      onPanResponderMove: (e, g) => {
+        const touches = e.nativeEvent.touches;
+        if (touches.length >= 2) {
+          // pinch: zoom the camera continuously, and step the selection's
+          // detail level each time the accumulated finger-distance ratio
+          // crosses PINCH_RATIO (spread = reveal, squeeze = collapse)
+          pinching.current = true;
+          panMoved.current = true;
+          cancelLongPress();
+          const dist = Math.hypot(
+            touches[1].pageX - touches[0].pageX,
+            touches[1].pageY - touches[0].pageY,
+          );
+          const mx = (touches[0].pageX + touches[1].pageX) / 2;
+          const my = (touches[0].pageY + touches[1].pageY) / 2;
+          if (pinchStart.current === null) {
+            pinchStart.current = dist;
+            detailAcc.current = 1;
+            return;
+          }
+          const ratio = dist / pinchStart.current;
+          pinchStart.current = dist;
+          pinchRef.current.camera(ratio, mx, my);
+          detailAcc.current *= ratio;
+          if (detailAcc.current >= PINCH_RATIO) {
+            detailAcc.current = 1;
+            pinchRef.current.detail(true, mx, my);
+          } else if (detailAcc.current <= 1 / PINCH_RATIO) {
+            detailAcc.current = 1;
+            pinchRef.current.detail(false, mx, my);
+          }
+          return;
+        }
+        if (pinching.current) {
+          // back to one finger: re-baseline the pan so the viewport
+          // doesn't jump when the remaining finger moves
+          pinching.current = false;
+          pinchStart.current = null;
+          panStart.current = {
+            x: viewportRef.current.x - g.dx,
+            y: viewportRef.current.y - g.dy,
+          };
+        }
         const bd = bendDragRef.current;
         if (bd) {
           // bend drag: the bend point follows the finger (world coords)
@@ -1027,8 +1251,8 @@ export default function MapScreen() {
             panMoved.current = true;
             setBendDrag({
               edgeId: bd.edgeId,
-              x: g.moveX - viewportRef.current.x,
-              y: g.moveY - viewportRef.current.y,
+              x: (g.moveX - viewportRef.current.x - fitRef.current.x) / fitRef.current.scale,
+              y: (g.moveY - viewportRef.current.y - fitRef.current.y) / fitRef.current.scale,
             });
           }
           return;
@@ -1043,10 +1267,14 @@ export default function MapScreen() {
           });
         }
       },
-      // a touch that never moved is a tap on empty canvas: dismiss overlays;
-      // a bend drag commits its bend point here if the finger moved
+      // a touch that never moved is a tap on empty canvas: dismiss
+      // overlays and clear the zoom selection (the lens), so the next
+      // pinch moves only the camera; a bend drag commits its bend point
+      // here if the finger moved
       onPanResponderRelease: () => {
         cancelLongPress();
+        pinchStart.current = null;
+        pinching.current = false;
         const bd = bendDragRef.current;
         if (bd) {
           if (panMoved.current) {
@@ -1064,10 +1292,13 @@ export default function MapScreen() {
         if (!panMoved.current) {
           setInfoTarget(null);
           setDragArmedId(null);
+          setZoomEdgeIds([]);
         }
       },
       onPanResponderTerminate: () => {
         cancelLongPress();
+        pinchStart.current = null;
+        pinching.current = false;
         setBendDrag(null);
       },
     }),
@@ -1098,6 +1329,16 @@ export default function MapScreen() {
 
   // domain -> UI: derive plain view models on every render
   const vm = mapDomainToViewModel(layerView);
+  // camera: the fit-zoom (recomputed from the visible nodes so a crowded
+  // view shrinks into view) with the user's pinch zoom composed on top
+  const fit = computeFitView(vm.nodes, { width, height });
+  baseFitRef.current = fit;
+  const cam = composedCam(fit, userScale, { width, height });
+  fitRef.current = cam;
+  // nodes render as map pins: pinch zoom spreads the ground beneath them
+  // but never grows them past their fit size, so zooming in adds room
+  // instead of crowding the map
+  const pinScale = fit.scale * Math.min(1, userScale);
   // the dragged node renders at its live drag position, so edges follow it
   const posById = new Map(
     vm.nodes.map((n) => [
@@ -1106,7 +1347,7 @@ export default function MapScreen() {
     ]),
   );
   console.log(
-    `[FLOW]   render step 3: drawing ${vm.nodes.length} nodes, ${vm.edges.length} edges, layer ${layerView.forwardSteps}`,
+    `[FLOW]   render step 3: drawing ${vm.nodes.length} nodes, ${vm.edges.length} edges, ${layerView.zoomedEdgeIds.size} zoomed`,
   );
 
   const saveInspector = () => {
@@ -1139,6 +1380,7 @@ export default function MapScreen() {
     setSheetEdgeId(null);
     setInspectorNodeId(null);
     setInfoTarget({ kind: "node", id });
+    setZoomEdgeIds([]); // nodes aren't zoomable; the edge lens clears
   };
 
   const onNodeDoubleTap = (id: string) => {
@@ -1211,10 +1453,11 @@ export default function MapScreen() {
   };
 
   const onEdgeSingleTap = (id: string) => {
-    console.log("[FLOW] tap -> edge info card (UI state only)");
+    console.log("[FLOW] tap -> edge info card + select (UI state only)");
     setSheetNodeId(null);
     setSheetEdgeId(null);
     setInfoTarget({ kind: "edge", id });
+    setZoomEdgeIds([id]); // the tapped edge becomes the zoom selection
   };
 
   const onEdgeDoubleTap = (id: string) => {
@@ -1423,17 +1666,15 @@ export default function MapScreen() {
     const edge = layerView.edges.find((e) => e.id === edgeId);
     if (!edge) return;
     console.log("[FLOW] sheet -> expand edge (goes through run())");
-    // expand = drill into this edge: navigate the view to the layer
-    // where the new children live (edge.layer + 1). A visible edge can
-    // be shallower than the view's bottom (e.g. a layer-0 edge shown at
-    // the layer-3 view), in which case the view comes back UP to the
-    // children's layer — that is the navigation.
-    const targetLayer = edge.layer + 1;
+    // expand is a DOMAIN edit (it creates a sub-node); zoom is the view
+    // operation. Expanding zooms this edge open locally so the new
+    // children show, without disturbing the rest of the map.
     run((m) => {
       m.expand(edge);
       placeSubNode(edge, -40); // offset so the bend is visible
     });
-    layerView.refresh(targetLayer);
+    layerView.zoomedEdgeIds.add(edge.id);
+    layerView.refresh();
     setVersion((v) => v + 1);
     setSelectedEdgeIds([]);
     setSheetEdgeId(null);
@@ -1536,24 +1777,50 @@ export default function MapScreen() {
   // recomputed on every render while the panel is open
   const noteResults = noteSearchMode ? map.searchNotes(noteQuery) : [];
 
+  // dot grid covering the visible window, in world coordinates: the dots
+  // render inside the viewport-transformed edge layer, so they stay
+  // anchored to the world and shift with panning. The spacing doubles
+  // whenever the zoom would pack dots tighter than 24 px on screen, and
+  // the radius counter-scales, so the grid looks identical at any zoom.
+  const cameraX = cam.x + viewport.x;
+  const cameraY = cam.y + viewport.y;
+  let gridSpacing = GRID_SPACING;
+  while (gridSpacing * cam.scale < 24) gridSpacing *= 2;
+  const worldLeft = -cameraX / cam.scale;
+  const worldTop = -cameraY / cam.scale;
+  const worldRight = (width - cameraX) / cam.scale;
+  const worldBottom = (height - cameraY) / cam.scale;
+  const gridDots: { x: number; y: number }[] = [];
+  const gridStartX = Math.floor(worldLeft / gridSpacing) * gridSpacing;
+  const gridStartY = Math.floor(worldTop / gridSpacing) * gridSpacing;
+  for (let x = gridStartX; x <= worldRight + gridSpacing; x += gridSpacing) {
+    for (let y = gridStartY; y <= worldBottom + gridSpacing; y += gridSpacing) {
+      gridDots.push({ x, y });
+    }
+  }
+
   return (
     <View style={styles.container} {...panResponder.panHandlers}>
       <Svg style={StyleSheet.absoluteFill}>
-        {/* the whole edge layer shifts with the viewport */}
-        <G transform={`translate(${viewport.x}, ${viewport.y})`}>
+        {/* the whole edge layer shifts with the pan and scales with the fit-zoom */}
+        <G transform={`translate(${cameraX}, ${cameraY}) scale(${cam.scale})`}>
+          {gridDots.map((p, i) => (
+            <Circle key={i} cx={p.x} cy={p.y} r={1.5 / cam.scale} fill={INK.primary} opacity={0.06} />
+          ))}
           {vm.edges.map((e) => {
           const a = posById.get(e.fromId);
           const b = posById.get(e.toId);
           if (!a || !b) return null;
           const selected =
             selectedEdgeIds.includes(e.id) ||
+            zoomEdgeIdSet.has(e.id) ||
             (infoTarget?.kind === "edge" && infoTarget.id === e.id);
           const onRoute = routeEdgeIds.has(e.id);
           const dimmed = routeFocusOn && !onRoute;
           // route and selection override everything: the whole edge draws
           // in the single override color, no per-segment colors
           const overridden = onRoute || selected;
-          const color = onRoute ? "#1a73e8" : selected ? "#333333" : "#9aa5b1";
+          const color = onRoute ? ACCENT : selected ? INK.primary : "#aeaeb4";
           const edgeWidth = overridden ? 4 : Math.max(1.5, 3 - e.layer);
           // a bend drag in progress overrides the stored bend point
           const bend = bendDrag && bendDrag.edgeId === e.id ? { x: bendDrag.x, y: bendDrag.y } : e.bend;
@@ -1568,8 +1835,10 @@ export default function MapScreen() {
           const uy = len > 0 ? dy / len : 0;
           const tipX = b.x - ux * (nodeSize(b.kind) / 2);
           const tipY = b.y - uy * (nodeSize(b.kind) / 2);
-          const wing = 6;
-          const back = 12;
+          // fills are not covered by non-scaling-stroke: counter-scale the
+          // arrowhead so it keeps a constant screen size at any zoom
+          const wing = 5 / cam.scale;
+          const back = 11 / cam.scale;
           const baseX = tipX - ux * back;
           const baseY = tipY - uy * back;
           const arrowPoints = `${tipX},${tipY} ${baseX - uy * wing},${baseY + ux * wing} ${baseX + uy * wing},${baseY - ux * wing}`;
@@ -1583,9 +1852,9 @@ export default function MapScreen() {
             if (overridden) return { color, status: e.status };
             if (e.hiddenCount > 0) {
               const s = e.segments?.[i];
-              return { color: s?.color ?? "#9aa5b1", status: s?.status ?? null };
+              return { color: s?.color ?? "#aeaeb4", status: s?.status ?? null };
             }
-            return { color: e.color ?? "#9aa5b1", status: e.status };
+            return { color: e.color ?? "#aeaeb4", status: e.status };
           });
           const lastSeg = segStyles[segStyles.length - 1];
           return (
@@ -1608,6 +1877,9 @@ export default function MapScreen() {
                     stroke={seg.color}
                     strokeWidth={edgeWidth}
                     strokeDasharray={segDash}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    vectorEffect="non-scaling-stroke"
                   />
                 );
               })}
@@ -1616,15 +1888,17 @@ export default function MapScreen() {
                   the dash pattern of todo/in-progress edges, so the break
                   needs its own mark */}
               {breakpoints.map((p, i) => (
-                <Circle key={i} cx={p.x} cy={p.y} r={edgeWidth + 1} fill={(segStyles[i + 1] ?? lastSeg).color} />
+                <Circle key={i} cx={p.x} cy={p.y} r={(edgeWidth + 1) / cam.scale} fill={(segStyles[i + 1] ?? lastSeg).color} />
               ))}
-              {/* wide invisible hit area so thin lines are tappable */}
+              {/* wide invisible hit area so thin lines stay tappable at
+                  any zoom (non-scaling-stroke keeps it 24 px on screen) */}
               {bend ? (
                 <Polyline
                   points={bentPoints}
                   fill="none"
                   stroke="transparent"
                   strokeWidth={24}
+                  vectorEffect="non-scaling-stroke"
                   onPress={() => onEdgePress(e.id)}
                   onLongPress={() => onEdgeLongPress(e.id)}
                 />
@@ -1636,19 +1910,22 @@ export default function MapScreen() {
                   y2={b.y}
                   stroke="transparent"
                   strokeWidth={24}
+                  vectorEffect="non-scaling-stroke"
                   onPress={() => onEdgePress(e.id)}
                   onLongPress={() => onEdgeLongPress(e.id)}
                 />
               )}
-              {/* bend handle: visible while a bend drag is armed */}
+              {/* bend handle: visible while a bend drag is armed; the
+                  radius counter-scales so it stays grabbable when zoomed out */}
               {bendDrag && bendDrag.edgeId === e.id && (
                 <Circle
                   cx={bendDrag.x}
                   cy={bendDrag.y}
-                  r={10}
+                  r={10 / cam.scale}
                   fill="#ffffff"
-                  stroke="#333333"
-                  strokeWidth={2}
+                  stroke={INK.primary}
+                  strokeWidth={1.5}
+                  vectorEffect="non-scaling-stroke"
                 />
               )}
             </G>
@@ -1658,8 +1935,11 @@ export default function MapScreen() {
       </Svg>
 
       {vm.nodes.map((n) => {
-        const size = nodeSize(n.kind);
-        const borderRadius = n.kind === "task" ? 12 : size / 2;
+        // nodes are pins: positions follow the camera, but their size and
+        // title only shrink with the fit-zoom — pinch zoom-in never
+        // inflates them
+        const size = nodeSize(n.kind) * pinScale;
+        const borderRadius = n.kind === "task" ? size * (12 / 56) : size / 2;
         const pulsing = n.status === "in-progress" && !reduceMotion;
         // outline style carries status: todo=dashed, in-progress=dotted
         // (breathing ring when motion is allowed), done=solid
@@ -1668,21 +1948,26 @@ export default function MapScreen() {
         // live position: the drag override while dragging, else the domain
         const pos = posById.get(n.id) ?? n;
         const nodeDimmed = routeFocusOn && !routeNodeIds.has(n.id);
+        const screenX = pos.x * cam.scale + cameraX;
+        const screenY = pos.y * cam.scale + cameraY;
         return (
         <Fragment key={n.id}>
           {pulsing && !nodeDimmed && (
             <PulsingRing
-              x={pos.x + viewport.x}
-              y={pos.y + viewport.y}
+              x={screenX}
+              y={screenY}
               size={size}
               borderRadius={borderRadius}
-              color="#333333"
+              color={INK.secondary}
             />
           )}
         <DraggableNode
           n={n}
-          screenX={pos.x + viewport.x}
-          screenY={pos.y + viewport.y}
+          screenX={screenX}
+          screenY={screenY}
+          size={size}
+          scale={cam.scale}
+          textScale={pinScale}
           selected={n.id === highlightedNodeId || (routeFocusOn && routeNodeIds.has(n.id))}
           pulsing={pulsing}
           dimmed={nodeDimmed}
@@ -1698,19 +1983,17 @@ export default function MapScreen() {
         );
       })}
 
-      <View style={styles.layerControls}>
-        <Pressable style={styles.layerButton} onPress={showLessDetail}>
-          <Text style={styles.layerButtonText}>-</Text>
-        </Pressable>
-        <Text style={styles.layerLabel}>Layer {layerView.forwardSteps}</Text>
-        <Pressable style={styles.layerButton} onPress={showMoreDetail}>
-          <Text style={styles.layerButtonText}>+</Text>
-        </Pressable>
-      </View>
-
       {!routeMode && !noteSearchMode && (
         <Pressable style={styles.queryButton} onPress={enterRouteMode}>
           <Text style={styles.queryButtonText}>🔍</Text>
+        </Pressable>
+      )}
+
+      {/* reset: fold all zoomed edges back to the top layer and restore
+          the fit-to-screen camera */}
+      {!routeMode && !noteSearchMode && (
+        <Pressable style={styles.fitButton} onPress={resetView}>
+          <Text style={styles.queryButtonText}>⤾</Text>
         </Pressable>
       )}
 
@@ -1760,10 +2043,30 @@ export default function MapScreen() {
               `${edge.childrenEdges.length} hidden sub-edge${edge.childrenEdges.length === 1 ? "" : "s"}`,
             );
           }
+          // non-gesture zoom controls on the selected edge: one level per
+          // tap, the same operations as the pinch steps
+          const actions: { label: string; onPress: () => void }[] = [];
+          if (edge.childrenEdges.length > 0) {
+            actions.push({
+              label: "Zoom in",
+              onPress: () => zoomSelectionStep(true, width / 2, height / 2),
+            });
+          }
+          if (edge.parentEdge && layerView.zoomedEdgeIds.has(edge.parentEdge.id)) {
+            actions.push({
+              label: "Collapse",
+              onPress: () => zoomSelectionStep(false, width / 2, height / 2),
+            });
+          }
           return (
             <InfoCard
               title={`${edge.node1.title} → ${edge.node2.title}`}
               lines={lines}
+              actions={actions}
+              onClose={() => {
+                setInfoTarget(null);
+                setZoomEdgeIds([]);
+              }}
             />
           );
         })()}
@@ -2045,6 +2348,7 @@ export default function MapScreen() {
               <View style={styles.formBackdrop}>
                 <Pressable style={StyleSheet.absoluteFill} onPress={() => setNotesNodeId(null)} />
                 <View style={styles.formSheet}>
+                  <View style={styles.sheetHandle} />
                   <Text style={styles.formTitle}>{node.title}</Text>
                   <Text style={styles.noteSheetCount}>
                     {node.notes.length === 0
@@ -2073,7 +2377,7 @@ export default function MapScreen() {
                   </ScrollView>
                   <View style={styles.formButtons}>
                     <Pressable
-                      style={styles.formSave}
+                      style={({ pressed }) => [styles.formSave, pressed && { opacity: 0.6 }]}
                       onPress={() => setNoteDraft({ nodeId: node.id, text: "" })}
                     >
                       <Text style={styles.formSaveText}>+ Add note</Text>
@@ -2110,6 +2414,7 @@ export default function MapScreen() {
               >
                 <Pressable style={StyleSheet.absoluteFill} onPress={() => setNoteDraft(null)} />
                 <View style={styles.formSheet}>
+                  <View style={styles.sheetHandle} />
                   <Text style={styles.formTitle}>
                     {noteDraft.noteId ? "Edit note" : `Note on ${node.title}`}
                   </Text>
@@ -2122,11 +2427,18 @@ export default function MapScreen() {
                     autoFocus
                   />
                   <View style={styles.formButtons}>
-                    <Pressable style={styles.formCancel} onPress={() => setNoteDraft(null)}>
+                    <Pressable
+                      style={({ pressed }) => [styles.formCancel, pressed && { opacity: 0.6 }]}
+                      onPress={() => setNoteDraft(null)}
+                    >
                       <Text style={styles.formCancelText}>Cancel</Text>
                     </Pressable>
                     <Pressable
-                      style={[styles.formSave, !noteDraft.text.trim() && styles.formSaveDisabled]}
+                      style={({ pressed }) => [
+                        styles.formSave,
+                        !noteDraft.text.trim() && styles.formSaveDisabled,
+                        pressed && { opacity: 0.6 },
+                      ]}
                       disabled={!noteDraft.text.trim()}
                       onPress={saveNote}
                     >
@@ -2196,6 +2508,7 @@ export default function MapScreen() {
             onPress={() => setRoutes([])}
           />
           <View style={styles.formSheet}>
+            <View style={styles.sheetHandle} />
             <Text style={styles.formTitle}>Routes</Text>
             {routes.map((r, i) => (
               <Pressable
@@ -2342,15 +2655,16 @@ export default function MapScreen() {
 
                   <View style={styles.formButtons}>
                     <Pressable
-                      style={styles.formCancel}
+                      style={({ pressed }) => [styles.formCancel, pressed && { opacity: 0.6 }]}
                       onPress={() => setInspectorNodeId(null)}
                     >
                       <Text style={styles.formCancelText}>Cancel</Text>
                     </Pressable>
                     <Pressable
-                      style={[
+                      style={({ pressed }) => [
                         styles.formSave,
                         !inspectorDraft.title.trim() && styles.formSaveDisabled,
+                        pressed && { opacity: 0.6 },
                       ]}
                       disabled={!inspectorDraft.title.trim()}
                       onPress={saveInspector}
@@ -2381,6 +2695,7 @@ export default function MapScreen() {
             onPress={() => setCreateTarget(null)}
           />
           <View style={styles.formSheet}>
+            <View style={styles.sheetHandle} />
             <Text style={styles.formTitle}>
               {createTarget?.mode === "goal"
                 ? "New goal"
@@ -2410,15 +2725,16 @@ export default function MapScreen() {
             )}
             <View style={styles.formButtons}>
               <Pressable
-                style={styles.formCancel}
+                style={({ pressed }) => [styles.formCancel, pressed && { opacity: 0.6 }]}
                 onPress={() => setCreateTarget(null)}
               >
                 <Text style={styles.formCancelText}>Cancel</Text>
               </Pressable>
               <Pressable
-                style={[
+                style={({ pressed }) => [
                   styles.formSave,
                   !draft.title.trim() && styles.formSaveDisabled,
+                  pressed && { opacity: 0.6 },
                 ]}
                 disabled={!draft.title.trim()}
                 onPress={saveCreate}
@@ -2434,11 +2750,11 @@ export default function MapScreen() {
 }
 
 const styles = StyleSheet.create({
-  // grayscale for now: the color channel is undecided — kind rides on
-  // shape, status on outline style, selection on border weight
+  // refined grayscale: kind rides on shape, status on outline style,
+  // selection on border weight; tokens come from src/app/theme.ts
   container: {
     flex: 1,
-    backgroundColor: "#f5f7fa",
+    backgroundColor: CANVAS_BG,
   },
   node: {
     position: "absolute",
@@ -2446,16 +2762,19 @@ const styles = StyleSheet.create({
     height: NODE_SIZE,
     borderRadius: NODE_SIZE / 2,
     backgroundColor: "#ffffff",
-    borderWidth: 2,
-    borderColor: "#333333",
+    borderWidth: 1.5,
+    borderColor: "#d4d4d9",
     alignItems: "center",
     justifyContent: "center",
     padding: 6,
+    ...SHADOW.card,
   },
   nodeSelected: {
-    borderColor: "#111111",
-    borderWidth: 3,
-    backgroundColor: "#e5e7eb",
+    borderColor: INK.primary,
+    borderWidth: 2,
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    elevation: 4,
   },
   // long-pressed (armed) node lifts: a following movement drags it
   nodeArmed: {
@@ -2468,62 +2787,63 @@ const styles = StyleSheet.create({
   nodePulsingBase: {
     borderColor: "transparent",
   },
+  nodeTodo: {
+    borderColor: INK.tertiary,
+  },
+  nodeTitleTodo: {
+    color: INK.tertiary,
+  },
   nodeTitleDone: {
     textDecorationLine: "line-through",
-    color: "#666666",
+    opacity: 0.45,
   },
   nodeRecord: {
-    borderColor: "#9aa5b1",
+    borderColor: INK.tertiary,
     borderWidth: 1,
-    backgroundColor: "#e2e8f0",
+    backgroundColor: INK.subtle,
     padding: 2,
   },
   nodeTitle: {
-    fontSize: 12,
+    fontSize: 13,
+    fontWeight: "600",
+    color: INK.primary,
     textAlign: "center",
   },
   nodeTitleRecord: {
-    fontSize: 8,
-  },
-  layerControls: {
-    position: "absolute",
-    left: 20,
-    bottom: 40,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: "#ffffff",
-    borderRadius: 24,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: "#d0d7de",
-  },
-  layerButton: {
-    paddingHorizontal: 8,
-  },
-  layerButtonText: {
-    fontSize: 20,
-    color: "#333333",
-    fontWeight: "600",
-  },
-  layerLabel: {
-    fontSize: 13,
-    color: "#333333",
+    fontSize: 9,
+    fontWeight: "500",
   },
   queryButton: {
     position: "absolute",
     right: 20,
-    top: 60,
+    top: 56,
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#1a73e8",
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: INK.subtle,
     alignItems: "center",
     justifyContent: "center",
+    ...SHADOW.floating,
+  },
+  fitButton: {
+    position: "absolute",
+    right: 20,
+    top: 108, // below the query button
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: INK.subtle,
+    alignItems: "center",
+    justifyContent: "center",
+    ...SHADOW.floating,
   },
   queryButtonText: {
     fontSize: 18,
+    color: INK.primary,
   },
   noteResults: {
     maxHeight: 240,
@@ -2532,11 +2852,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 13,
-    color: "#666666",
+    color: INK.secondary,
   },
   noteSheetCount: {
     fontSize: 12,
-    color: "#8a8f98",
+    fontWeight: "500",
+    color: INK.tertiary,
     marginTop: -6,
   },
   notesList: {
@@ -2544,8 +2865,8 @@ const styles = StyleSheet.create({
   },
   noteRow: {
     borderWidth: 1,
-    borderColor: "#d0d7de",
-    borderRadius: 8,
+    borderColor: INK.subtle,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 6,
@@ -2553,7 +2874,7 @@ const styles = StyleSheet.create({
   },
   noteRowText: {
     fontSize: 14,
-    color: "#333333",
+    color: INK.primary,
   },
   noteRowFooter: {
     flexDirection: "row",
@@ -2563,7 +2884,7 @@ const styles = StyleSheet.create({
   noteRowMeta: {
     flex: 1,
     fontSize: 12,
-    color: "#666666",
+    color: INK.secondary,
   },
   routePanel: {
     position: "absolute",
@@ -2574,15 +2895,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     backgroundColor: "#ffffff",
-    borderRadius: 12,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#d0d7de",
+    borderColor: INK.subtle,
     padding: 8,
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
+    ...SHADOW.floating,
   },
   routeFields: {
     flex: 1,
@@ -2593,40 +2910,40 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     borderWidth: 1,
-    borderColor: "#d0d7de",
-    borderRadius: 8,
+    borderColor: "#e0e0e4",
+    borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
   routeRowActive: {
-    borderColor: "#1a73e8",
-    borderWidth: 2,
+    borderColor: INK.primary,
+    borderWidth: 1.5,
   },
   routeRowLabel: {
     fontSize: 13,
-    color: "#666666",
+    color: INK.secondary,
     fontWeight: "600",
     width: 36,
   },
   routeInput: {
     flex: 1,
-    fontSize: 14,
-    color: "#333333",
+    fontSize: 15,
+    color: INK.primary,
     paddingVertical: 0,
   },
   routeSuggestion: {
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderTopColor: "#eef1f4",
+    borderTopColor: "#f0f0f2",
   },
   routeSuggestionText: {
-    fontSize: 14,
-    color: "#333333",
+    fontSize: 13,
+    color: INK.primary,
   },
   routeSuggestionKind: {
     fontSize: 12,
-    color: "#9aa5b1",
+    color: INK.tertiary,
   },
   routeIconButton: {
     paddingHorizontal: 8,
@@ -2634,25 +2951,25 @@ const styles = StyleSheet.create({
   },
   routeIconButtonText: {
     fontSize: 16,
-    color: "#333333",
+    color: INK.primary,
     fontWeight: "600",
   },
   routeCard: {
     borderWidth: 1,
-    borderColor: "#d0d7de",
-    borderRadius: 8,
+    borderColor: INK.subtle,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 4,
   },
   routeCardTitle: {
     fontSize: 14,
-    color: "#1a73e8",
+    color: INK.primary,
     fontWeight: "600",
   },
   routeCardPath: {
     fontSize: 13,
-    color: "#666666",
+    color: INK.secondary,
   },
   menuBackdrop: {
     position: "absolute",
@@ -2663,28 +2980,30 @@ const styles = StyleSheet.create({
   },
   formBackdrop: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.3)",
+    backgroundColor: BACKDROP,
     justifyContent: "flex-end",
   },
   formSheet: {
     backgroundColor: "#ffffff",
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: 20,
-    gap: 12,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 24,
+    gap: 14,
   },
   formTitle: {
     fontSize: 17,
     fontWeight: "600",
-    color: "#333333",
+    color: INK.primary,
   },
   formInput: {
     borderWidth: 1,
-    borderColor: "#d0d7de",
-    borderRadius: 8,
+    borderColor: "#e0e0e4",
+    borderRadius: 12,
+    backgroundColor: "#f7f7f5",
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
+    color: INK.primary,
   },
   formInputMultiline: {
     minHeight: 70,
@@ -2698,17 +3017,17 @@ const styles = StyleSheet.create({
   formCancel: {
     paddingHorizontal: 16,
     paddingVertical: 10,
-    borderRadius: 20,
+    borderRadius: 999,
   },
   formCancelText: {
-    color: "#666666",
+    color: INK.secondary,
     fontWeight: "600",
   },
   formSave: {
-    backgroundColor: "#333333",
+    backgroundColor: INK.primary,
     paddingHorizontal: 20,
     paddingVertical: 10,
-    borderRadius: 20,
+    borderRadius: 999,
   },
   formSaveDisabled: {
     opacity: 0.4,
@@ -2725,12 +3044,12 @@ const styles = StyleSheet.create({
   },
   inspectorSheet: {
     backgroundColor: "#ffffff",
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
     borderTopWidth: 1,
-    borderColor: "#d0d7de",
-    padding: 20,
-    gap: 12,
+    borderColor: INK.subtle,
+    padding: 24,
+    gap: 14,
   },
   inspectorStatusRow: {
     flexDirection: "row",
@@ -2740,7 +3059,7 @@ const styles = StyleSheet.create({
   },
   inspectorStatusText: {
     fontSize: 14,
-    color: "#333333",
+    color: INK.primary,
     fontWeight: "600",
   },
   inspectorButton: {
@@ -2748,42 +3067,53 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#333333",
+    borderColor: INK.primary,
   },
   inspectorButtonText: {
     fontSize: 13,
-    color: "#333333",
+    color: INK.primary,
     fontWeight: "600",
   },
   inspectorMeta: {
     fontSize: 12,
-    color: "#666666",
+    color: INK.secondary,
   },
   infoCard: {
     position: "absolute",
     left: 20,
     right: 20,
-    bottom: 100, // sits above the bottom row (layer controls / add button)
+    bottom: 100, // sits above the bottom row (add button)
     backgroundColor: "#ffffff",
-    borderRadius: 12,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#d0d7de",
+    borderColor: INK.subtle,
     padding: 12,
     gap: 4,
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
+    ...SHADOW.floating,
   },
   infoTitle: {
     fontSize: 15,
+    fontWeight: "700",
+    color: INK.primary,
+  },
+  infoHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  infoClose: {
+    fontSize: 14,
     fontWeight: "600",
-    color: "#333333",
+    color: INK.secondary,
+    padding: 2,
+  },
+  infoActions: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 6,
   },
   infoMeta: {
     fontSize: 13,
-    color: "#666666",
+    color: INK.secondary,
   },
   modeBanner: {
     position: "absolute",
@@ -2794,10 +3124,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 16,
-    backgroundColor: "#333333",
+    backgroundColor: "#2c2c2e",
     borderRadius: 24,
     paddingHorizontal: 16,
     paddingVertical: 10,
+    ...SHADOW.floating,
   },
   modeBannerText: {
     color: "#ffffff",
@@ -2806,7 +3137,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   modeBannerAction: {
-    color: "#9ecbff",
+    color: "#d8d8dc",
     fontSize: 14,
     fontWeight: "600",
   },
@@ -2818,14 +3149,15 @@ const styles = StyleSheet.create({
     backgroundColor: "#d8dade",
   },
   sheetTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: "700",
-    color: "#222222",
+    color: INK.primary,
     textAlign: "center",
   },
   sheetSubtitle: {
     fontSize: 12,
-    color: "#8a8f98",
+    fontWeight: "500",
+    color: INK.tertiary,
     textAlign: "center",
     marginTop: -6,
   },
@@ -2839,16 +3171,16 @@ const styles = StyleSheet.create({
     flexBasis: "28%",
     alignItems: "center",
     gap: 6,
-    backgroundColor: "#f2f3f7",
-    borderRadius: 14,
+    backgroundColor: "#f4f4f6",
+    borderRadius: 16,
     paddingVertical: 14,
     paddingHorizontal: 6,
   },
   actionTileDestructive: {
-    backgroundColor: "#fdeceb",
+    backgroundColor: "#faf0ef",
   },
   actionTileIcon: {
-    fontSize: 20,
+    fontSize: 22,
   },
   actionTileLabel: {
     fontSize: 12,
@@ -2857,6 +3189,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   actionTileLabelDestructive: {
-    color: "#c0392b",
+    color: "#b3402f",
   },
 });

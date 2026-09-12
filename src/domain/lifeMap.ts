@@ -8,81 +8,97 @@ import { isTaskNode, Node } from "./node";
 
 export class LayerView {
     map: LifeMap;
-    forwardSteps: number = 0;
     isolatedNodes: Node[];
     edges: Edge[];
-
+    // edges currently zoomed open: the visible frontier replaces each of
+    // them with its children. Pure view state — zoom never mutates the
+    // domain (unlike expand, which creates sub-structure).
+    zoomedEdgeIds: Set<string> = new Set();
 
     constructor(map: LifeMap) {
         this.map = map;
         this.edges = this.map.rootEdges;
         this.isolatedNodes = this.map.rootNodes;
     }
-    refresh(layer: number) {
-        this.edges = this.map.rootEdges;
+
+    // rebuild the visible frontier: walk the edge tree, descending into
+    // zoomed edges and keeping every other edge visible. Invariant: a
+    // visible edge's children are never visible at the same time.
+    refresh() {
+        const result: Edge[] = [];
+        const walk = (e: Edge) => {
+            if (this.zoomedEdgeIds.has(e.id) && e.childrenEdges.length > 0) {
+                e.childrenEdges.forEach(walk);
+            } else {
+                result.push(e);
+            }
+        };
+        this.map.rootEdges.forEach(walk);
+        this.edges = result;
         this.isolatedNodes = this.map.rootNodes;
-        this.forwardSteps = 0;
-        while (this.forwardSteps < layer && this.nextLayer()) {
-            // keep stepping until the target layer or the bottom
-        }
-
     }
 
-    /**
-     * Inverse method for nextLayer(), inferred from the current edges:
-     * nextLayer() expands every expandable visible edge, so the edges
-     * revealed by the last step are exactly those with
-     * layer === forwardSteps. Collapse just them back to their parents;
-     * shallower edges were expanded in earlier steps and stay untouched.
-     * @returns return false when already at the top layer.
-     */
-
-    prevLayer(): boolean {
-        if (this.forwardSteps <= 0) { return false }
-
-        const result: Edge[] = [];
-        const collapsedParents = new Set<string>();
+    // zoom the given visible edges one level deeper. Returns the revealed
+    // child edges so the caller can inherit them into its selection.
+    // Edges without children are a no-op.
+    zoomIn(edgeIds: string[]): Edge[] {
+        const ids = new Set(edgeIds);
+        const revealed: Edge[] = [];
         for (const e of this.edges) {
-            const parent = e.parentEdge;
-            if (parent && e.layer === this.forwardSteps) {
-                if (!collapsedParents.has(parent.id)) {
-                    collapsedParents.add(parent.id);
-                    result.push(parent);
-                }
-            } else {
-                result.push(e);
+            if (ids.has(e.id) && e.childrenEdges.length > 0) {
+                this.zoomedEdgeIds.add(e.id);
+                revealed.push(...e.childrenEdges);
             }
         }
-        this.edges = result;
-        this.forwardSteps--;
-        return true
+        if (revealed.length > 0) {
+            this.refresh();
+        }
+        return revealed;
     }
-    // go one layer deeper: replace each expanded edge with its children.
-    // An edge without children has nothing deeper to show, so it stays.
-    /**
-     * 
-     * @returns return true when not reach the bottom, return false when reach to the bottom.
-     */
-    nextLayer(): boolean {
-        let expandedAny = false;
-        const result: Edge[] = [];
-        for (const e of this.edges) {
-            if (e.childrenEdges.length > 0) {
-                result.push(...e.childrenEdges);
-                expandedAny = true;
-            } else {
-                result.push(e);
+
+    // collapse the deepest selected frontier one level: each affected edge
+    // folds back into its parent together with its whole sibling group (the
+    // frontier invariant forbids collapsing just one child). Returns the
+    // parent edges so the caller can inherit them into its selection.
+    zoomOut(edgeIds: string[]): Edge[] {
+        const ids = new Set(edgeIds);
+        const candidates = this.edges.filter(
+            (e) => ids.has(e.id) && e.parentEdge && this.zoomedEdgeIds.has(e.parentEdge.id),
+        );
+        if (candidates.length === 0) {
+            return [];
+        }
+        // mixed-depth selections collapse one level at a time, deepest first
+        const deepest = Math.max(...candidates.map((e) => e.layer));
+        const parents = new Map<string, Edge>();
+        for (const e of candidates) {
+            if (e.layer === deepest && e.parentEdge) {
+                parents.set(e.parentEdge.id, e.parentEdge);
             }
         }
-        if (!expandedAny) {
-            return false
+        for (const p of parents.values()) {
+            this.zoomedEdgeIds.delete(p.id);
         }
-        this.edges = result;
-        this.forwardSteps++;
-        return true
+        this.refresh();
+        return [...parents.values()];
     }
 
+    // zoom open every ancestor of the edge so the edge itself becomes
+    // visible (used to focus a node hidden in collapsed layers)
+    reveal(edge: Edge) {
+        let p = edge.parentEdge;
+        while (p) {
+            this.zoomedEdgeIds.add(p.id);
+            p = p.parentEdge;
+        }
+        this.refresh();
+    }
 
+    // fold everything back to the top layer
+    reset() {
+        this.zoomedEdgeIds.clear();
+        this.refresh();
+    }
 }
 export class LifeMap {
     rootNodes: Node[]

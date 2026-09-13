@@ -554,6 +554,23 @@ function ActionSheet(props: { title: string; subtitle?: string; actions: SheetAc
   );
 }
 
+// selection bar: the identity of the selected edge/road as "From → To" at
+// the top of the canvas. The edit icon re-opens the editing UI for the
+// selection: the edge action sheet for a single edge, the route query
+// panel for a road
+function SelectionBar(props: { from: string; to: string; onEdit: () => void }) {
+  return (
+    <View style={styles.selectionBar}>
+      <Text style={styles.selectionBarText} numberOfLines={1}>
+        {props.from} → {props.to}
+      </Text>
+      <Pressable onPress={props.onEdit} hitSlop={8}>
+        <Text style={styles.selectionBarEdit}>✏️</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 // top banner for modes that retarget canvas taps/drags: connect mode,
 // summarize mode, bend-drag mode
 function ModeBanner(props: { text: string; confirmLabel?: string; onConfirm?: () => void; onCancel: () => void }) {
@@ -1085,6 +1102,7 @@ export default function MapScreen() {
     closeOverlays();
     clearRouteState();
     exitNoteSearchMode(); // modes are mutually exclusive
+    setZoomEdgeIds([]); // the query starts from a clean selection
     setRouteMode(true);
   };
 
@@ -1104,6 +1122,7 @@ export default function MapScreen() {
     closeOverlays();
     clearRouteState();
     setRouteMode(false); // modes are mutually exclusive
+    setZoomEdgeIds([]); // the query starts from a clean selection
     setNoteQuery("");
     setNoteSearchMode(true);
   };
@@ -1142,8 +1161,10 @@ export default function MapScreen() {
   };
 
   // search over the currently visible edges so every route edge can be
-  // rendered and highlighted
+  // rendered and highlighted. A new query replaces the current selection:
+  // the candidates are only a preview (blue) until confirmed
   const searchRoutes = (fromId: string, toId: string) => {
+    setZoomEdgeIds([]);
     const found = findRoutes(layerView.edges, fromId, toId, MAX_ROUTE_CANDIDATES);
     if (found.length === 0) {
       setRoutes([]);
@@ -1220,8 +1241,9 @@ export default function MapScreen() {
     if (from && to) searchRoutes(to, from);
   };
 
-  // the roads shown on the canvas: the confirmed selection, or every
-  // candidate while the routes sheet is open so all options stay visible
+  // the roads previewed on the canvas before confirmation, drawn in ACCENT
+  // blue; once confirmed their edges become the zoom selection and render
+  // like any other selection
   const activeRoutes =
     !routeMode || routes.length === 0
       ? []
@@ -1229,11 +1251,12 @@ export default function MapScreen() {
         ? pickedRoutes.map((i) => routes[i]).filter((r): r is RouteResult => !!r)
         : routes;
   const routeEdgeIds = new Set(activeRoutes.flatMap((r) => r.edges.map((e) => e.id)));
-  const routeNodeIds = new Set(activeRoutes.flatMap((r) => r.nodes.map((n) => n.id)));
-  // dim everything off the roads only once the selection is confirmed
-  const routeFocusOn = routeMode && routeConfirmed && activeRoutes.length > 0;
   // the zoom selection: pinch reveals/collapses detail on exactly these edges
   const zoomEdgeIdSet = new Set(zoomEdgeIds);
+  // any active edge selection — a single-tapped edge or confirmed roads —
+  // focuses the map the same way: selected edges render in INK.primary,
+  // everything else dims (the bright endpoint nodes derive from vm below)
+  const focusOn = zoomEdgeIds.length > 0;
 
   // Camera = fit-zoom × user pinch zoom + user pan. The fit view (scale +
   // centering offset) is recomputed from the visible nodes on every
@@ -1469,6 +1492,10 @@ export default function MapScreen() {
 
   // domain -> UI: derive plain view models on every render
   const vm = mapDomainToViewModel(layerView);
+  // endpoint nodes of selected edges stay bright; every other node dims
+  const focusNodeIds = new Set(
+    vm.edges.filter((e) => zoomEdgeIdSet.has(e.id)).flatMap((e) => [e.fromId, e.toId]),
+  );
   // camera: the fit-zoom (recomputed from the visible nodes so a crowded
   // view shrinks into view) with the user's pinch zoom composed on top
   const fit = computeFitView(vm.nodes, { width, height });
@@ -1489,6 +1516,32 @@ export default function MapScreen() {
   console.log(
     `[FLOW]   render step 3: drawing ${vm.nodes.length} nodes, ${vm.edges.length} edges, ${layerView.zoomedEdgeIds.size} zoomed`,
   );
+
+  // the selection bar's "From → To": the boundary nodes of the selected
+  // visible edges — a road's two ends, or a single edge's own endpoints
+  const selectedVmEdges = vm.edges.filter((e) => zoomEdgeIdSet.has(e.id));
+  let selectionEnds: { from: string; to: string } | null = null;
+  if (selectedVmEdges.length > 0) {
+    const selFromIds = new Set(selectedVmEdges.map((e) => e.fromId));
+    const selToIds = new Set(selectedVmEdges.map((e) => e.toId));
+    const start = selectedVmEdges.find((e) => !selToIds.has(e.fromId)) ?? selectedVmEdges[0];
+    const end = selectedVmEdges.find((e) => !selFromIds.has(e.toId)) ?? selectedVmEdges[0];
+    selectionEnds = {
+      from: posById.get(start.fromId)?.title ?? "",
+      to: posById.get(end.toId)?.title ?? "",
+    };
+  }
+
+  // the selection bar's edit icon: a single edge opens its action sheet; a
+  // road re-opens the route query panel so the search can be adjusted
+  const editSelection = () => {
+    if (selectedVmEdges.length === 1) {
+      console.log("[FLOW] selection bar -> edge action sheet (UI state only)");
+      setSheetEdgeId(selectedVmEdges[0].id);
+    } else {
+      enterRouteMode();
+    }
+  };
 
   const saveInspector = () => {
     if (!inspectorNodeId) return;
@@ -1829,6 +1882,7 @@ export default function MapScreen() {
   const startSummarize = (edgeId: string) => {
     setSheetEdgeId(null);
     setInfoTarget(null);
+    setZoomEdgeIds([]); // the summarize selection is its own state
     setSelectedEdgeIds([edgeId]);
     setSummarizeMode(true);
   };
@@ -1965,11 +2019,11 @@ export default function MapScreen() {
             zoomEdgeIdSet.has(e.id) ||
             (infoTarget?.kind === "edge" && infoTarget.id === e.id);
           const onRoute = routeEdgeIds.has(e.id);
-          const dimmed = routeFocusOn && !onRoute;
-          // route and selection override everything: the whole edge draws
-          // in the single override color, no per-segment colors
+          const dimmed = focusOn && !zoomEdgeIdSet.has(e.id);
+          // selection and route preview override everything: the whole edge
+          // draws in the single override color, no per-segment colors
           const overridden = onRoute || selected;
-          const color = onRoute ? ACCENT : selected ? INK.primary : "#aeaeb4";
+          const color = selected ? INK.primary : onRoute ? ACCENT : "#aeaeb4";
           const edgeWidth = overridden ? 4 : Math.max(1.5, 3 - e.layer);
           // a bend drag in progress overrides the stored bend point
           const bend = bendDrag && bendDrag.edgeId === e.id ? { x: bendDrag.x, y: bendDrag.y } : e.bend;
@@ -2096,7 +2150,7 @@ export default function MapScreen() {
           n.status === "todo" ? "dashed" : n.status === "in-progress" ? "dotted" : "solid";
         // live position: the drag override while dragging, else the domain
         const pos = posById.get(n.id) ?? n;
-        const nodeDimmed = routeFocusOn && !routeNodeIds.has(n.id);
+        const nodeDimmed = focusOn && !focusNodeIds.has(n.id);
         const screenX = pos.x * cam.scale + cameraX;
         const screenY = pos.y * cam.scale + cameraY;
         return (
@@ -2117,7 +2171,7 @@ export default function MapScreen() {
           size={size}
           scale={cam.scale}
           textScale={pinScale}
-          selected={n.id === highlightedNodeId || (routeFocusOn && routeNodeIds.has(n.id))}
+          selected={n.id === highlightedNodeId}
           pulsing={pulsing}
           dimmed={nodeDimmed}
           armed={dragArmedId === n.id}
@@ -2136,6 +2190,17 @@ export default function MapScreen() {
         <Pressable style={styles.queryButton} onPress={enterRouteMode}>
           <Text style={styles.queryButtonText}>🔍</Text>
         </Pressable>
+      )}
+
+      {/* selection bar: the selected edge/road as "From → To", with an
+          edit icon — same spot whether the selection came from a single
+          tap or from the route query */}
+      {!routeMode && !noteSearchMode && selectionEnds && (
+        <SelectionBar
+          from={selectionEnds.from}
+          to={selectionEnds.to}
+          onEdit={editSelection}
+        />
       )}
 
       {/* reset: fold all zoomed edges back to the top layer and restore
@@ -2515,9 +2580,12 @@ export default function MapScreen() {
                           </Text>
                           <SheetButton
                             label="Edit"
-                            onPress={() =>
-                              setNoteDraft({ nodeId: node.id, noteId: note.id, text: note.text })
-                            }
+                            onPress={() => {
+                              // iOS shows only one Modal at a time: swap the
+                              // list for the editor, which reopens it on close
+                              setNotesNodeId(null);
+                              setNoteDraft({ nodeId: node.id, noteId: note.id, text: note.text });
+                            }}
                           />
                           <SheetButton label="Delete" onPress={() => confirmRemoveNote(note.id)} />
                         </View>
@@ -2527,7 +2595,12 @@ export default function MapScreen() {
                   <View style={styles.formButtons}>
                     <Pressable
                       style={({ pressed }) => [styles.formSave, pressed && { opacity: 0.6 }]}
-                      onPress={() => setNoteDraft({ nodeId: node.id, text: "" })}
+                      onPress={() => {
+                        // iOS shows only one Modal at a time: swap the list
+                        // for the editor, which reopens it on close
+                        setNotesNodeId(null);
+                        setNoteDraft({ nodeId: node.id, text: "" });
+                      }}
                     >
                       <Text style={styles.formSaveText}>+ Add note</Text>
                     </Pressable>
@@ -2543,6 +2616,11 @@ export default function MapScreen() {
         (() => {
           const node = findDomainNode(map, noteDraft.nodeId);
           if (!node) return null;
+          // the editor replaced the notes sheet; every exit reopens it
+          const closeNoteEditor = () => {
+            setNoteDraft(null);
+            setNotesNodeId(noteDraft.nodeId);
+          };
           const saveNote = () => {
             console.log("[FLOW] note editor -> save (goes through run())");
             run((m) => {
@@ -2553,15 +2631,15 @@ export default function MapScreen() {
                 m.addNote(node, noteDraft.text);
               }
             });
-            setNoteDraft(null);
+            closeNoteEditor();
           };
           return (
-            <Modal visible transparent animationType="fade" onRequestClose={() => setNoteDraft(null)}>
+            <Modal visible transparent animationType="fade" onRequestClose={closeNoteEditor}>
               <KeyboardAvoidingView
                 style={styles.formBackdrop}
                 behavior={Platform.OS === "ios" ? "padding" : undefined}
               >
-                <Pressable style={StyleSheet.absoluteFill} onPress={() => setNoteDraft(null)} />
+                <Pressable style={StyleSheet.absoluteFill} onPress={closeNoteEditor} />
                 <View style={styles.formSheet}>
                   <View style={styles.sheetHandle} />
                   <Text style={styles.formTitle}>
@@ -2578,7 +2656,7 @@ export default function MapScreen() {
                   <View style={styles.formButtons}>
                     <Pressable
                       style={({ pressed }) => [styles.formCancel, pressed && { opacity: 0.6 }]}
-                      onPress={() => setNoteDraft(null)}
+                      onPress={closeNoteEditor}
                     >
                       <Text style={styles.formCancelText}>Cancel</Text>
                     </Pressable>
@@ -3030,6 +3108,32 @@ const styles = StyleSheet.create({
   },
   queryButtonText: {
     fontSize: 18,
+    color: INK.primary,
+  },
+  selectionBar: {
+    position: "absolute",
+    top: 56, // same row as the query button
+    left: 20,
+    right: 76, // leave room for the query/fit buttons
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#ffffff",
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: INK.subtle,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    ...SHADOW.floating,
+  },
+  selectionBarText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "600",
+    color: INK.primary,
+  },
+  selectionBarEdit: {
+    fontSize: 16,
     color: INK.primary,
   },
   noteResults: {

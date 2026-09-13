@@ -554,20 +554,33 @@ function ActionSheet(props: { title: string; subtitle?: string; actions: SheetAc
   );
 }
 
-// selection bar: the identity of the selected edge/road as "From → To" at
-// the top of the canvas. The edit icon re-opens the editing UI for the
-// selection: the edge action sheet for a single edge, the route query
-// panel for a road
-function SelectionBar(props: { from: string; to: string; onEdit: () => void }) {
+// selection bar: the identity of the selected edge/road at the top of the
+// canvas — start title on the left, end title on the right, and the
+// collapsed in-between rendered as a dashed connector with the step count.
+// Transparent: it sits directly on the canvas, replacing the query button.
+// Long-press opens the mutation UI for the selection: the edge action
+// sheet for a single edge, the route query panel for a road
+function SelectionBar(props: { from: string; to: string; steps: number; onLongPress: () => void }) {
   return (
-    <View style={styles.selectionBar}>
-      <Text style={styles.selectionBarText} numberOfLines={1}>
-        {props.from} → {props.to}
+    <Pressable
+      style={styles.selectionBar}
+      onLongPress={props.onLongPress}
+      delayLongPress={LONG_PRESS_MS}
+    >
+      <Text style={styles.selectionBarEnd} numberOfLines={1}>
+        {props.from}
       </Text>
-      <Pressable onPress={props.onEdit} hitSlop={8}>
-        <Text style={styles.selectionBarEdit}>✏️</Text>
-      </Pressable>
-    </View>
+      <View style={styles.selectionBarMiddle}>
+        <View style={styles.selectionBarDash} />
+        <Text style={styles.selectionBarSteps}>
+          {props.steps} {props.steps === 1 ? "step" : "steps"}
+        </Text>
+        <View style={styles.selectionBarDash} />
+      </View>
+      <Text style={[styles.selectionBarEnd, styles.selectionBarEndRight]} numberOfLines={1}>
+        {props.to}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -1186,10 +1199,11 @@ export default function MapScreen() {
     );
   };
 
-  // confirm the ticked roads: center their bounding box on screen — the
-  // renderer highlights their edges and dims everything else — and make
-  // their edges the zoom selection, so a following pinch reveals or
-  // collapses detail along the whole selection at once
+  // confirm the ticked roads: center their bounding box on screen, make
+  // their edges the zoom selection (so a following pinch reveals or
+  // collapses detail along the whole selection at once), and close the
+  // query panel — the selection bar takes over the top row. The route
+  // state is kept so the bar's edit icon re-opens the panel prefilled
   const confirmPickedRoutes = () => {
     const chosen = pickedRoutes
       .map((i) => routes[i])
@@ -1197,6 +1211,7 @@ export default function MapScreen() {
     if (chosen.length === 0) return;
     setRouteConfirmed(true);
     setZoomEdgeIds([...new Set(chosen.flatMap((r) => r.edges.map((e) => e.id)))]);
+    setRouteMode(false);
     const nodes = chosen.flatMap((r) => r.nodes);
     const xs = nodes.map((n) => n.x);
     const ys = nodes.map((n) => n.y);
@@ -1532,14 +1547,15 @@ export default function MapScreen() {
     };
   }
 
-  // the selection bar's edit icon: a single edge opens its action sheet; a
-  // road re-opens the route query panel so the search can be adjusted
+  // long-press on the selection bar opens the mutation UI: a single edge
+  // gets its action sheet; a road re-opens the route query panel (the
+  // confirmed query is kept, so the panel comes back prefilled)
   const editSelection = () => {
     if (selectedVmEdges.length === 1) {
       console.log("[FLOW] selection bar -> edge action sheet (UI state only)");
       setSheetEdgeId(selectedVmEdges[0].id);
     } else {
-      enterRouteMode();
+      setRouteMode(true);
     }
   };
 
@@ -2186,22 +2202,24 @@ export default function MapScreen() {
         );
       })}
 
-      {!routeMode && !noteSearchMode && (
-        <Pressable style={styles.queryButton} onPress={enterRouteMode}>
-          <Text style={styles.queryButtonText}>🔍</Text>
-        </Pressable>
-      )}
-
-      {/* selection bar: the selected edge/road as "From → To", with an
-          edit icon — same spot whether the selection came from a single
-          tap or from the route query */}
-      {!routeMode && !noteSearchMode && selectionEnds && (
-        <SelectionBar
-          from={selectionEnds.from}
-          to={selectionEnds.to}
-          onEdit={editSelection}
-        />
-      )}
+      {/* top row: with an active selection the selection bar shows the
+          selected edge/road (start left, end right, the collapsed middle
+          between them) and the query button is hidden; with no selection
+          the query button stands alone */}
+      {!routeMode &&
+        !noteSearchMode &&
+        (selectionEnds ? (
+          <SelectionBar
+            from={selectionEnds.from}
+            to={selectionEnds.to}
+            steps={selectedVmEdges.length}
+            onLongPress={editSelection}
+          />
+        ) : (
+          <Pressable style={styles.queryButton} onPress={enterRouteMode}>
+            <Text style={styles.queryButtonText}>🔍</Text>
+          </Pressable>
+        ))}
 
       {/* reset: fold all zoomed edges back to the top layer and restore
           the fit-to-screen camera */}
@@ -2718,7 +2736,12 @@ export default function MapScreen() {
           }}
           onPickSuggestion={pickRouteNode}
           onSwap={swapRouteEnds}
-          onShowRoutes={() => setRouteConfirmed(false)}
+          // re-picking from the candidates sheet replaces the selection:
+          // clear it so every candidate previews in blue again
+          onShowRoutes={() => {
+            setRouteConfirmed(false);
+            setZoomEdgeIds([]);
+          }}
           onClose={exitRouteMode}
         />
       )}
@@ -3112,29 +3135,40 @@ const styles = StyleSheet.create({
   },
   selectionBar: {
     position: "absolute",
-    top: 56, // same row as the query button
+    top: 56, // same row as the standalone query button it replaces
     left: 20,
-    right: 76, // leave room for the query/fit buttons
+    right: 20,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    backgroundColor: "#ffffff",
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: INK.subtle,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    ...SHADOW.floating,
+    gap: 10,
+    paddingVertical: 14, // a taller target for the long-press
   },
-  selectionBarText: {
-    flex: 1,
+  selectionBarEnd: {
+    flexShrink: 1,
     fontSize: 14,
     fontWeight: "600",
     color: INK.primary,
   },
-  selectionBarEdit: {
-    fontSize: 16,
-    color: INK.primary,
+  selectionBarEndRight: {
+    textAlign: "right",
+  },
+  // the collapsed in-between: a dashed connector carrying the step count
+  selectionBarMiddle: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  selectionBarDash: {
+    flex: 1,
+    borderBottomWidth: 1,
+    borderStyle: "dashed",
+    borderColor: INK.secondary,
+  },
+  selectionBarSteps: {
+    fontSize: 11,
+    fontWeight: "500",
+    color: INK.secondary,
   },
   noteResults: {
     maxHeight: 240,

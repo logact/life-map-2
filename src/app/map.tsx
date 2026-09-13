@@ -230,7 +230,7 @@ function nodeSize(kind: NodeKind): number {
   return NODE_SIZE;
 }
 
-// long-press on empty canvas = pick a node kind and create it there;
+// double tap on empty canvas = pick a node kind and create it there;
 // long-press on a node or edge arms it for dragging (move the node /
 // place the edge's bend point)
 const LONG_PRESS_MS = 500;
@@ -1219,16 +1219,18 @@ export default function MapScreen() {
   const pinchStart = useRef<number | null>(null);
   const pinching = useRef(false);
   const detailAcc = useRef(1);
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // pending empty-canvas tap: if a second tap lands within DOUBLE_TAP_MS it
+  // becomes a double tap (create picker), else the single-tap dismiss fires
+  const canvasTapRef = useRef<{ timer: ReturnType<typeof setTimeout> } | null>(null);
 
-  const cancelLongPress = () => {
-    if (longPressTimer.current !== null) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
+  const cancelCanvasTap = () => {
+    if (canvasTapRef.current !== null) {
+      clearTimeout(canvasTapRef.current.timer);
+      canvasTapRef.current = null;
     }
   };
 
-  // long-press on empty canvas opens a kind picker at that point; picking
+  // double tap on empty canvas opens a kind picker at that point; picking
   // a kind opens the create form there (world position = (screen position
   // - camera offset) / zoom)
   const [freeSpacePicker, setFreeSpacePicker] = useState<{ x: number; y: number } | null>(null);
@@ -1241,27 +1243,22 @@ export default function MapScreen() {
   };
 
   // The container claims empty-space touches immediately (node Pressables
-  // still win on their own area) so it can start a long-press timer. Any
-  // movement past the threshold cancels the timer and becomes a pan —
-  // unless a bend drag is armed, in which case the drag moves the bend.
-  // A second finger turns the gesture into a pinch: the camera zooms
-  // continuously with the finger distance, and the selection steps one
-  // detail level each time the accumulated distance crosses PINCH_RATIO.
+  // still win on their own area) so it can detect taps. Any movement past
+  // the threshold becomes a pan — unless a bend drag is armed, in which
+  // case the drag moves the bend. A tap that stays put starts the
+  // double-tap window: a second tap within DOUBLE_TAP_MS opens the create
+  // picker, otherwise the single tap dismisses overlays. A second finger
+  // turns the gesture into a pinch: the camera zooms continuously with the
+  // finger distance, and the selection steps one detail level each time
+  // the accumulated distance crosses PINCH_RATIO.
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onPanResponderGrant: (e) => {
+      onPanResponderGrant: () => {
         panStart.current = viewportRef.current;
         panMoved.current = false;
         pinchStart.current = null;
         pinching.current = false;
-        if (bendDragRef.current) return; // bend drag: no create-picker timer
-        const { pageX, pageY } = e.nativeEvent;
-        cancelLongPress();
-        longPressTimer.current = setTimeout(
-          () => openCreatePickerAt(pageX, pageY),
-          LONG_PRESS_MS,
-        );
       },
       onPanResponderMove: (e, g) => {
         const touches = e.nativeEvent.touches;
@@ -1271,7 +1268,7 @@ export default function MapScreen() {
           // crosses PINCH_RATIO (spread = reveal, squeeze = collapse)
           pinching.current = true;
           panMoved.current = true;
-          cancelLongPress();
+          cancelCanvasTap();
           const dist = Math.hypot(
             touches[1].pageX - touches[0].pageX,
             touches[1].pageY - touches[0].pageY,
@@ -1321,7 +1318,7 @@ export default function MapScreen() {
         }
         if (Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4) {
           panMoved.current = true;
-          cancelLongPress();
+          cancelCanvasTap();
           closeOverlaysRef.current();
           setViewport({
             x: panStart.current.x + g.dx,
@@ -1329,12 +1326,13 @@ export default function MapScreen() {
           });
         }
       },
-      // a touch that never moved is a tap on empty canvas: dismiss
-      // overlays and clear the zoom selection (the lens), so the next
-      // pinch moves only the camera; a bend drag commits its bend point
-      // here if the finger moved
-      onPanResponderRelease: () => {
-        cancelLongPress();
+      // a touch that never moved is a tap on empty canvas: it starts the
+      // double-tap window. A second tap within DOUBLE_TAP_MS opens the
+      // create picker there; otherwise the single tap dismisses overlays
+      // and clears the zoom selection (the lens), so the next pinch moves
+      // only the camera. A bend drag commits its bend point here if the
+      // finger moved.
+      onPanResponderRelease: (e) => {
         pinchStart.current = null;
         pinching.current = false;
         const bd = bendDragRef.current;
@@ -1352,13 +1350,27 @@ export default function MapScreen() {
           return;
         }
         if (!panMoved.current) {
-          setInfoTarget(null);
-          setDragArmedId(null);
-          setZoomEdgeIds([]);
+          const { pageX, pageY } = e.nativeEvent;
+          if (canvasTapRef.current) {
+            // second tap inside the window: double tap -> create picker
+            console.log("[FLOW] double tap -> create picker (UI state only)");
+            cancelCanvasTap();
+            openCreatePickerAt(pageX, pageY);
+          } else {
+            // first tap: its dismiss action waits out the double-tap window
+            canvasTapRef.current = {
+              timer: setTimeout(() => {
+                canvasTapRef.current = null;
+                setInfoTarget(null);
+                setDragArmedId(null);
+                setZoomEdgeIds([]);
+              }, DOUBLE_TAP_MS),
+            };
+          }
         }
       },
       onPanResponderTerminate: () => {
-        cancelLongPress();
+        cancelCanvasTap();
         pinchStart.current = null;
         pinching.current = false;
         setBendDrag(null);
@@ -1690,7 +1702,7 @@ export default function MapScreen() {
         m.addEdge(newNode, child);
       });
     } else if ("x" in createTarget) {
-      // free node at the long-pressed position
+      // free node at the double-tapped position
       run((m) =>
         m.addNode(
           createTarget.mode === "task"
@@ -2222,9 +2234,9 @@ export default function MapScreen() {
           );
         })()}
 
-      {/* free-space kind picker: first step of a long-press on empty
+      {/* free-space kind picker: first step of a double tap on empty
           canvas — pick the kind of the new node, then the create form
-          opens at the pressed position */}
+          opens at the tapped position */}
       {freeSpacePicker &&
         (() => {
           const { x, y } = freeSpacePicker;

@@ -1,0 +1,46 @@
+name: iOS Release (EAS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      destination:
+        description: "Submit destination"
+        type: choice
+        required: true
+        default: testflight
+        options:
+          - testflight
+          - appstore
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build iOS
+        run: eas build --platform ios --profile production --non-interactive --wait
+
+      - name: Submit to TestFlight
+        if: inputs.destination == 'testflight'
+        run: eas submit --platform ios --latest --non-interactive
+
+      - name: Submit to App Store
+        if: inputs.destination == 'appstore'
+        run: eas submit --platform ios --latest --non-interactive

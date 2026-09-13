@@ -215,6 +215,51 @@ function createDemoMap(cx: number, cy: number): LifeMap {
   map.addTask(family, planTrip);
   completeTask(callMom);
 
+  // ---- route query test: many parallel roads between two nodes ----
+  // Five distinct directed paths of different lengths (some sharing
+  // segments), a dead end that must NOT appear in the results, and a
+  // back-road whose wrong direction must NOT be traversable. Querying
+  // "RT Start" -> "RT End" should list 5 candidate routes.
+  const rtStart = new Goal(cx - 160, cy + 360, "RT Start", [], []);
+  const rtEnd = new Goal(cx + 160, cy + 360, "RT End", [], []);
+
+  // path 1: direct, 1 step
+  map.addEdge(rtStart, rtEnd);
+
+  // path 2: 2 steps, above the direct road
+  const rtA = new Task(cx, cy + 310, "RT A1", [], []);
+  map.addEdge(rtStart, rtA);
+  map.addEdge(rtA, rtEnd);
+
+  // path 3: 3 steps, below the direct road
+  const rtB1 = new Task(cx - 70, cy + 430, "RT B1", [], []);
+  const rtB2 = new Task(cx + 70, cy + 450, "RT B2", [], []);
+  map.addEdge(rtStart, rtB1);
+  map.addEdge(rtB1, rtB2);
+  map.addEdge(rtB2, rtEnd);
+
+  // path 4: 3 steps, merges into path 3 at RT B2
+  const rtC1 = new Task(cx - 30, cy + 530, "RT C1", [], []);
+  map.addEdge(rtStart, rtC1);
+  map.addEdge(rtC1, rtB2);
+
+  // path 5: 3 steps, merges into path 2 at RT A1
+  const rtD1 = new Task(cx - 110, cy + 290, "RT D1", [], []);
+  map.addEdge(rtStart, rtD1);
+  map.addEdge(rtD1, rtA);
+
+  // dead end: reachable from RT Start but never reaches RT End
+  const rtX = new Task(cx - 270, cy + 430, "RT X", [], []);
+  const rtY = new Task(cx - 330, cy + 500, "RT Y", [], []);
+  map.addEdge(rtStart, rtX);
+  map.addEdge(rtX, rtY);
+
+  // back-road: directed RT End -> RT Z -> RT Start; a route search must
+  // not travel it backwards
+  const rtZ = new Task(cx + 270, cy + 430, "RT Z", [], []);
+  map.addEdge(rtEnd, rtZ);
+  map.addEdge(rtZ, rtStart);
+
   return map;
 }
 
@@ -249,6 +294,10 @@ const PINCH_RATIO = 1.3;
 // can't be lost at either extreme
 const MIN_USER_SCALE = 0.5;
 const MAX_USER_SCALE = 4;
+
+// route query: cap on candidate roads listed between two nodes (the
+// domain search also stops at its own hop limit)
+const MAX_ROUTE_CANDIDATES = 8;
 
 // what the create form is making: a free node of any kind at a world
 // position, a node attached under a parent node (create + connect), or —
@@ -1001,8 +1050,8 @@ export default function MapScreen() {
   const [noteSearchMode, setNoteSearchMode] = useState(false);
   const [noteQuery, setNoteQuery] = useState("");
 
-  // route query flow: pick From/To nodes, list candidate routes, then
-  // focus the chosen one (center it, highlight it, dim everything else)
+  // route query flow: pick From/To nodes, mark every road between them on
+  // the canvas, then focus the roads the user selects (all, one, or some)
   const [routeMode, setRouteMode] = useState(false);
   const [routeFromId, setRouteFromId] = useState<string | null>(null);
   const [routeToId, setRouteToId] = useState<string | null>(null);
@@ -1010,7 +1059,10 @@ export default function MapScreen() {
   // the text typed into the From/To search inputs
   const [routeQuery, setRouteQuery] = useState({ from: "", to: "" });
   const [routes, setRoutes] = useState<RouteResult[]>([]);
-  const [selectedRouteIndex, setSelectedRouteIndex] = useState<number | null>(null);
+  // the route indexes ticked in the sheet, and whether that selection is
+  // confirmed (confirmed = dim everything else, edges become zoom targets)
+  const [pickedRoutes, setPickedRoutes] = useState<number[]>([]);
+  const [routeConfirmed, setRouteConfirmed] = useState(false);
 
   const clearRouteState = () => {
     setRouteFromId(null);
@@ -1018,7 +1070,8 @@ export default function MapScreen() {
     setRoutePickerField(null);
     setRouteQuery({ from: "", to: "" });
     setRoutes([]);
-    setSelectedRouteIndex(null);
+    setPickedRoutes([]);
+    setRouteConfirmed(false);
   };
 
   const enterRouteMode = () => {
@@ -1091,28 +1144,41 @@ export default function MapScreen() {
   // search over the currently visible edges so every route edge can be
   // rendered and highlighted
   const searchRoutes = (fromId: string, toId: string) => {
-    const found = findRoutes(layerView.edges, fromId, toId);
+    const found = findRoutes(layerView.edges, fromId, toId, MAX_ROUTE_CANDIDATES);
     if (found.length === 0) {
       setRoutes([]);
-      setSelectedRouteIndex(null);
+      setPickedRoutes([]);
+      setRouteConfirmed(false);
       Alert.alert("No route", "No directed path connects these two nodes.");
       return;
     }
     setRoutes(found);
-    setSelectedRouteIndex(null);
+    // every road starts selected; the user narrows it to one or some
+    setPickedRoutes(found.map((_, i) => i));
+    setRouteConfirmed(false);
   };
 
-  // confirm a candidate: focus it — center its bounding box on screen,
-  // the renderer highlights its edges and dims everything else — and make
-  // its edges the zoom selection, so a following pinch reveals or
-  // collapses detail along the whole road at once
-  const confirmRoute = (index: number) => {
-    const route = routes[index];
-    if (!route) return;
-    setSelectedRouteIndex(index);
-    setZoomEdgeIds(route.edges.map((e) => e.id));
-    const xs = route.nodes.map((n) => n.x);
-    const ys = route.nodes.map((n) => n.y);
+  // tick or untick one road in the routes sheet
+  const toggleRoutePick = (index: number) => {
+    setPickedRoutes((p) =>
+      p.includes(index) ? p.filter((i) => i !== index) : [...p, index],
+    );
+  };
+
+  // confirm the ticked roads: center their bounding box on screen — the
+  // renderer highlights their edges and dims everything else — and make
+  // their edges the zoom selection, so a following pinch reveals or
+  // collapses detail along the whole selection at once
+  const confirmPickedRoutes = () => {
+    const chosen = pickedRoutes
+      .map((i) => routes[i])
+      .filter((r): r is RouteResult => !!r);
+    if (chosen.length === 0) return;
+    setRouteConfirmed(true);
+    setZoomEdgeIds([...new Set(chosen.flatMap((r) => r.edges.map((e) => e.id)))]);
+    const nodes = chosen.flatMap((r) => r.nodes);
+    const xs = nodes.map((n) => n.x);
+    const ys = nodes.map((n) => n.y);
     const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
     const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
     // userPan = (screenCenter - world * scale) - camOffset
@@ -1154,18 +1220,18 @@ export default function MapScreen() {
     if (from && to) searchRoutes(to, from);
   };
 
-  // the route shown on the canvas: the confirmed one, or the shortest
-  // candidate as a preview while the alternatives sheet is open
-  const activeRoute =
-    selectedRouteIndex !== null
-      ? (routes[selectedRouteIndex] ?? null)
-      : routeMode && routes.length > 0
-        ? routes[0]
-        : null;
-  const routeEdgeIds = new Set((activeRoute?.edges ?? []).map((e) => e.id));
-  const routeNodeIds = new Set((activeRoute?.nodes ?? []).map((n) => n.id));
-  // dim everything off the route only once a candidate is confirmed
-  const routeFocusOn = routeMode && selectedRouteIndex !== null;
+  // the roads shown on the canvas: the confirmed selection, or every
+  // candidate while the routes sheet is open so all options stay visible
+  const activeRoutes =
+    !routeMode || routes.length === 0
+      ? []
+      : routeConfirmed
+        ? pickedRoutes.map((i) => routes[i]).filter((r): r is RouteResult => !!r)
+        : routes;
+  const routeEdgeIds = new Set(activeRoutes.flatMap((r) => r.edges.map((e) => e.id)));
+  const routeNodeIds = new Set(activeRoutes.flatMap((r) => r.nodes.map((n) => n.id)));
+  // dim everything off the roads only once the selection is confirmed
+  const routeFocusOn = routeMode && routeConfirmed && activeRoutes.length > 0;
   // the zoom selection: pinch reveals/collapses detail on exactly these edges
   const zoomEdgeIdSet = new Set(zoomEdgeIds);
 
@@ -2569,18 +2635,20 @@ export default function MapScreen() {
             else setRouteToId(null);
             setRoutePickerField(field);
             setRoutes([]);
-            setSelectedRouteIndex(null);
+            setPickedRoutes([]);
+            setRouteConfirmed(false);
           }}
           onPickSuggestion={pickRouteNode}
           onSwap={swapRouteEnds}
-          onShowRoutes={() => setSelectedRouteIndex(null)}
+          onShowRoutes={() => setRouteConfirmed(false)}
           onClose={exitRouteMode}
         />
       )}
 
-      {/* candidate routes: pick one to focus it on the canvas */}
+      {/* candidate routes: every road between the two nodes is marked on
+          the canvas; tick one, some, or all, then focus the selection */}
       <Modal
-        visible={routeMode && routes.length > 0 && selectedRouteIndex === null}
+        visible={routeMode && routes.length > 0 && !routeConfirmed}
         transparent
         animationType="fade"
         onRequestClose={() => setRoutes([])}
@@ -2593,22 +2661,58 @@ export default function MapScreen() {
           <View style={styles.formSheet}>
             <View style={styles.sheetHandle} />
             <Text style={styles.formTitle}>Routes</Text>
-            {routes.map((r, i) => (
+            <View style={styles.routeSheetToolbar}>
+              <SheetButton
+                label={
+                  pickedRoutes.length === routes.length ? "Clear all" : "Select all"
+                }
+                onPress={() =>
+                  setPickedRoutes((p) =>
+                    p.length === routes.length ? [] : routes.map((_, i) => i),
+                  )
+                }
+              />
+            </View>
+            <ScrollView style={styles.routeList} contentContainerStyle={{ gap: 8 }}>
+              {routes.map((r, i) => {
+                const picked = pickedRoutes.includes(i);
+                return (
+                  <Pressable
+                    key={r.nodes.map((n) => n.id).join(">")}
+                    style={[styles.routeCard, picked && styles.routeCardPicked]}
+                    onPress={() => toggleRoutePick(i)}
+                  >
+                    <Text style={styles.routeCardTitle}>
+                      {picked ? "☑" : "☐"} Route {i + 1} · {r.edges.length}{" "}
+                      {r.edges.length === 1 ? "step" : "steps"} · ~
+                      {Math.round(r.length)} px
+                    </Text>
+                    <Text style={styles.routeCardPath} numberOfLines={2}>
+                      {r.nodes.map((n) => n.title).join(" → ")}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <View style={styles.formButtons}>
               <Pressable
-                key={r.nodes.map((n) => n.id).join(">")}
-                style={styles.routeCard}
-                onPress={() => confirmRoute(i)}
+                style={({ pressed }) => [
+                  styles.formSave,
+                  pickedRoutes.length === 0 && styles.formSaveDisabled,
+                  pressed && { opacity: 0.6 },
+                ]}
+                disabled={pickedRoutes.length === 0}
+                onPress={confirmPickedRoutes}
               >
-                <Text style={styles.routeCardTitle}>
-                  Route {i + 1} · {r.edges.length}{" "}
-                  {r.edges.length === 1 ? "step" : "steps"} · ~
-                  {Math.round(r.length)} px
-                </Text>
-                <Text style={styles.routeCardPath} numberOfLines={2}>
-                  {r.nodes.map((n) => n.title).join(" → ")}
+                <Text style={styles.formSaveText}>
+                  Show{" "}
+                  {pickedRoutes.length === routes.length
+                    ? "all"
+                    : pickedRoutes.length}{" "}
+                  {pickedRoutes.length === 1 ? "road" : "roads"}
                 </Text>
               </Pressable>
-            ))}
+            </View>
           </View>
         </View>
       </Modal>
@@ -3044,6 +3148,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 4,
+  },
+  routeCardPicked: {
+    borderColor: ACCENT,
+    backgroundColor: `${ACCENT}14`,
+  },
+  routeSheetToolbar: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+  },
+  routeList: {
+    flexGrow: 0,
+    maxHeight: 320,
   },
   routeCardTitle: {
     fontSize: 14,

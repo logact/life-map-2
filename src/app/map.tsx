@@ -559,12 +559,23 @@ function ActionSheet(props: { title: string; subtitle?: string; actions: SheetAc
 // canvas — start title on the left, end title on the right, and the
 // collapsed in-between rendered as a dashed connector with the step count.
 // Transparent: it sits directly on the canvas, replacing the query button.
-// Long-press opens the mutation UI for the selection: the edge action
-// sheet for a single edge, the route query panel for a road
-function SelectionBar(props: { from: string; to: string; steps: number; onLongPress: () => void }) {
+// Tap re-opens the route query prefilled with this selection (the last
+// road fills the search by default); the lock icon pins the selection
+// against automatic clearing; long-press opens the mutation UI: the edge
+// action sheet for a single edge, the route query panel for a road
+function SelectionBar(props: {
+  from: string;
+  to: string;
+  steps: number;
+  locked: boolean;
+  onPress: () => void;
+  onToggleLock: () => void;
+  onLongPress: () => void;
+}) {
   return (
     <Pressable
       style={styles.selectionBar}
+      onPress={props.onPress}
       onLongPress={props.onLongPress}
       delayLongPress={LONG_PRESS_MS}
     >
@@ -581,6 +592,10 @@ function SelectionBar(props: { from: string; to: string; steps: number; onLongPr
       <Text style={[styles.selectionBarEnd, styles.selectionBarEndRight]} numberOfLines={1}>
         {props.to}
       </Text>
+      {/* nested pressable: the lock toggles without triggering the bar's tap */}
+      <Pressable onPress={props.onToggleLock} hitSlop={10} style={styles.selectionBarLock}>
+        <Text style={styles.selectionBarLockText}>{props.locked ? "🔒" : "🔓"}</Text>
+      </Pressable>
     </Pressable>
   );
 }
@@ -1007,6 +1022,13 @@ export default function MapScreen() {
   const [zoomEdgeIds, setZoomEdgeIds] = useState<string[]>([]);
   const zoomEdgeIdsRef = useRef(zoomEdgeIds);
   zoomEdgeIdsRef.current = zoomEdgeIds;
+  // the lock pins the selection: while locked, stray canvas and node taps
+  // no longer clear it. Explicit actions (tapping another edge, confirming
+  // a route, pasting) still replace it, and pruning still applies when
+  // selected edges vanish from the view
+  const [selectionLocked, setSelectionLocked] = useState(false);
+  const selectionLockedRef = useRef(selectionLocked);
+  selectionLockedRef.current = selectionLocked;
   // undo stack for selection-less pinch-in: each spread pushes the revealed
   // child edge ids, so a squeeze with no lens collapses the last spread
   // even after the selection was accidentally cleared
@@ -1246,7 +1268,8 @@ export default function MapScreen() {
   // their edges the zoom selection (so a following pinch reveals or
   // collapses detail along the whole selection at once), and close the
   // query panel — the selection bar takes over the top row. The route
-  // state is kept so the bar's edit icon re-opens the panel prefilled
+  // state is kept so the road sheet's "Edit route query" re-opens the
+  // panel prefilled
   const confirmPickedRoutes = () => {
     const chosen = pickedRoutes
       .map((i) => routes[i])
@@ -1490,9 +1513,9 @@ export default function MapScreen() {
       // a touch that never moved is a tap on empty canvas: it starts the
       // double-tap window. A second tap within DOUBLE_TAP_MS opens the
       // create picker there; otherwise the single tap dismisses overlays
-      // and clears the zoom selection (the lens), so the next pinch moves
-      // only the camera. A bend drag commits its bend point here if the
-      // finger moved.
+      // and clears the zoom selection (the lens) unless it is locked, so
+      // the next pinch moves only the camera. A bend drag commits its bend
+      // point here if the finger moved.
       onPanResponderRelease: (e) => {
         pinchStart.current = null;
         pinching.current = false;
@@ -1524,7 +1547,8 @@ export default function MapScreen() {
                 canvasTapRef.current = null;
                 setInfoTarget(null);
                 setDragArmedId(null);
-                setZoomEdgeIds([]);
+                // a locked selection survives stray canvas taps
+                if (!selectionLockedRef.current) setZoomEdgeIds([]);
               }, DOUBLE_TAP_MS),
             };
           }
@@ -1590,15 +1614,18 @@ export default function MapScreen() {
   );
 
   // the selection bar's "From → To": the boundary nodes of the selected
-  // visible edges — a road's two ends, or a single edge's own endpoints
+  // visible edges — a road's two ends, or a single edge's own endpoints.
+  // The ids ride along so a bar tap can prefill the route query
   const selectedVmEdges = vm.edges.filter((e) => zoomEdgeIdSet.has(e.id));
-  let selectionEnds: { from: string; to: string } | null = null;
+  let selectionEnds: { fromId: string; toId: string; from: string; to: string } | null = null;
   if (selectedVmEdges.length > 0) {
     const selFromIds = new Set(selectedVmEdges.map((e) => e.fromId));
     const selToIds = new Set(selectedVmEdges.map((e) => e.toId));
     const start = selectedVmEdges.find((e) => !selToIds.has(e.fromId)) ?? selectedVmEdges[0];
     const end = selectedVmEdges.find((e) => !selFromIds.has(e.toId)) ?? selectedVmEdges[0];
     selectionEnds = {
+      fromId: start.fromId,
+      toId: end.toId,
       from: posById.get(start.fromId)?.title ?? "",
       to: posById.get(end.toId)?.title ?? "",
     };
@@ -1614,6 +1641,25 @@ export default function MapScreen() {
       setSheetEdgeId(selectedVmEdges[0].id);
     } else if (selectedVmEdges.length > 1) {
       setRoadSheetOpen(true);
+    }
+  };
+
+  // tap on the selection bar: open the route query prefilled with the
+  // selection's boundary nodes — the current road fills the search by
+  // default — and search right away so the candidate roads preview
+  const searchSelection = () => {
+    if (!selectionEnds) return;
+    console.log("[FLOW] selection bar -> route query prefilled (UI state only)");
+    setInfoTarget(null);
+    setSheetEdgeId(null);
+    setRoadSheetOpen(false);
+    setRouteFromId(selectionEnds.fromId);
+    setRouteToId(selectionEnds.toId);
+    setRouteQuery({ from: selectionEnds.from, to: selectionEnds.to });
+    setRoutePickerField(null);
+    setRouteMode(true);
+    if (selectionEnds.fromId !== selectionEnds.toId) {
+      searchRoutes(selectionEnds.fromId, selectionEnds.toId);
     }
   };
 
@@ -1647,7 +1693,8 @@ export default function MapScreen() {
     setSheetEdgeId(null);
     setInspectorNodeId(null);
     setInfoTarget({ kind: "node", id });
-    setZoomEdgeIds([]); // nodes aren't zoomable; the edge lens clears
+    // nodes aren't zoomable; the edge lens clears unless it is locked
+    if (!selectionLocked) setZoomEdgeIds([]);
   };
 
   const onNodeDoubleTap = (id: string) => {
@@ -2271,6 +2318,9 @@ export default function MapScreen() {
             from={selectionEnds.from}
             to={selectionEnds.to}
             steps={selectedVmEdges.length}
+            locked={selectionLocked}
+            onPress={searchSelection}
+            onToggleLock={() => setSelectionLocked((v) => !v)}
             onLongPress={editSelection}
           />
         ) : (
@@ -3329,6 +3379,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "500",
     color: INK.secondary,
+  },
+  selectionBarLock: {
+    padding: 2,
+  },
+  selectionBarLockText: {
+    fontSize: 15,
   },
   noteResults: {
     maxHeight: 240,

@@ -965,6 +965,10 @@ export default function MapScreen() {
   // ---------- interaction state ----------
   // single tap -> read-only info card; double tap -> action sheet
   const [infoTarget, setInfoTarget] = useState<InfoTarget | null>(null);
+  // node spotlight: a tapped or dragged node's directly-connected edges
+  // (and their endpoints) light up while everything else dims. Purely
+  // visual — the zoom selection is untouched
+  const [nodeFocusId, setNodeFocusId] = useState<string | null>(null);
   const [sheetNodeId, setSheetNodeId] = useState<string | null>(null);
   const [sheetEdgeId, setSheetEdgeId] = useState<string | null>(null);
   // connect mode: next node tap becomes the target of a new edge
@@ -1000,6 +1004,7 @@ export default function MapScreen() {
 
   const closeOverlays = () => {
     setInfoTarget(null);
+    setNodeFocusId(null);
     setSheetNodeId(null);
     setSheetEdgeId(null);
     setInspectorNodeId(null);
@@ -1546,6 +1551,7 @@ export default function MapScreen() {
               timer: setTimeout(() => {
                 canvasTapRef.current = null;
                 setInfoTarget(null);
+                setNodeFocusId(null);
                 setDragArmedId(null);
                 // a locked selection survives stray canvas taps
                 if (!selectionLockedRef.current) setZoomEdgeIds([]);
@@ -1571,6 +1577,8 @@ export default function MapScreen() {
 
   const onNodeDragStart = (id: string, x: number, y: number) => {
     closeOverlays();
+    // spotlight the dragged node's directly-connected edges (visual only)
+    setNodeFocusId(id);
     setDrag({ id, x, y });
   };
   const onNodeDragMove = (id: string, x: number, y: number) => setDrag({ id, x, y });
@@ -1592,6 +1600,15 @@ export default function MapScreen() {
   const focusNodeIds = new Set(
     vm.edges.filter((e) => zoomEdgeIdSet.has(e.id)).flatMap((e) => [e.fromId, e.toId]),
   );
+  // node spotlight: the focused node's directly-connected visible edges
+  // and their endpoints stay bright; everything else dims. A node with no
+  // visible edges (isolated, or collapsed away) turns no spotlight on
+  const nodeFocusEdges = nodeFocusId
+    ? vm.edges.filter((e) => e.fromId === nodeFocusId || e.toId === nodeFocusId)
+    : [];
+  const nodeFocusEdgeIds = new Set(nodeFocusEdges.map((e) => e.id));
+  const nodeFocusNodeIds = new Set(nodeFocusEdges.flatMap((e) => [e.fromId, e.toId]));
+  const nodeFocusOn = nodeFocusEdges.length > 0;
   // camera: the fit-zoom (recomputed from the visible nodes so a crowded
   // view shrinks into view) with the user's pinch zoom composed on top
   const fit = computeFitView(vm.nodes, { width, height });
@@ -1693,6 +1710,8 @@ export default function MapScreen() {
     setSheetEdgeId(null);
     setInspectorNodeId(null);
     setInfoTarget({ kind: "node", id });
+    // spotlight the node's directly-connected edges (visual only)
+    setNodeFocusId(id);
     // nodes aren't zoomable; the edge lens clears unless it is locked
     if (!selectionLocked) setZoomEdgeIds([]);
   };
@@ -1771,6 +1790,7 @@ export default function MapScreen() {
     setSheetNodeId(null);
     setSheetEdgeId(null);
     setInfoTarget({ kind: "edge", id });
+    setNodeFocusId(null); // the edge's own selection takes over the canvas
     setZoomEdgeIds([id]); // the tapped edge becomes the zoom selection
   };
 
@@ -2140,11 +2160,22 @@ export default function MapScreen() {
             zoomEdgeIdSet.has(e.id) ||
             (infoTarget?.kind === "edge" && infoTarget.id === e.id);
           const onRoute = routeEdgeIds.has(e.id);
-          const dimmed = focusOn && !zoomEdgeIdSet.has(e.id);
-          // selection and route preview override everything: the whole edge
-          // draws in the single override color, no per-segment colors
-          const overridden = onRoute || selected;
-          const color = selected ? INK.primary : onRoute ? ACCENT : "#aeaeb4";
+          // the node spotlight wins over the selection lens visually
+          // (the selection itself is untouched); spotlight edges draw in
+          // the lighter INK.secondary so they read differently from a
+          // selection's solid INK.primary
+          const related = nodeFocusEdgeIds.has(e.id);
+          const dimmed = nodeFocusOn ? !related : focusOn && !zoomEdgeIdSet.has(e.id);
+          // selection, spotlight and route preview override everything: the
+          // whole edge draws in the single override color, no per-segment colors
+          const overridden = onRoute || selected || related;
+          const color = selected
+            ? INK.primary
+            : onRoute
+              ? ACCENT
+              : related
+                ? INK.secondary
+                : "#aeaeb4";
           const edgeWidth = overridden ? 4 : Math.max(1.5, 3 - e.layer);
           // a bend drag in progress overrides the stored bend point
           const bend = bendDrag && bendDrag.edgeId === e.id ? { x: bendDrag.x, y: bendDrag.y } : e.bend;
@@ -2271,7 +2302,9 @@ export default function MapScreen() {
           n.status === "todo" ? "dashed" : n.status === "in-progress" ? "dotted" : "solid";
         // live position: the drag override while dragging, else the domain
         const pos = posById.get(n.id) ?? n;
-        const nodeDimmed = focusOn && !focusNodeIds.has(n.id);
+        const nodeDimmed = nodeFocusOn
+          ? !nodeFocusNodeIds.has(n.id)
+          : focusOn && !focusNodeIds.has(n.id);
         const screenX = pos.x * cam.scale + cameraX;
         const screenY = pos.y * cam.scale + cameraY;
         return (

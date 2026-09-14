@@ -36,7 +36,8 @@ import { edgeStatus, goalStatus, nodeStatus, Status, startTask, pauseTask, compl
 import { PALETTE } from "@/app/palette";
 import { ACCENT, BACKDROP, CANVAS_BG, INK, SHADOW } from "@/app/theme";
 import { computeFitView, FitView } from "@/app/fitZoom";
-import { loadLifeMap, scheduleSave } from "@/data/lifeMapStore";
+import { ClipboardPayload, pasteIntoMap, snapshotEdge, snapshotNode, snapshotRoad } from "@/domain/clipboard";
+import { loadLifeMap, restoreLifeMap, scheduleSave, snapshotLifeMap, type LifeMapSnapshot } from "@/data/lifeMapStore";
 
 // ---------- View models: plain data describing what to draw ----------
 // The UI renders ONLY from these. It never renders domain objects directly.
@@ -882,19 +883,68 @@ export default function MapScreen() {
   const layerView = layerViewRef.current!;
   const [mapLoaded, setMapLoaded] = useState(false);
 
+  // Undo/redo: memento stacks of serialized map snapshots. Every domain
+  // change goes through run(), which snapshots the map BEFORE mutating, so
+  // undo restores the pre-edit state. Continuous gestures (node drag, bend
+  // drag, text edits) commit through run() once per gesture, so each undo
+  // step is one meaningful edit. View state (zoom, selection, camera) is
+  // not part of the history.
+  const HISTORY_LIMIT = 100;
+  const undoStackRef = useRef<LifeMapSnapshot[]>([]);
+  const redoStackRef = useRef<LifeMapSnapshot[]>([]);
+  // stack sizes mirrored into state so the buttons can render enabled/disabled
+  // without reading refs during render
+  const [historySize, setHistorySize] = useState({ undo: 0, redo: 0 });
+
   // Every domain change goes through run(): mutate, re-sync the layer
   // view, persist, then bump state so React re-renders from fresh view models.
   const [, setVersion] = useState(0);
   const run = (mutate: (m: LifeMap) => void) => {
     console.log("[FLOW] event -> mutating domain now");
+    undoStackRef.current.push(snapshotLifeMap(map));
+    if (undoStackRef.current.length > HISTORY_LIMIT) {
+      undoStackRef.current.shift();
+    }
+    redoStackRef.current = [];
     mutate(map);
     layerView.refresh();
     scheduleSave(map);
     // domain edits can hide or remove selected edges; prune the selection
     const visible = new Set(layerView.edges.map((e) => e.id));
     setZoomEdgeIds((prev) => prev.filter((id) => visible.has(id)));
+    setHistorySize({ undo: undoStackRef.current.length, redo: 0 });
     console.log("[FLOW] calling setVersion -> tells React to re-render");
     setVersion((v) => v + 1);
+  };
+
+  // swap the live map for a restored snapshot, the same way the initial
+  // load does: new map, new layer view, persist, re-render
+  const applySnapshot = (snapshot: LifeMapSnapshot) => {
+    mapRef.current = restoreLifeMap(snapshot);
+    layerViewRef.current = new LayerView(mapRef.current);
+    scheduleSave(mapRef.current);
+    // the restored layer view starts folded; drop zoom state that points
+    // at now-hidden edges and close overlays holding stale domain objects
+    zoomHistoryRef.current = [];
+    const visible = new Set(layerViewRef.current.edges.map((e) => e.id));
+    setZoomEdgeIds((prev) => prev.filter((id) => visible.has(id)));
+    setHistorySize({ undo: undoStackRef.current.length, redo: redoStackRef.current.length });
+    closeOverlays();
+    setVersion((v) => v + 1);
+  };
+
+  const undo = () => {
+    const snapshot = undoStackRef.current.pop();
+    if (!snapshot) return;
+    redoStackRef.current.push(snapshotLifeMap(mapRef.current!));
+    applySnapshot(snapshot);
+  };
+
+  const redo = () => {
+    const snapshot = redoStackRef.current.pop();
+    if (!snapshot) return;
+    undoStackRef.current.push(snapshotLifeMap(mapRef.current!));
+    applySnapshot(snapshot);
   };
 
   // ---------- interaction state ----------
@@ -926,6 +976,12 @@ export default function MapScreen() {
   const [bendDrag, setBendDrag] = useState<{ edgeId: string; x: number; y: number } | null>(null);
   const bendDragRef = useRef(bendDrag);
   bendDragRef.current = bendDrag;
+  // clipboard: the last copied node/edge/road as a plain-data snapshot;
+  // paste recreates it with fresh ids at the tapped canvas point
+  const [clipboard, setClipboard] = useState<ClipboardPayload | null>(null);
+  // road sheet: long-press on the selection bar with a multi-edge
+  // selection offers copying the road or editing its route query
+  const [roadSheetOpen, setRoadSheetOpen] = useState(false);
 
   const closeOverlays = () => {
     setInfoTarget(null);
@@ -1014,19 +1070,6 @@ export default function MapScreen() {
       x: mx - wx * newCam.scale - newCam.x,
       y: my - wy * newCam.scale - newCam.y,
     });
-    setVersion((v) => v + 1);
-  };
-
-  // fit/reset: fold every zoomed edge back to the top layer and restore
-  // the fit-to-screen camera
-  const resetView = () => {
-    layerView.reset();
-    zoomHistoryRef.current = [];
-    userScaleRef.current = 1;
-    setUserScale(1);
-    setViewport({ x: 0, y: 0 });
-    setZoomEdgeIds([]);
-    closeOverlays();
     setVersion((v) => v + 1);
   };
 
@@ -1346,6 +1389,20 @@ export default function MapScreen() {
     });
   };
 
+  // paste the clipboard snapshot centered on a tapped canvas point, then
+  // highlight the pasted root edges (a pasted lone node clears the lens)
+  const pasteClipboardAt = (x: number, y: number) => {
+    if (!clipboard) return;
+    const payload = clipboard;
+    setFreeSpacePicker(null);
+    console.log("[FLOW] free space -> paste (goes through run())");
+    let rootEdgeIds: string[] = [];
+    run((m) => {
+      rootEdgeIds = pasteIntoMap(m, payload, { x, y }).rootEdgeIds;
+    });
+    setZoomEdgeIds(rootEdgeIds);
+  };
+
   // The container claims empty-space touches immediately (node Pressables
   // still win on their own area) so it can detect taps. Any movement past
   // the threshold becomes a pan — unless a bend drag is armed, in which
@@ -1548,14 +1605,15 @@ export default function MapScreen() {
   }
 
   // long-press on the selection bar opens the mutation UI: a single edge
-  // gets its action sheet; a road re-opens the route query panel (the
-  // confirmed query is kept, so the panel comes back prefilled)
+  // gets its action sheet; a road gets a sheet offering to copy it or
+  // re-open the route query panel (the confirmed query is kept, so the
+  // panel comes back prefilled)
   const editSelection = () => {
     if (selectedVmEdges.length === 1) {
       console.log("[FLOW] selection bar -> edge action sheet (UI state only)");
       setSheetEdgeId(selectedVmEdges[0].id);
-    } else {
-      setRouteMode(true);
+    } else if (selectedVmEdges.length > 1) {
+      setRoadSheetOpen(true);
     }
   };
 
@@ -2221,12 +2279,24 @@ export default function MapScreen() {
           </Pressable>
         ))}
 
-      {/* reset: fold all zoomed edges back to the top layer and restore
-          the fit-to-screen camera */}
+      {/* undo/redo: restore domain snapshots taken before each edit */}
       {!routeMode && !noteSearchMode && (
-        <Pressable style={styles.fitButton} onPress={resetView}>
-          <Text style={styles.queryButtonText}>⤾</Text>
-        </Pressable>
+        <>
+          <Pressable
+            style={[styles.undoButton, historySize.undo === 0 && styles.historyButtonDisabled]}
+            onPress={undo}
+            disabled={historySize.undo === 0}
+          >
+            <Text style={styles.queryButtonText}>{"↩\uFE0E"}</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.redoButton, historySize.redo === 0 && styles.historyButtonDisabled]}
+            onPress={redo}
+            disabled={historySize.redo === 0}
+          >
+            <Text style={styles.queryButtonText}>{"↪\uFE0E"}</Text>
+          </Pressable>
+        </>
       )}
 
       {/* mode banners: connect mode and summarize mode retarget taps;
@@ -2338,6 +2408,15 @@ export default function MapScreen() {
             icon: "←",
             onPress: () => startConnectReverse(node.id),
           });
+          // copy a trimmed snapshot: payload only, never the node's edges
+          actions.push({
+            label: "Copy",
+            icon: "⧉",
+            onPress: () => {
+              setClipboard(snapshotNode(node));
+              setSheetNodeId(null);
+            },
+          });
           // every node kind can carry notes
           actions.push({
             label: "Notes",
@@ -2385,28 +2464,53 @@ export default function MapScreen() {
 
       {/* free-space kind picker: first step of a double tap on empty
           canvas — pick the kind of the new node, then the create form
-          opens at the tapped position */}
-      {freeSpacePicker &&
-        (() => {
-          const { x, y } = freeSpacePicker;
-          const pick = (mode: "goal" | "task" | "record") => {
-            setFreeSpacePicker(null);
-            setDraft({ title: "", detail: "" });
-            setCreateTarget({ mode, x, y });
-          };
-          return (
-            <ActionSheet
-              title="Create"
-              subtitle="Free space"
-              actions={[
-                { label: "Goal", icon: "◎", onPress: () => pick("goal") },
-                { label: "Task", icon: "☑", onPress: () => pick("task") },
-                { label: "Record", icon: "✎", onPress: () => pick("record") },
-              ]}
-              onClose={() => setFreeSpacePicker(null)}
-            />
-          );
-        })()}
+          opens at the tapped position. With a non-empty clipboard a Paste
+          tile joins, recreating the snapshot at the tapped point */}
+      {freeSpacePicker && (
+        <ActionSheet
+          title="Create"
+          subtitle="Free space"
+          actions={[
+            {
+              label: "Goal",
+              icon: "◎",
+              onPress: () => {
+                setFreeSpacePicker(null);
+                setDraft({ title: "", detail: "" });
+                setCreateTarget({ mode: "goal", x: freeSpacePicker.x, y: freeSpacePicker.y });
+              },
+            },
+            {
+              label: "Task",
+              icon: "☑",
+              onPress: () => {
+                setFreeSpacePicker(null);
+                setDraft({ title: "", detail: "" });
+                setCreateTarget({ mode: "task", x: freeSpacePicker.x, y: freeSpacePicker.y });
+              },
+            },
+            {
+              label: "Record",
+              icon: "✎",
+              onPress: () => {
+                setFreeSpacePicker(null);
+                setDraft({ title: "", detail: "" });
+                setCreateTarget({ mode: "record", x: freeSpacePicker.x, y: freeSpacePicker.y });
+              },
+            },
+            ...(clipboard
+              ? [
+                  {
+                    label: "Paste",
+                    icon: "📋",
+                    onPress: () => pasteClipboardAt(freeSpacePicker.x, freeSpacePicker.y),
+                  },
+                ]
+              : []),
+          ]}
+          onClose={() => setFreeSpacePicker(null)}
+        />
+      )}
 
       {/* kind picker: second step of "Add to" / "Be added to" — pick the
           kind of the new node, then the create form opens */}
@@ -2506,7 +2610,37 @@ export default function MapScreen() {
         />
       )}
 
-      {/* double-tap edge sheet: expand / summarize / straighten / remove */}
+      {/* selection-bar long-press on a road: copy the whole road (every
+          selected edge deep-copied with its subtree and endpoints) or
+          edit the route query that produced it */}
+      {roadSheetOpen && (
+        <ActionSheet
+          title={selectionEnds ? `${selectionEnds.from} → ${selectionEnds.to}` : "Road"}
+          subtitle={`${selectedVmEdges.length} steps`}
+          actions={[
+            {
+              label: "Copy road",
+              icon: "⧉",
+              onPress: () => {
+                const edges = layerView.edges.filter((e) => zoomEdgeIdSet.has(e.id));
+                if (edges.length > 0) setClipboard(snapshotRoad(edges));
+                setRoadSheetOpen(false);
+              },
+            },
+            {
+              label: "Edit route query",
+              icon: "🔍",
+              onPress: () => {
+                setRoadSheetOpen(false);
+                setRouteMode(true);
+              },
+            },
+          ]}
+          onClose={() => setRoadSheetOpen(false)}
+        />
+      )}
+
+      {/* double-tap edge sheet: expand / summarize / copy / straighten / remove */}
       {sheetEdgeId &&
         (() => {
           const edge = layerView.edges.find((e) => e.id === sheetEdgeId);
@@ -2514,6 +2648,15 @@ export default function MapScreen() {
           const actions: SheetAction[] = [
             { label: "Expand", icon: "⤢", onPress: () => expandEdge(edge.id) },
             { label: "Summarize with…", icon: "🧩", onPress: () => startSummarize(edge.id) },
+            {
+              label: "Copy",
+              icon: "⧉",
+              onPress: () => {
+                // deep copy: endpoints and the whole hidden subtree come along
+                setClipboard(snapshotEdge(edge));
+                setSheetEdgeId(null);
+              },
+            },
           ];
           if (edge.bend) {
             actions.push({
@@ -3115,7 +3258,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     ...SHADOW.floating,
   },
-  fitButton: {
+  undoButton: {
     position: "absolute",
     right: 20,
     top: 108, // below the query button
@@ -3128,6 +3271,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     ...SHADOW.floating,
+  },
+  redoButton: {
+    position: "absolute",
+    right: 20,
+    top: 160, // below the undo button
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: INK.subtle,
+    alignItems: "center",
+    justifyContent: "center",
+    ...SHADOW.floating,
+  },
+  historyButtonDisabled: {
+    opacity: 0.4,
   },
   queryButtonText: {
     fontSize: 18,

@@ -84,7 +84,7 @@ function serializeKindData(node: Node): string {
   return "{}";
 }
 
-interface NodeRow {
+export interface NodeRow {
   id: string;
   kind: string;
   title: string;
@@ -135,55 +135,11 @@ function deserializeNode(row: NodeRow): Node {
   return node;
 }
 
-// ---------- save: full rewrite inside one transaction ----------
+// ---------- snapshots: map <-> plain rows ----------
+// A snapshot is the same row shape the database uses, held in memory as a
+// JSON-safe deep copy. Undo/redo restore a snapshot; save writes one out.
 
-export async function saveLifeMap(map: LifeMap): Promise<void> {
-  const db = await getDb();
-  await db.withExclusiveTransactionAsync(async (txn) => {
-    await txn.execAsync("DELETE FROM notes; DELETE FROM edges; DELETE FROM nodes;");
-
-    for (const node of map.allNodes()) {
-      await txn.runAsync(
-        "INSERT INTO nodes (id, kind, title, x, y, color, data) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [node.id, node.kind, node.title, node.x, node.y, node.color ?? null, serializeKindData(node)],
-      );
-      for (let i = 0; i < node.notes.length; i++) {
-        const note = node.notes[i];
-        await txn.runAsync(
-          "INSERT INTO notes (id, node_id, text, created_at, updated_at, position) VALUES (?, ?, ?, ?, ?, ?)",
-          [note.id, node.id, note.text, note.createdAt.getTime(), note.updatedAt.getTime(), i],
-        );
-      }
-    }
-
-    const insertEdge = async (edge: Edge, position: number) => {
-      await txn.runAsync(
-        "INSERT INTO edges (id, node1_id, node2_id, parent_edge_id, position, layer, color, bend_x, bend_y) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-          edge.id,
-          edge.node1.id,
-          edge.node2.id,
-          edge.parentEdge?.id ?? null,
-          position,
-          edge.layer,
-          edge.color ?? null,
-          edge.bend?.x ?? null,
-          edge.bend?.y ?? null,
-        ],
-      );
-      for (let i = 0; i < edge.childrenEdges.length; i++) {
-        await insertEdge(edge.childrenEdges[i], i);
-      }
-    };
-    for (let i = 0; i < map.rootEdges.length; i++) {
-      await insertEdge(map.rootEdges[i], i);
-    }
-  });
-}
-
-// ---------- load ----------
-
-interface NoteRow {
+export interface NoteRow {
   id: string;
   node_id: string;
   text: string;
@@ -192,7 +148,7 @@ interface NoteRow {
   position: number;
 }
 
-interface EdgeRow {
+export interface EdgeRow {
   id: string;
   node1_id: string;
   node2_id: string;
@@ -204,21 +160,67 @@ interface EdgeRow {
   bend_y: number | null;
 }
 
-// returns null when the database has never been written to, so the caller
-// can seed initial content
-export async function loadLifeMap(): Promise<LifeMap | null> {
-  const db = await getDb();
-  const nodeRows = await db.getAllAsync<NodeRow>("SELECT * FROM nodes");
-  if (nodeRows.length === 0) {
-    return null;
+export interface LifeMapSnapshot {
+  nodes: NodeRow[];
+  notes: NoteRow[];
+  edges: EdgeRow[];
+}
+
+export function snapshotLifeMap(map: LifeMap): LifeMapSnapshot {
+  const nodes: NodeRow[] = [];
+  const notes: NoteRow[] = [];
+  for (const node of map.allNodes()) {
+    nodes.push({
+      id: node.id,
+      kind: node.kind,
+      title: node.title,
+      x: node.x,
+      y: node.y,
+      color: node.color ?? null,
+      data: serializeKindData(node),
+    });
+    for (let i = 0; i < node.notes.length; i++) {
+      const note = node.notes[i];
+      notes.push({
+        id: note.id,
+        node_id: node.id,
+        text: note.text,
+        created_at: note.createdAt.getTime(),
+        updated_at: note.updatedAt.getTime(),
+        position: i,
+      });
+    }
   }
 
+  const edges: EdgeRow[] = [];
+  const collectEdge = (edge: Edge, position: number) => {
+    edges.push({
+      id: edge.id,
+      node1_id: edge.node1.id,
+      node2_id: edge.node2.id,
+      parent_edge_id: edge.parentEdge?.id ?? null,
+      position,
+      layer: edge.layer,
+      color: edge.color ?? null,
+      bend_x: edge.bend?.x ?? null,
+      bend_y: edge.bend?.y ?? null,
+    });
+    for (let i = 0; i < edge.childrenEdges.length; i++) {
+      collectEdge(edge.childrenEdges[i], i);
+    }
+  };
+  for (let i = 0; i < map.rootEdges.length; i++) {
+    collectEdge(map.rootEdges[i], i);
+  }
+  return { nodes, notes, edges };
+}
+
+function buildMapFromRows(nodeRows: NodeRow[], noteRows: NoteRow[], edgeRows: EdgeRow[]): LifeMap {
   const nodes = new Map<string, Node>();
   for (const row of nodeRows) {
     nodes.set(row.id, deserializeNode(row));
   }
 
-  const noteRows = await db.getAllAsync<NoteRow>("SELECT * FROM notes ORDER BY position ASC");
   for (const row of noteRows) {
     nodes.get(row.node_id)?.notes.push({
       id: row.id,
@@ -230,13 +232,11 @@ export async function loadLifeMap(): Promise<LifeMap | null> {
 
   // parents sit one layer below their children, so ordering by layer
   // guarantees every parent edge exists before its children are created
-  const edgeRows = await db.getAllAsync<EdgeRow>(
-    "SELECT * FROM edges ORDER BY layer ASC, position ASC",
-  );
+  const orderedEdges = [...edgeRows].sort((a, b) => a.layer - b.layer || a.position - b.position);
   const map = new LifeMap();
   const edgeById = new Map<string, Edge>();
   const connectedNodeIds = new Set<string>();
-  for (const row of edgeRows) {
+  for (const row of orderedEdges) {
     const node1 = nodes.get(row.node1_id);
     const node2 = nodes.get(row.node2_id);
     if (!node1 || !node2) continue;
@@ -265,6 +265,67 @@ export async function loadLifeMap(): Promise<LifeMap | null> {
     }
   }
   return map;
+}
+
+export function restoreLifeMap(snapshot: LifeMapSnapshot): LifeMap {
+  return buildMapFromRows(snapshot.nodes, snapshot.notes, snapshot.edges);
+}
+
+// ---------- save: full rewrite inside one transaction ----------
+
+export async function saveLifeMap(map: LifeMap): Promise<void> {
+  const db = await getDb();
+  const snapshot = snapshotLifeMap(map);
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    await txn.execAsync("DELETE FROM notes; DELETE FROM edges; DELETE FROM nodes;");
+
+    for (const row of snapshot.nodes) {
+      await txn.runAsync(
+        "INSERT INTO nodes (id, kind, title, x, y, color, data) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [row.id, row.kind, row.title, row.x, row.y, row.color, row.data],
+      );
+    }
+    for (const row of snapshot.notes) {
+      await txn.runAsync(
+        "INSERT INTO notes (id, node_id, text, created_at, updated_at, position) VALUES (?, ?, ?, ?, ?, ?)",
+        [row.id, row.node_id, row.text, row.created_at, row.updated_at, row.position],
+      );
+    }
+    for (const row of snapshot.edges) {
+      await txn.runAsync(
+        "INSERT INTO edges (id, node1_id, node2_id, parent_edge_id, position, layer, color, bend_x, bend_y) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+          row.id,
+          row.node1_id,
+          row.node2_id,
+          row.parent_edge_id,
+          row.position,
+          row.layer,
+          row.color,
+          row.bend_x,
+          row.bend_y,
+        ],
+      );
+    }
+  });
+}
+
+// ---------- load ----------
+
+// returns null when the database has never been written to, so the caller
+// can seed initial content
+export async function loadLifeMap(): Promise<LifeMap | null> {
+  const db = await getDb();
+  const nodeRows = await db.getAllAsync<NodeRow>("SELECT * FROM nodes");
+  if (nodeRows.length === 0) {
+    return null;
+  }
+
+  // notes are read per node in position order; edge ordering happens inside
+  // buildMapFromRows
+  const noteRows = await db.getAllAsync<NoteRow>("SELECT * FROM notes ORDER BY position ASC");
+  const edgeRows = await db.getAllAsync<EdgeRow>("SELECT * FROM edges");
+  return buildMapFromRows(nodeRows, noteRows, edgeRows);
 }
 
 // ---------- save queue ----------

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   Alert,
@@ -139,7 +139,9 @@ export default function MapScreen() {
   // edge's bend point (live position kept here, committed on release)
   const [bendDrag, setBendDrag] = useState<{ edgeId: string; x: number; y: number } | null>(null);
   const bendDragRef = useRef(bendDrag);
-  bendDragRef.current = bendDrag;
+  useLayoutEffect(() => {
+    bendDragRef.current = bendDrag;
+  });
   // clipboard: the last copied node/edge/road as a plain-data snapshot;
   // paste recreates it with fresh ids at the tapped canvas point
   const [clipboard, setClipboard] = useState<ClipboardPayload | null>(null);
@@ -221,11 +223,14 @@ export default function MapScreen() {
   const { visible, vm } = useMapViewModel(doc, zoomedIds);
 
   // camera: the fit-zoom (recomputed from the visible nodes so a crowded
-  // view shrinks into view) with the user's pinch zoom composed on top
+  // view shrinks into view) with the user's pinch zoom composed on top;
+  // the refs feed the once-created pan responder, synced on every commit
   const fit = computeFitView(vm.nodes, { width, height });
-  baseFitRef.current = fit;
   const cam = composedCam(fit, camera.userScale, { width, height });
-  fitRef.current = cam;
+  useLayoutEffect(() => {
+    baseFitRef.current = fit;
+    fitRef.current = cam;
+  });
   // nodes render as map pins: pinch zoom spreads the ground beneath them
   // but never grows them past their fit size, so zooming in adds room
   // instead of crowding the map
@@ -271,13 +276,6 @@ export default function MapScreen() {
     resetCanvasModes();
     noteSearch.exitNoteSearchMode();
     routeQuery.enterRouteMode();
-  };
-
-  const enterNoteSearchMode = () => {
-    resetCanvasModes();
-    routeQuery.exitRouteMode();
-    setZoomEdgeIds([]); // the query starts from a clean selection
-    noteSearch.enterNoteSearchMode();
   };
 
   // double tap on empty canvas opens a kind picker at that point; picking
@@ -388,6 +386,14 @@ export default function MapScreen() {
   const cameraY = cam.y + camera.viewport.y;
   const gridDots = computeGridDots(cameraX, cameraY, cam.scale, width, height);
 
+  // the edge open in the action sheet, with its endpoints resolved (an
+  // edit can remove the edge out from under an open sheet)
+  const sheetEdge = sheetEdgeId ? visible.find((e) => e.id === sheetEdgeId) : undefined;
+  const sheetEdgeFrom = sheetEdge ? doc.nodes[sheetEdge.fromId] : undefined;
+  const sheetEdgeTo = sheetEdge ? doc.nodes[sheetEdge.toId] : undefined;
+  // the node whose note is being edited (same out-from-under case)
+  const noteDraftNode = noteDraft ? doc.nodes[noteDraft.nodeId] : undefined;
+
   // ---------- selection bar handlers ----------
 
   // long-press on the selection bar opens the mutation UI: a single edge
@@ -421,6 +427,23 @@ export default function MapScreen() {
     if (!title) return;
     run(renameNode(node.id, title));
     setInspectorNodeId(null);
+  };
+
+  // the note editor replaced the notes sheet; every exit reopens it
+  const closeNoteEditor = () => {
+    if (!noteDraft) return;
+    setNoteDraft(null);
+    setNotesNodeId(noteDraft.nodeId);
+  };
+
+  const saveNote = () => {
+    if (!noteDraft) return;
+    if (noteDraft.noteId) {
+      run(updateNote(noteDraft.nodeId, noteDraft.noteId, noteDraft.text));
+    } else {
+      run(addNote(noteDraft.nodeId, noteDraft.text).recipe);
+    }
+    closeNoteEditor();
   };
 
   // ---------- single/double tap routing ----------
@@ -1072,42 +1095,34 @@ export default function MapScreen() {
       )}
 
       {/* double-tap edge sheet: expand / summarize / copy / straighten / remove */}
-      {sheetEdgeId &&
-        (() => {
-          const edge = visible.find((e) => e.id === sheetEdgeId);
-          if (!edge) return null;
-          const from = doc.nodes[edge.fromId];
-          const to = doc.nodes[edge.toId];
-          if (!from || !to) return null;
-          return (
-            <EdgeActionSheet
-              edge={edge}
-              fromTitle={from.title}
-              toTitle={to.title}
-              layer={edgeDepth(doc, edge.id)}
-              onExpand={() => expandEdge(edge.id)}
-              onSummarize={() => startSummarize(edge.id)}
-              onCopy={() => {
-                setClipboard(snapshotEdge(doc, edge.id));
-                setSheetEdgeId(null);
-              }}
-              onStraighten={() => {
-                run(setEdgeBend(edge.id, null));
-                setSheetEdgeId(null);
-              }}
-              onColor={() => {
-                setSheetEdgeId(null);
-                setColorPicker({
-                  kind: "edge",
-                  id: edge.id,
-                  title: `${from.title} → ${to.title}`,
-                });
-              }}
-              onRemove={() => confirmRemoveEdge(edge)}
-              onClose={() => setSheetEdgeId(null)}
-            />
-          );
-        })()}
+      {sheetEdge && sheetEdgeFrom && sheetEdgeTo && (
+        <EdgeActionSheet
+          edge={sheetEdge}
+          fromTitle={sheetEdgeFrom.title}
+          toTitle={sheetEdgeTo.title}
+          layer={edgeDepth(doc, sheetEdge.id)}
+          onExpand={() => expandEdge(sheetEdge.id)}
+          onSummarize={() => startSummarize(sheetEdge.id)}
+          onCopy={() => {
+            setClipboard(snapshotEdge(doc, sheetEdge.id));
+            setSheetEdgeId(null);
+          }}
+          onStraighten={() => {
+            run(setEdgeBend(sheetEdge.id, null));
+            setSheetEdgeId(null);
+          }}
+          onColor={() => {
+            setSheetEdgeId(null);
+            setColorPicker({
+              kind: "edge",
+              id: sheetEdge.id,
+              title: `${sheetEdgeFrom.title} → ${sheetEdgeTo.title}`,
+            });
+          }}
+          onRemove={() => confirmRemoveEdge(sheetEdge)}
+          onClose={() => setSheetEdgeId(null)}
+        />
+      )}
 
       {/* notes sheet: the node's notes newest-first, with add/edit/delete */}
       {notesNodeId &&
@@ -1136,34 +1151,16 @@ export default function MapScreen() {
         })()}
 
       {/* note editor: add a new note or edit an existing one */}
-      {noteDraft &&
-        (() => {
-          const node = doc.nodes[noteDraft.nodeId];
-          if (!node) return null;
-          // the editor replaced the notes sheet; every exit reopens it
-          const closeNoteEditor = () => {
-            setNoteDraft(null);
-            setNotesNodeId(noteDraft.nodeId);
-          };
-          const saveNote = () => {
-            if (noteDraft.noteId) {
-              run(updateNote(noteDraft.nodeId, noteDraft.noteId, noteDraft.text));
-            } else {
-              run(addNote(noteDraft.nodeId, noteDraft.text).recipe);
-            }
-            closeNoteEditor();
-          };
-          return (
-            <NoteEditorSheet
-              nodeTitle={node.title}
-              noteId={noteDraft.noteId}
-              text={noteDraft.text}
-              onChangeText={(t) => setNoteDraft((d) => (d ? { ...d, text: t } : d))}
-              onSave={saveNote}
-              onClose={closeNoteEditor}
-            />
-          );
-        })()}
+      {noteDraft && noteDraftNode && (
+        <NoteEditorSheet
+          nodeTitle={noteDraftNode.title}
+          noteId={noteDraft.noteId}
+          text={noteDraft.text}
+          onChangeText={(t) => setNoteDraft((d) => (d ? { ...d, text: t } : d))}
+          onSave={saveNote}
+          onClose={closeNoteEditor}
+        />
+      )}
 
       {/* note query panel: search every note on the map; tapping a result
           focuses the owning node */}

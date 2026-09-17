@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PanResponder, Pressable, Text, View } from "react-native";
 import Animated, {
   Easing,
@@ -85,9 +85,14 @@ function DraggableNode(props: {
   // the pan responder is created once, so it reads the latest props
   // through a ref instead of closing over stale ones
   const latest = useRef(props);
-  latest.current = props;
+  useLayoutEffect(() => {
+    latest.current = props;
+  });
   const dragOrigin = useRef({ x: 0, y: 0 });
-  const dragResponder = useRef(
+  // the once-created responder reads values through refs; its callbacks
+  // only fire on gesture events, never during render
+  // eslint-disable-next-line react-hooks/refs
+  const [dragResponder] = useState(() =>
     PanResponder.create({
       // drag is only possible after a long-press armed this node; the
       // Pressable owns the touch until then (tap / double-tap / long-press)
@@ -111,7 +116,7 @@ function DraggableNode(props: {
         onDragEnd(n.id, dragOrigin.current.x + g.dx / scale, dragOrigin.current.y + g.dy / scale);
       },
     }),
-  ).current;
+  );
 
   return (
     <View

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import { FitView } from "@/app/fitZoom";
 import { MAX_USER_SCALE, MIN_USER_SCALE } from "../constants";
@@ -13,13 +13,17 @@ import { composedCam } from "../utils";
 export function useMapCamera(width: number, height: number) {
   const [viewport, setViewport] = useState({ x: 0, y: 0 });
   const viewportRef = useRef(viewport);
-  viewportRef.current = viewport;
+  useLayoutEffect(() => {
+    viewportRef.current = viewport;
+  });
   const [userScale, setUserScale] = useState(1);
   const userScaleRef = useRef(userScale);
-  userScaleRef.current = userScale;
+  useLayoutEffect(() => {
+    userScaleRef.current = userScale;
+  });
   // the raw fit view and the latest composed camera (zoom + centering
   // offset, without the pan), read by the once-created pan responder for
-  // world <-> screen conversion; written during render by the screen
+  // world <-> screen conversion; synced by the screen on every commit
   const baseFitRef = useRef<FitView>({ scale: 1, x: 0, y: 0 });
   const fitRef = useRef({ scale: 1, x: 0, y: 0 });
 

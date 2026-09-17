@@ -1,4 +1,4 @@
-import { RefObject, useRef } from "react";
+import { RefObject, useLayoutEffect, useRef, useState } from "react";
 import { PanResponder } from "react-native";
 
 import { FitView } from "@/app/fitZoom";
@@ -15,7 +15,7 @@ import { DOUBLE_TAP_MS, PINCH_RATIO } from "../constants";
 // the accumulated distance crosses PINCH_RATIO.
 //
 // The pan responder is created ONCE, so every callback it needs arrives
-// through `params` and is mirrored into `latest` on every render — the
+// through `params` and is mirrored into `latest` on every commit — the
 // responder never closes over stale handlers.
 export function useCanvasGestures(params: {
   viewportRef: RefObject<{ x: number; y: number }>;
@@ -36,7 +36,9 @@ export function useCanvasGestures(params: {
   // the pan responder is created once, so it reaches the latest handlers
   // through a ref instead of closing over stale ones
   const latest = useRef(params);
-  latest.current = params;
+  useLayoutEffect(() => {
+    latest.current = params;
+  });
 
   const panStart = useRef({ x: 0, y: 0 });
   // whether the current touch has moved past the tap threshold
@@ -58,7 +60,10 @@ export function useCanvasGestures(params: {
     }
   };
 
-  const panResponder = useRef(
+  // the once-created responder reads values through refs; its callbacks
+  // only fire on gesture events, never during render
+  // eslint-disable-next-line react-hooks/refs
+  const [panResponder] = useState(() =>
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onPanResponderGrant: () => {
@@ -175,7 +180,7 @@ export function useCanvasGestures(params: {
         setBendDrag(null);
       },
     }),
-  ).current;
+  );
 
   return { panResponder };
 }

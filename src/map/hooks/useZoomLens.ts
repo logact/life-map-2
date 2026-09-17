@@ -1,4 +1,4 @@
-import { RefObject, useRef, useState } from "react";
+import { RefObject, useLayoutEffect, useRef, useState } from "react";
 
 import { computeFitView, FitView } from "@/app/fitZoom";
 import { useDocStore } from "@/state/docStore";
@@ -23,20 +23,26 @@ export function useZoomLens(params: {
   const { width, height, fitRef, viewportRef, userScaleRef, setViewport } = params;
   const [zoomEdgeIds, setZoomEdgeIds] = useState<string[]>([]);
   const zoomEdgeIdsRef = useRef(zoomEdgeIds);
-  zoomEdgeIdsRef.current = zoomEdgeIds;
+  useLayoutEffect(() => {
+    zoomEdgeIdsRef.current = zoomEdgeIds;
+  });
   // the lens: ids of edges currently zoomed open. Pure UI state owned here
   // (never persisted); always REPLACED with the fresh Set returned by the
   // pure lens functions (zoomInIds/zoomOutIds/revealEdge), never mutated
   const [zoomedIds, setZoomedIds] = useState<Set<string>>(new Set());
   const zoomedIdsRef = useRef(zoomedIds);
-  zoomedIdsRef.current = zoomedIds;
+  useLayoutEffect(() => {
+    zoomedIdsRef.current = zoomedIds;
+  });
   // the lock pins the selection: while locked, stray canvas and node taps
   // no longer clear it. Explicit actions (tapping another edge, confirming
   // a route, pasting) still replace it, and pruning still applies when
   // selected edges vanish from the view
   const [selectionLocked, setSelectionLocked] = useState(false);
   const selectionLockedRef = useRef(selectionLocked);
-  selectionLockedRef.current = selectionLocked;
+  useLayoutEffect(() => {
+    selectionLockedRef.current = selectionLocked;
+  });
   // undo stack for selection-less pinch-in: each spread pushes the revealed
   // child edge ids, so a squeeze with no lens collapses the last spread
   // even after the selection was accidentally cleared

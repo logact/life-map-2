@@ -1,11 +1,11 @@
 import { StyleSheet } from "react-native";
 
-import { ACCENT, BACKDROP, CANVAS_BG, INK, SHADOW } from "@/app/theme";
+import { ACCENT, BACKDROP, CANVAS_BG, INK, SHADOW } from "@/ui/theme";
 import { NODE_SIZE } from "./constants";
 
 export const styles = StyleSheet.create({
   // refined grayscale: kind rides on shape, status on outline style,
-  // selection on border weight; tokens come from src/app/theme.ts
+  // selection on border weight; tokens come from src/ui/theme.ts
   container: {
     flex: 1,
     backgroundColor: CANVAS_BG,
@@ -167,15 +167,6 @@ export const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 13,
     color: INK.secondary,
-  },
-  noteSheetCount: {
-    fontSize: 12,
-    fontWeight: "500",
-    color: INK.tertiary,
-    marginTop: -6,
-  },
-  notesList: {
-    maxHeight: 280,
   },
   noteRow: {
     borderWidth: 1,
@@ -404,18 +395,12 @@ export const styles = StyleSheet.create({
     fontSize: 12,
     color: INK.secondary,
   },
+  // read-only peek card content; rendered inside the BottomPanel shell,
+  // which provides the card chrome
   infoCard: {
-    position: "absolute",
-    left: 20,
-    right: 20,
-    bottom: 100, // sits above the bottom row (add button)
-    backgroundColor: "#ffffff",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: INK.subtle,
-    padding: 12,
+    width: "100%",
     gap: 4,
-    ...SHADOW.floating,
+    padding: 6,
   },
   infoTitle: {
     fontSize: 15,
@@ -440,6 +425,32 @@ export const styles = StyleSheet.create({
   infoMeta: {
     fontSize: 13,
     color: INK.secondary,
+  },
+  // notes peek on the node info card: just the newest note (truncated)
+  // plus a "view all" row — the full list lives in the notes sheet
+  infoNotesSep: {
+    height: 1,
+    backgroundColor: INK.subtle,
+    marginVertical: 6,
+  },
+  notePeekText: {
+    fontSize: 14,
+    color: INK.primary,
+  },
+  notePeekMeta: {
+    fontSize: 12,
+    color: INK.secondary,
+    marginTop: 2,
+  },
+  notePeekLink: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: INK.secondary,
+    marginTop: 4,
+  },
+  // full notes list inside the modal notes sheet
+  notesSheetList: {
+    maxHeight: 360,
   },
   modeBanner: {
     position: "absolute",
@@ -474,47 +485,93 @@ export const styles = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: "#d8dade",
   },
-  sheetTitle: {
-    fontSize: 17,
-    fontWeight: "700",
-    color: INK.primary,
-    textAlign: "center",
-  },
-  sheetSubtitle: {
-    fontSize: 12,
-    fontWeight: "500",
-    color: INK.tertiary,
-    textAlign: "center",
-    marginTop: -6,
-  },
-  actionGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  actionTile: {
-    flexGrow: 1,
-    flexBasis: "28%",
+  // bottom-docked panel: the single home for object UI (menus, info
+  // card). Touches outside the card fall through to the canvas (the wrap
+  // is box-none); the camera shifts up so the focused object stays clear
+  // of the panel's area
+  bottomPanelWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
     alignItems: "center",
-    gap: 6,
-    backgroundColor: "#f4f4f6",
+    padding: 16,
+  },
+  bottomPanel: {
+    width: "100%",
+    maxWidth: 420,
+    backgroundColor: "#ffffff",
     borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 6,
+    borderWidth: 1,
+    borderColor: INK.subtle,
+    padding: 6,
+    ...SHADOW.floating,
   },
-  actionTileDestructive: {
-    backgroundColor: "#faf0ef",
+  // menu content inside the BottomPanel shell
+  menuCard: {
+    width: "100%",
   },
-  actionTileIcon: {
-    fontSize: 22,
-  },
-  actionTileLabel: {
+  menuTitle: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#333333",
+    color: INK.tertiary,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  menuRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+  },
+  menuRowPressed: {
+    backgroundColor: "#f4f4f6",
+  },
+  menuRowText: {
+    flexShrink: 1,
+    fontSize: 14,
+    fontWeight: "500",
+    color: INK.primary,
+  },
+  menuRowTextDestructive: {
+    color: "#b3402f",
+  },
+  // the armed (second-tap) state of a destructive row
+  menuRowTextArmed: {
+    fontWeight: "700",
+  },
+  menuGlyph: {
+    width: 34,
+    fontSize: 11,
+    color: INK.secondary,
     textAlign: "center",
   },
-  actionTileLabelDestructive: {
-    color: "#b3402f",
+  menuDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginHorizontal: 2,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+  },
+  menuSeparator: {
+    height: 1,
+    backgroundColor: INK.subtle,
+    marginVertical: 4,
+    marginHorizontal: 10,
+  },
+  // connect handle on a focused node: drag from it onto another node to
+  // create an edge (drag direction = edge direction)
+  connectHandle: {
+    position: "absolute",
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: INK.primary,
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    ...SHADOW.card,
   },
 });

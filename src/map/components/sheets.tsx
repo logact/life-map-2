@@ -1,4 +1,4 @@
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 
 import { LONG_PRESS_MS } from "../constants";
 import { styles } from "../styles";
@@ -12,10 +12,11 @@ export function SheetButton(props: { label: string; onPress: () => void }) {
   );
 }
 
-// peek card for a single tap: title plus a few fact lines. Read-only by
-// default (pointerEvents="none", canvas touches pass through and dismiss
-// it); with actions/onClose it becomes interactive — the edge card's
-// zoom controls and close button
+// peek card content for a single tap: title plus a few fact lines,
+// rendered inside the bottom panel. Read-only by default
+// (pointerEvents="none", canvas touches pass through and dismiss it);
+// with actions/onClose it becomes interactive — the edge card's zoom
+// controls and close button
 export function InfoCard(props: {
   title: string;
   lines: string[];
@@ -46,52 +47,6 @@ export function InfoCard(props: {
         </View>
       )}
     </View>
-  );
-}
-
-// bottom sheet of mutation actions for a node or edge (double-tap target).
-// Actions render as a wrap grid of icon tiles, destructive ones tinted red.
-export interface SheetAction {
-  label: string;
-  icon: string;
-  destructive?: boolean;
-  // tints the icon; used by the color picker's swatches
-  color?: string;
-  onPress: () => void;
-}
-
-export function ActionSheet(props: { title: string; subtitle?: string; actions: SheetAction[]; onClose: () => void }) {
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={props.onClose}>
-      <View style={styles.formBackdrop}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={props.onClose} />
-        <View style={styles.formSheet}>
-          <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>{props.title}</Text>
-          {props.subtitle && <Text style={styles.sheetSubtitle}>{props.subtitle}</Text>}
-          <View style={styles.actionGrid}>
-            {props.actions.map((a) => (
-              <Pressable
-                key={a.label}
-                style={({ pressed }) => [
-                  styles.actionTile,
-                  a.destructive && styles.actionTileDestructive,
-                  pressed && { opacity: 0.6 },
-                ]}
-                onPress={a.onPress}
-              >
-                <Text style={[styles.actionTileIcon, a.color && { color: a.color }]}>{a.icon}</Text>
-                <Text
-                  style={[styles.actionTileLabel, a.destructive && styles.actionTileLabelDestructive]}
-                >
-                  {a.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-      </View>
-    </Modal>
   );
 }
 

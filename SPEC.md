@@ -177,28 +177,50 @@ Reduce-motion OS setting replaces pulse/march with static outlines.
 
 | Gesture | Target | Action |
 |---|---|---|
-| Single tap | node | Read-only info card + spotlight (connected edges light up, rest dims) |
-| Single tap | edge | Info card (layer, status, hidden sub-edges, Zoom in/Collapse buttons) + edge becomes the zoom **selection** |
-| Single tap | empty canvas | Dismiss overlays; clear selection (unless locked) |
-| Double tap (300ms) | node | Node action sheet |
-| Double tap | edge | Edge action sheet |
-| Double tap | empty canvas | Create picker (Goal/Task/Record, + Paste if clipboard non-empty) at that point |
+| Single tap | node | Focus: info card in the bottom panel (kind · status · dates, plus a peek of the newest note — the full list opens in a notes sheet) + spotlight (connected edges light up, rest dims) + connect handle on the node |
+| Single tap | edge | Info card in the bottom panel (layer, status, hidden sub-edges, Zoom in/Collapse buttons) + edge becomes the zoom **selection** |
+| Single tap | empty canvas | Dismiss the panel; clear selection (unless locked) |
+| Double tap (300ms) | node | Node menu in the bottom panel |
+| Double tap | edge | Edge menu in the bottom panel |
+| Double tap | empty canvas | Create menu in the bottom panel (Goal/Task/Record, + Paste if clipboard non-empty) |
 | Long press (500ms) | node | Arm for drag → following movement repositions the node |
 | Long press | edge | Arm bend-drag → next canvas drag places the bend point; release commits |
+| Drag from connect handle | focused node → node | Connect: a tentative edge follows the finger and snaps to the node under it; dropping creates the edge (drag direction = edge direction); dropping anywhere else cancels |
 | Pinch | canvas | Camera zoom continuously; with a selection, every accumulated ×1.3 spread/squeeze also steps detail one level (reveal/collapse) — anchored at the pinch midpoint. Selection-less squeeze pops zoom history to undo the last spread |
 
-### 3.4 Action sheets & flows
+### 3.4 Menus & flows
 
-- **Node sheet**: Add to (child: goal/task/record), Be added to (new parent),
-  Connect to / Be connected to (tap-the-other-end mode), Copy, Notes,
-  Status (only legal transitions; records have none), Color, Remove
-  (confirmed). Attached children fan out around the parent at the golden
+All object UI — info card, node/edge/create/road menus — lives in one
+**bottom panel** (see DESIGN_MUTATIONS.md): a card docked at the bottom of
+the screen, never modal — no backdrop, no dimming; a tap elsewhere dismisses
+and retargets in one motion. When a panel opens or grows, the **camera eases
+the graph up** just enough that the panel's object stays visible above the
+panel area; an already-visible object never moves, and any user gesture
+cancels the tween. Submenus (kind picker, color swatches) open one level
+down inside the same panel. Destructive rows confirm in place: first tap
+arms ("tap again"), second fires. Sheets survive only for text work (create
+form, inspector, notes, route query, note search).
+
+- **Node menu**: New successor (creates a node this one points to:
+  goal/task/record), New predecessor (creates a node pointing here:
+  goal/task — records are leaves, so neither a record node nor a record
+  predecessor can point at anything), Edit details (inspector),
+  one row per legal status transition labeled by target state
+  (Start / Pause / Mark done / Reopen; goals only Mark done / Reopen;
+  records none), Color (palette + Default), Copy (trimmed payload
+  snapshot), Remove. New nodes fan out around the anchor at the golden
   angle (radius 120).
-- **Edge sheet**: Expand, Summarize with… (multi-select same-parent edges,
-  then confirm), Copy (deep), Straighten (clear bend), Color, Remove edge.
+- **Edge menu**: Expand (leaf edges only), Summarize with… (multi-select
+  same-parent edges, then confirm), Copy (deep), Straighten (only when
+  bent), Color, Remove edge.
+- **Create menu** (double-tap empty canvas): Goal / Task / Record at the
+  tapped point, plus Paste when the clipboard is non-empty.
 - **Inspector** (edit title/description/note + status actions): text saves
   on Save; status buttons act immediately.
-- **Notes sheet**: list (newest first), add, edit, delete.
+- **Notes**: the node's single-tap info card shows only a peek of the
+  newest note; tapping it opens the modal notes sheet — full list
+  (newest first), add, edit, delete (in-place two-tap). Text entry opens
+  the modal note editor on top.
 - **Undo/redo** buttons top-right; **route query** button opens the
   From/To panel (type with autocomplete or tap nodes on canvas, swap ⇅);
   results list up to 8 candidate roads (steps + length), preview in blue,
@@ -206,13 +228,14 @@ Reduce-motion OS setting replaces pulse/march with static outlines.
   everything else dims.
 - **Selection bar** (top, replaces the query button): shows From → To and
   step count of the selection; tap re-opens the route query prefilled,
-  🔒 pins the selection against stray taps, long-press opens mutation UI
-  (edge sheet, or for a road: Copy road / Edit route query).
+  🔒 pins the selection against stray taps, long-press opens the
+  bottom-panel menu (edge menu for a single edge, or for a road: Copy road /
+  Edit route query).
 - **Note search** panel: keyword over all notes (hidden layers included);
   tapping a result reveals its node through collapsed layers, centers it,
   and opens its info card.
-- Mode banners (dark pill) announce tap-retargeting modes: connect,
-  reverse-connect, summarize, bend-drag — each with Cancel.
+- Mode banners (dark pill) announce only genuinely multi-step modes:
+  summarize and bend-drag — each with Cancel.
 
 ### 3.5 Demo seed
 

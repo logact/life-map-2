@@ -8,7 +8,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-import { ACCENT, INK } from "@/app/theme";
+import { ACCENT, INK } from "@/ui/theme";
 import { EdgeViewModel, NodeViewModel } from "../types";
 import { nodeSize, splitPath } from "../utils";
 

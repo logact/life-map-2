@@ -1,4 +1,4 @@
-import { FitView } from "@/app/fitZoom";
+import { FitView } from "@/map/fitZoom";
 import { NodeData, NodeKind } from "@/domain/doc";
 import {
   BREAKPOINT_GAP,

@@ -9,7 +9,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import Svg, { Circle, G } from "react-native-svg";
+import Svg, { Circle, G, Line, Polygon } from "react-native-svg";
 
 import {
   addChildNode,
@@ -26,17 +26,19 @@ import {
   setEdgeBend,
   setEdgeColor,
   setNodeColor,
+  setNodeDetail,
   summarizeEdges,
   updateNote,
 } from "@/domain/commands";
 import { ClipboardPayload, snapshotEdge, snapshotNode, snapshotRoad } from "@/domain/clipboard";
-import { EdgeData, edgeDepth, NodeData } from "@/domain/doc";
+import { EdgeData, isGoal, isRecord, NodeData } from "@/domain/doc";
 import { visibleEdges } from "@/domain/visibility";
 import { useDocStore } from "@/state/docStore";
-import { computeFitView } from "@/app/fitZoom";
-import { INK } from "@/app/theme";
+import { computeFitView } from "@/map/fitZoom";
+import { INK } from "@/ui/theme";
 import { EdgeGlyph } from "@/map/components/edgeGlyph";
 import { CanvasNode } from "@/map/components/nodeGlyph";
+import { BottomPanel } from "@/map/components/bottomPanel";
 import { NoteSearchPanel, RoutePanel } from "@/map/components/panels";
 import { ModeBanner, SelectionBar } from "@/map/components/sheets";
 import { DOUBLE_TAP_MS } from "@/map/constants";
@@ -46,22 +48,14 @@ import { useNodeDrag } from "@/map/hooks/useNodeDrag";
 import { useNoteSearch } from "@/map/hooks/useNoteSearch";
 import { useRouteQuery } from "@/map/hooks/useRouteQuery";
 import { useZoomLens } from "@/map/hooks/useZoomLens";
-import {
-  ColorPickerSheet,
-  EdgeActionSheet,
-  FreeSpacePicker,
-  KindPickerSheet,
-  NodeActionSheet,
-  RoadSheet,
-  StatusPickerSheet,
-} from "@/map/overlays/actionSheets";
+import { CreateMenu, EdgeMenu, NodeMenu, RoadMenu } from "@/map/overlays/menus";
 import { CreateNodeForm, InspectorSheet } from "@/map/overlays/forms";
 import { MapInfoCard } from "@/map/overlays/mapInfoCard";
 import { NoteEditorSheet, NotesSheet } from "@/map/overlays/notes";
 import { RoutesModal } from "@/map/overlays/routesModal";
 import { styles } from "@/map/styles";
 import { CreateTarget, InfoTarget } from "@/map/types";
-import { childPosition, composedCam, computeGridDots } from "@/map/utils";
+import { childPosition, composedCam, computeGridDots, nodeSize } from "@/map/utils";
 import { useMapViewModel } from "@/map/viewModel";
 
 /**
@@ -110,28 +104,22 @@ export default function MapScreen() {
   } = lens;
 
   // ---------- interaction state ----------
-  // single tap -> read-only info card; double tap -> action sheet
+  // single tap -> read-only info card in the bottom panel; double tap ->
+  // action menu in the bottom panel (see DESIGN_MUTATIONS.md)
   const [infoTarget, setInfoTarget] = useState<InfoTarget | null>(null);
   // node spotlight: a tapped or dragged node's directly-connected edges
   // (and their endpoints) light up while everything else dims. Purely
   // visual — the zoom selection is untouched
   const [nodeFocusId, setNodeFocusId] = useState<string | null>(null);
-  const [sheetNodeId, setSheetNodeId] = useState<string | null>(null);
-  const [sheetEdgeId, setSheetEdgeId] = useState<string | null>(null);
-  // connect mode: next node tap becomes the target of a new edge
-  const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
-  // reverse connect mode ("Be connected to"): next node tap becomes the
-  // SOURCE of a new edge whose target is this node
-  const [connectTargetId, setConnectTargetId] = useState<string | null>(null);
-  // kind-picker step of the node sheet: "Add to" creates a child of the
-  // chosen kind, "Be added to" creates a parent of the chosen kind
-  const [kindPicker, setKindPicker] = useState<{ nodeId: string; direction: "child" | "parent" } | null>(null);
-  // status-picker step of the node sheet: offers only the statuses the
-  // state machine allows from the node's current one
-  const [statusPickerNodeId, setStatusPickerNodeId] = useState<string | null>(null);
-  // color-picker step of the node/edge sheet: pick a palette color or
-  // Default (clear) for the target
-  const [colorPicker, setColorPicker] = useState<{ kind: "node" | "edge"; id: string; title: string } | null>(null);
+  const [menuNodeId, setMenuNodeId] = useState<string | null>(null);
+  const [menuEdgeId, setMenuEdgeId] = useState<string | null>(null);
+  // drag-to-connect: the tentative edge follows the finger (world coords);
+  // the node under the finger is the candidate target. Drop = connect,
+  // drop anywhere else = cancel
+  const [connectDrag, setConnectDrag] = useState<{ fromId: string; x: number; y: number } | null>(
+    null,
+  );
+  const [connectCandidateId, setConnectCandidateId] = useState<string | null>(null);
   // summarize mode: edge taps accumulate a selection to summarize
   const [summarizeMode, setSummarizeMode] = useState(false);
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
@@ -145,9 +133,9 @@ export default function MapScreen() {
   // clipboard: the last copied node/edge/road as a plain-data snapshot;
   // paste recreates it with fresh ids at the tapped canvas point
   const [clipboard, setClipboard] = useState<ClipboardPayload | null>(null);
-  // road sheet: long-press on the selection bar with a multi-edge
+  // road menu: long-press on the selection bar with a multi-edge
   // selection offers copying the road or editing its route query
-  const [roadSheetOpen, setRoadSheetOpen] = useState(false);
+  const [roadMenuOpen, setRoadMenuOpen] = useState(false);
   // creation flow: what the form is making
   const [createTarget, setCreateTarget] = useState<CreateTarget | null>(null);
   const [draft, setDraft] = useState({ title: "", detail: "" });
@@ -155,25 +143,29 @@ export default function MapScreen() {
   // Status buttons act immediately; title/description/note wait for Save.
   const [inspectorNodeId, setInspectorNodeId] = useState<string | null>(null);
   const [inspectorDraft, setInspectorDraft] = useState({ title: "", detail: "" });
-  // notes flow: which node's note list is open, and the note being added
-  // or edited (noteId present = editing that existing note)
+  // notes flow: the info card shows only a peek of the newest note; the
+  // notes sheet (notesNodeId) holds the full list, and the note being
+  // added or edited sits in the editor sheet (noteId present = editing
+  // that existing note)
   const [notesNodeId, setNotesNodeId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState<{ nodeId: string; noteId?: string; text: string } | null>(null);
-  // pending empty-canvas double tap: the kind picker opens at this world
-  // position (a Paste tile joins when the clipboard is non-empty)
-  const [freeSpacePicker, setFreeSpacePicker] = useState<{ x: number; y: number } | null>(null);
+  // pending empty-canvas double tap: the create menu opens for this world
+  // point (a Paste row joins when the clipboard is non-empty)
+  const [createPicker, setCreatePicker] = useState<{ x: number; y: number } | null>(null);
+  // measured height of the bottom-docked panel — the camera accommodation
+  // below needs to know how much room to make
+  const [panelHeight, setPanelHeight] = useState(0);
 
   const closeOverlays = () => {
     setInfoTarget(null);
     setNodeFocusId(null);
-    setSheetNodeId(null);
-    setSheetEdgeId(null);
+    setMenuNodeId(null);
+    setMenuEdgeId(null);
     setInspectorNodeId(null);
-    setKindPicker(null);
-    setStatusPickerNodeId(null);
-    setColorPicker(null);
     setNotesNodeId(null);
     setNoteDraft(null);
+    setCreatePicker(null);
+    setRoadMenuOpen(false);
   };
 
   // Every domain change goes through the store's run(). Afterwards, prune
@@ -263,9 +255,6 @@ export default function MapScreen() {
   const resetCanvasModes = () => {
     setSelectedEdgeIds([]);
     setSummarizeMode(false);
-    setConnectSourceId(null);
-    setConnectTargetId(null);
-    setKindPicker(null);
     setBendDrag(null);
     setDragArmedId(null);
     closeOverlays();
@@ -278,23 +267,23 @@ export default function MapScreen() {
     routeQuery.enterRouteMode();
   };
 
-  // double tap on empty canvas opens a kind picker at that point; picking
-  // a kind opens the create form there (world position = (screen position
-  // - camera offset) / zoom)
+  // double tap on empty canvas opens the create menu for that point; the
+  // camera keeps the point clear of the bottom panel (world position =
+  // (screen position - camera offset) / zoom)
   const openCreatePickerAt = (screenX: number, screenY: number) => {
     closeOverlays();
-    setFreeSpacePicker({
+    setCreatePicker({
       x: (screenX - viewportRef.current.x - fitRef.current.x) / fitRef.current.scale,
       y: (screenY - viewportRef.current.y - fitRef.current.y) / fitRef.current.scale,
     });
   };
 
   // single tap on empty canvas (after the double-tap window lapses):
-  // dismiss overlays and clear the zoom selection (the lens) unless it is
-  // locked, so the next pinch moves only the camera
+  // dismiss overlays — the bottom panel included — and clear the zoom
+  // selection (the lens) unless it is locked, so the next pinch moves
+  // only the camera
   const onCanvasSingleTap = () => {
-    setInfoTarget(null);
-    setNodeFocusId(null);
+    closeOverlays();
     setDragArmedId(null);
     // a locked selection survives stray canvas taps
     if (!selectionLockedRef.current) setZoomEdgeIds([]);
@@ -303,11 +292,64 @@ export default function MapScreen() {
   const commitBend = (edgeId: string, bend: { x: number; y: number }) =>
     run(setEdgeBend(edgeId, bend));
 
+  // ---------- drag-to-connect ----------
+  // The connect handle on a focused node starts the drag; the tentative
+  // edge follows the finger and snaps to the node under it. Drop on a
+  // node = connect (drag direction is the edge direction); drop anywhere
+  // else cancels. Duplicates are allowed — undo covers regret.
+  const hitTestConnectTarget = (pageX: number, pageY: number, excludeId: string) => {
+    const camNow = fitRef.current;
+    const vp = viewportRef.current;
+    let best: string | null = null;
+    let bestDist = Infinity;
+    for (const n of vm.nodes) {
+      if (n.id === excludeId) continue;
+      const sx = n.x * camNow.scale + camNow.x + vp.x;
+      const sy = n.y * camNow.scale + camNow.y + vp.y;
+      const d = Math.hypot(sx - pageX, sy - pageY);
+      const hitR = Math.max(22, (nodeSize(n.kind) * pinScale) / 2) + 10;
+      if (d <= hitR && d < bestDist) {
+        best = n.id;
+        bestDist = d;
+      }
+    }
+    return best;
+  };
+
+  const onConnectStart = (id: string) => {
+    const node = doc.nodes[id];
+    if (!node) return;
+    setConnectDrag({ fromId: id, x: node.x, y: node.y });
+    setConnectCandidateId(null);
+  };
+
+  const onConnectMove = (id: string, pageX: number, pageY: number) => {
+    const camNow = fitRef.current;
+    const vp = viewportRef.current;
+    setConnectDrag({
+      fromId: id,
+      x: (pageX - vp.x - camNow.x) / camNow.scale,
+      y: (pageY - vp.y - camNow.y) / camNow.scale,
+    });
+    setConnectCandidateId(hitTestConnectTarget(pageX, pageY, id));
+  };
+
+  const onConnectEnd = (id: string, pageX: number, pageY: number) => {
+    const targetId = hitTestConnectTarget(pageX, pageY, id);
+    setConnectDrag(null);
+    setConnectCandidateId(null);
+    if (!targetId) return;
+    const d = useDocStore.getState().doc;
+    if (!d.nodes[id] || !d.nodes[targetId]) return;
+    run(connectNodes(id, targetId).recipe);
+  };
+
   const { panResponder } = useCanvasGestures({
     viewportRef,
     fitRef,
     setViewport,
     pinchCameraZoom: camera.pinchCameraZoom,
+    cancelCameraTween: camera.cancelCameraTween,
     zoomSelectionStep,
     bendDragRef,
     setBendDrag,
@@ -331,6 +373,38 @@ export default function MapScreen() {
     useDocStore.getState().load({ width, height });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // bottom-dock accommodation: when a panel opens (or grows), ease the
+  // camera up just enough that the panel's object stays clear of the
+  // panel's area. An object already visible stays put (no jumpiness); any
+  // user gesture cancels the tween (useMapCamera)
+  useEffect(() => {
+    const open = Boolean(menuNodeId || menuEdgeId || infoTarget || createPicker || roadMenuOpen);
+    // a stale height after close is harmless: the panel re-measures on the
+    // next open and the effect re-runs with the fresh value
+    if (!open) return;
+    // the road menu's object is the selection bar itself (top of screen)
+    if (panelHeight === 0 || roadMenuOpen) return;
+    const edgeMid = (id: string) => {
+      const e = doc.edges[id];
+      const a = e ? doc.nodes[e.fromId] : undefined;
+      const b = e ? doc.nodes[e.toId] : undefined;
+      return e && a && b ? (e.bend ?? { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }) : null;
+    };
+    let world: { x: number; y: number } | null = null;
+    if (menuNodeId) world = doc.nodes[menuNodeId] ?? null;
+    else if (menuEdgeId) world = edgeMid(menuEdgeId);
+    else if (infoTarget?.kind === "node") world = doc.nodes[infoTarget.id] ?? null;
+    else if (infoTarget?.kind === "edge") world = edgeMid(infoTarget.id);
+    else if (createPicker) world = { x: createPicker.x, y: createPicker.y };
+    if (!world) return;
+    const camNow = fitRef.current;
+    const screenY = world.y * camNow.scale + camNow.y + viewportRef.current.y;
+    const limit = height - panelHeight - 40;
+    if (screenY > limit) camera.panByAnimated(0, limit - screenY);
+    // fires on panel open / height change only; reads the camera via refs
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelHeight, menuNodeId, menuEdgeId, infoTarget, createPicker, roadMenuOpen]);
 
   // ---------- derived render state ----------
 
@@ -360,9 +434,9 @@ export default function MapScreen() {
       drag && drag.id === n.id ? { ...n, x: drag.x, y: drag.y } : n,
     ]),
   );
-  // node highlight: the connect source/target, the info-card node, or route focus
-  const highlightedNodeId =
-    connectSourceId ?? connectTargetId ?? (infoTarget?.kind === "node" ? infoTarget.id : null);
+  // node highlight: the connect-drag candidate (drop target), else the
+  // focused node (info card / open menu / spotlight)
+  const highlightedNodeId = connectCandidateId ?? nodeFocusId;
 
   // the selection bar's "From → To": the boundary nodes of the selected
   // visible edges — a road's two ends, or a single edge's own endpoints.
@@ -386,25 +460,30 @@ export default function MapScreen() {
   const cameraY = cam.y + camera.viewport.y;
   const gridDots = computeGridDots(cameraX, cameraY, cam.scale, width, height);
 
-  // the edge open in the action sheet, with its endpoints resolved (an
-  // edit can remove the edge out from under an open sheet)
-  const sheetEdge = sheetEdgeId ? visible.find((e) => e.id === sheetEdgeId) : undefined;
-  const sheetEdgeFrom = sheetEdge ? doc.nodes[sheetEdge.fromId] : undefined;
-  const sheetEdgeTo = sheetEdge ? doc.nodes[sheetEdge.toId] : undefined;
+  // the edge open in the bottom-docked menu, with its endpoints resolved
+  // (an edit can remove the edge out from under an open menu)
+  const menuEdge = menuEdgeId ? visible.find((e) => e.id === menuEdgeId) : undefined;
+  const menuEdgeFrom = menuEdge ? doc.nodes[menuEdge.fromId] : undefined;
+  const menuEdgeTo = menuEdge ? doc.nodes[menuEdge.toId] : undefined;
+  // the node open in the menu (same out-from-under case)
+  const menuNode = menuNodeId ? doc.nodes[menuNodeId] : undefined;
   // the node whose note is being edited (same out-from-under case)
   const noteDraftNode = noteDraft ? doc.nodes[noteDraft.nodeId] : undefined;
+  // the node whose notes sheet is open (same out-from-under case)
+  const notesNode = notesNodeId ? doc.nodes[notesNodeId] : undefined;
 
   // ---------- selection bar handlers ----------
 
-  // long-press on the selection bar opens the mutation UI: a single edge
-  // gets its action sheet; a road gets a sheet offering to copy it or
+  // long-press on the selection bar opens the bottom-panel mutation menu:
+  // a single edge gets its menu; a road gets a menu offering to copy it or
   // re-open the route query panel (the confirmed query is kept, so the
   // panel comes back prefilled)
   const editSelection = () => {
+    setInfoTarget(null);
     if (selectedVmEdges.length === 1) {
-      setSheetEdgeId(selectedVmEdges[0].id);
+      setMenuEdgeId(selectedVmEdges[0].id);
     } else if (selectedVmEdges.length > 1) {
-      setRoadSheetOpen(true);
+      setRoadMenuOpen(true);
     }
   };
 
@@ -414,9 +493,24 @@ export default function MapScreen() {
   const searchSelection = () => {
     if (!selectionEnds) return;
     setInfoTarget(null);
-    setSheetEdgeId(null);
-    setRoadSheetOpen(false);
+    setMenuEdgeId(null);
+    setRoadMenuOpen(false);
     routeQuery.openWithSelection(selectionEnds);
+  };
+
+  // "Edit details" in the node menu: seed the inspector draft from the
+  // node, then open it (the goal's detail is its description, the
+  // record's is its note; tasks have no detail field)
+  const openInspector = (id: string) => {
+    const node = doc.nodes[id];
+    if (!node) return;
+    setMenuNodeId(null);
+    setInfoTarget(null);
+    setInspectorDraft({
+      title: node.title,
+      detail: isGoal(node) ? (node.description ?? "") : isRecord(node) ? (node.note ?? "") : "",
+    });
+    setInspectorNodeId(id);
   };
 
   const saveInspector = () => {
@@ -425,16 +519,19 @@ export default function MapScreen() {
     if (!node) return;
     const title = inspectorDraft.title.trim();
     if (!title) return;
-    run(renameNode(node.id, title));
+    const id = node.id;
+    const detail = inspectorDraft.detail;
+    // one composed recipe: the whole save is a single undo step
+    run((d) => {
+      renameNode(id, title)(d);
+      setNodeDetail(id, detail)(d);
+    });
     setInspectorNodeId(null);
   };
 
-  // the note editor replaced the notes sheet; every exit reopens it
-  const closeNoteEditor = () => {
-    if (!noteDraft) return;
-    setNoteDraft(null);
-    setNotesNodeId(noteDraft.nodeId);
-  };
+  // the note editor opens over the notes sheet / info card (they stay
+  // put underneath); closing just returns to them
+  const closeNoteEditor = () => setNoteDraft(null);
 
   const saveNote = () => {
     if (!noteDraft) return;
@@ -456,8 +553,8 @@ export default function MapScreen() {
 
   const onNodeSingleTap = (id: string) => {
     setDragArmedId(null);
-    setSheetNodeId(null);
-    setSheetEdgeId(null);
+    setMenuNodeId(null);
+    setMenuEdgeId(null);
     setInspectorNodeId(null);
     setInfoTarget({ kind: "node", id });
     // spotlight the node's directly-connected edges (visual only)
@@ -468,8 +565,11 @@ export default function MapScreen() {
 
   const onNodeDoubleTap = (id: string) => {
     setInfoTarget(null);
-    setSheetEdgeId(null);
-    setSheetNodeId(id);
+    setMenuEdgeId(null);
+    setMenuNodeId(id);
+    // spotlight the menu's node the way a single tap would — the object
+    // of the action stays visually held while the menu is open
+    setNodeFocusId(id);
   };
 
   const onNodePress = (id: string) => {
@@ -489,28 +589,6 @@ export default function MapScreen() {
       return;
     }
     if (bendDrag) return; // bend drag owns the canvas until released/cancelled
-    // reverse connect mode: this tap picks the edge source; duplicates allowed
-    if (connectTargetId) {
-      if (id !== connectTargetId) {
-        const d = useDocStore.getState().doc;
-        if (d.nodes[id] && d.nodes[connectTargetId]) {
-          run(connectNodes(id, connectTargetId).recipe);
-        }
-      }
-      setConnectTargetId(null);
-      return;
-    }
-    // connect mode: this tap picks the edge target; duplicates allowed
-    if (connectSourceId) {
-      if (id !== connectSourceId) {
-        const d = useDocStore.getState().doc;
-        if (d.nodes[connectSourceId] && d.nodes[id]) {
-          run(connectNodes(connectSourceId, id).recipe);
-        }
-      }
-      setConnectSourceId(null);
-      return;
-    }
     const pending = nodeTapRef.current;
     if (pending && pending.id === id) {
       clearTimeout(pending.timer);
@@ -532,8 +610,8 @@ export default function MapScreen() {
   };
 
   const onEdgeSingleTap = (id: string) => {
-    setSheetNodeId(null);
-    setSheetEdgeId(null);
+    setMenuNodeId(null);
+    setMenuEdgeId(null);
     setInfoTarget({ kind: "edge", id });
     setNodeFocusId(null); // the edge's own selection takes over the canvas
     setZoomEdgeIds([id]); // the tapped edge becomes the zoom selection
@@ -541,12 +619,13 @@ export default function MapScreen() {
 
   const onEdgeDoubleTap = (id: string) => {
     setInfoTarget(null);
-    setSheetNodeId(null);
-    setSheetEdgeId(id);
+    setNodeFocusId(null);
+    setMenuNodeId(null);
+    setMenuEdgeId(id);
   };
 
   const onEdgePress = (id: string) => {
-    if (routeQuery.routeMode || noteSearch.noteSearchMode || connectSourceId || connectTargetId || bendDrag) return;
+    if (routeQuery.routeMode || noteSearch.noteSearchMode || bendDrag) return;
     // summarize mode: edge taps only grow/shrink the selection
     if (summarizeMode) {
       setSelectedEdgeIds((prev) =>
@@ -577,14 +656,14 @@ export default function MapScreen() {
   // long-press an edge arms bend-drag: the bend handle appears at the
   // current bend (or the midpoint) and the next canvas drag places it
   const onEdgeLongPress = (id: string) => {
-    if (routeQuery.routeMode || noteSearch.noteSearchMode || summarizeMode || connectSourceId || connectTargetId) return;
+    if (routeQuery.routeMode || noteSearch.noteSearchMode || summarizeMode) return;
     const edge = visible.find((e) => e.id === id);
     if (!edge) return;
     const from = doc.nodes[edge.fromId];
     const to = doc.nodes[edge.toId];
     if (!from || !to) return;
     setInfoTarget(null);
-    setSheetEdgeId(null);
+    setMenuEdgeId(null);
     const mid = edge.bend ?? {
       x: (from.x + to.x) / 2,
       y: (from.y + to.y) / 2,
@@ -595,7 +674,7 @@ export default function MapScreen() {
   // long-press a node arms it for dragging; a following movement becomes
   // the drag (see DraggableNode's armed pan responder)
   const onNodeLongPress = (id: string) => {
-    if (routeQuery.routeMode || noteSearch.noteSearchMode || connectSourceId || connectTargetId) return;
+    if (routeQuery.routeMode || noteSearch.noteSearchMode) return;
     const node = useDocStore.getState().doc.nodes[id];
     if (!node) return;
     closeOverlays();
@@ -604,85 +683,42 @@ export default function MapScreen() {
 
   // ---------- create / connect / remove flows ----------
 
+  // "New successor": create a node of the chosen kind, pointed at by the
+  // anchor node (edge anchor -> new)
   const startCreate = (mode: "task" | "record", parentId: string) => {
     closeOverlays();
     setDraft({ title: "", detail: "" });
     setCreateTarget({ mode, parentId });
   };
 
-  // "Add goal" on a node: create a goal AND connect it to the parent
+  // goal variant of the above (the CreateTarget type splits goal out)
   const startCreateAttachedGoal = (parentId: string) => {
     closeOverlays();
     setDraft({ title: "", detail: "" });
     setCreateTarget({ mode: "goal", parentId });
   };
 
-  // connect mode: sheet closes, source stays highlighted, next node tap
-  // becomes the target
-  const startConnect = (sourceId: string) => {
-    closeOverlays();
-    setConnectSourceId(sourceId);
+  // removal runs straight from the menu — the menu's two-tap in-place
+  // confirm is the only confirmation (undo is the safety net)
+  const removeNodeNow = (node: NodeData) => {
+    run(removeNode(node.id));
+    setMenuNodeId(null);
+    setInfoTarget(null);
+    setNodeFocusId(null);
   };
 
-  // reverse connect mode ("Be connected to"): sheet closes, target stays
-  // highlighted, next node tap becomes the source
-  const startConnectReverse = (targetId: string) => {
-    closeOverlays();
-    setConnectTargetId(targetId);
+  const removeEdgeNow = (edge: EdgeData) => {
+    run(removeEdge(edge.id));
+    setMenuEdgeId(null);
+    setInfoTarget(null);
   };
 
-  // "Be added to": create a node of the chosen kind and make it the parent
-  // of the current node (edge new -> current)
+  // "New predecessor": create a node of the chosen kind pointing at the
+  // current one (edge new -> current)
   const startCreateReverse = (mode: "goal" | "task" | "record", childId: string) => {
     closeOverlays();
     setDraft({ title: "", detail: "" });
     setCreateTarget({ mode, childId });
-  };
-
-  const confirmRemoveNode = (node: NodeData) => {
-    Alert.alert("Remove node", `Remove "${node.title}" and all its edges?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: () => {
-          run(removeNode(node.id));
-          setSheetNodeId(null);
-          setInfoTarget(null);
-          if (connectSourceId === node.id) setConnectSourceId(null);
-          if (connectTargetId === node.id) setConnectTargetId(null);
-        },
-      },
-    ]);
-  };
-
-  const confirmRemoveEdge = (edge: EdgeData) => {
-    const fromTitle = doc.nodes[edge.fromId]?.title ?? "";
-    const toTitle = doc.nodes[edge.toId]?.title ?? "";
-    Alert.alert("Remove edge", `Remove "${fromTitle} → ${toTitle}"?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: () => {
-          run(removeEdge(edge.id));
-          setSheetEdgeId(null);
-          setInfoTarget(null);
-        },
-      },
-    ]);
-  };
-
-  // color picker: apply the chosen swatch (undefined = Default, clears the
-  // color) to the node or edge the picker was opened from
-  const pickColor = (color?: string) => {
-    if (!colorPicker) return;
-    run(
-      colorPicker.kind === "node"
-        ? setNodeColor(colorPicker.id, color)
-        : setEdgeColor(colorPicker.id, color),
-    );
-    setColorPicker(null);
   };
 
   const saveCreate = () => {
@@ -691,13 +727,13 @@ export default function MapScreen() {
     if (!title) return;
     const detail = draft.detail.trim();
 
-    // fan children around the anchor; index from existing links so
+    // fan new nodes around the anchor; index from existing links so
     // repeated adds don't stack nodes on top of each other
     const degree = (id: string) =>
       Object.values(doc.edges).filter((e) => e.fromId === id || e.toId === id).length;
 
     if ("childId" in createTarget) {
-      // "Be added to": the new node becomes the PARENT of the current one
+      // predecessor: the new node points at the current one
       const child = doc.nodes[createTarget.childId];
       if (!child) return;
       const pos = childPosition(child, degree(child.id));
@@ -722,7 +758,7 @@ export default function MapScreen() {
   const pasteClipboardAt = (x: number, y: number) => {
     if (!clipboard) return;
     const payload = clipboard;
-    setFreeSpacePicker(null);
+    setCreatePicker(null);
     const p = pastePayload(payload, { x, y });
     run(p.recipe);
     setZoomEdgeIds(p.rootEdgeIds);
@@ -741,7 +777,7 @@ export default function MapScreen() {
     } else {
       const ex = expandEdgeCmd(edgeId);
       run(ex.recipe);
-      // sheet-expand bypasses zoomSelectionStep; record it so a
+      // menu-expand bypasses zoomSelectionStep; record it so a
       // selection-less squeeze can undo this spread too
       zoomHistoryRef.current.push(ex.childEdgeIds);
     }
@@ -749,14 +785,14 @@ export default function MapScreen() {
     zoomedIdsRef.current = nextZoom;
     setZoomedIds(nextZoom);
     setSelectedEdgeIds([]);
-    setSheetEdgeId(null);
+    setMenuEdgeId(null);
     setInfoTarget(null);
   };
 
-  // summarize mode: the sheet's edge is pre-selected, further edge taps
+  // summarize mode: the menu's edge is pre-selected, further edge taps
   // extend the selection, Confirm runs the domain summarize
   const startSummarize = (edgeId: string) => {
-    setSheetEdgeId(null);
+    setMenuEdgeId(null);
     setInfoTarget(null);
     setZoomEdgeIds([]); // the summarize selection is its own state
     setSelectedEdgeIds([edgeId]);
@@ -848,6 +884,51 @@ export default function MapScreen() {
               />
             );
           })}
+          {/* tentative connect edge: follows the finger while a connect
+              drag is in flight; snaps to the candidate target's rim with
+              an arrowhead (same geometry as EdgeGlyph), else ends in a dot */}
+          {connectDrag &&
+            (() => {
+              const from = posById.get(connectDrag.fromId);
+              if (!from) return null;
+              const target = connectCandidateId ? posById.get(connectCandidateId) : undefined;
+              const tx = target ? target.x : connectDrag.x;
+              const ty = target ? target.y : connectDrag.y;
+              const dx = tx - from.x;
+              const dy = ty - from.y;
+              const len = Math.hypot(dx, dy);
+              if (len === 0) return null;
+              const ux = dx / len;
+              const uy = dy / len;
+              const rim = target ? nodeSize(target.kind) / 2 : 0;
+              const tipX = tx - ux * rim;
+              const tipY = ty - uy * rim;
+              const wing = 5 / cam.scale;
+              const back = 11 / cam.scale;
+              const baseX = tipX - ux * back;
+              const baseY = tipY - uy * back;
+              const arrowPoints = `${tipX},${tipY} ${baseX - uy * wing},${baseY + ux * wing} ${baseX + uy * wing},${baseY - ux * wing}`;
+              return (
+                <>
+                  <Line
+                    x1={from.x}
+                    y1={from.y}
+                    x2={tipX}
+                    y2={tipY}
+                    stroke={INK.primary}
+                    strokeWidth={2}
+                    strokeDasharray="6 6"
+                    strokeLinecap="round"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {target ? (
+                    <Polygon points={arrowPoints} fill={INK.primary} />
+                  ) : (
+                    <Circle cx={tipX} cy={tipY} r={3 / cam.scale} fill={INK.primary} />
+                  )}
+                </>
+              );
+            })()}
         </G>
       </Svg>
 
@@ -869,11 +950,18 @@ export default function MapScreen() {
             selected={n.id === highlightedNodeId}
             dimmed={nodeDimmed}
             armed={dragArmedId === n.id}
+            // the handle yields to the node's own menu and to bend mode
+            connectable={
+              nodeFocusId === n.id && dragArmedId !== n.id && !menuNodeId && !bendDrag
+            }
             onPress={onNodePress}
             onArm={onNodeLongPress}
             onDragStart={nodeDrag.onNodeDragStart}
             onDragMove={nodeDrag.onNodeDragMove}
             onDragEnd={nodeDrag.onNodeDragEnd}
+            onConnectStart={onConnectStart}
+            onConnectMove={onConnectMove}
+            onConnectEnd={onConnectEnd}
           />
         );
       })}
@@ -920,20 +1008,8 @@ export default function MapScreen() {
         </>
       )}
 
-      {/* mode banners: connect mode and summarize mode retarget taps;
-          bend mode retargets the next canvas drag */}
-      {connectSourceId && (
-        <ModeBanner
-          text="Tap a node to connect"
-          onCancel={() => setConnectSourceId(null)}
-        />
-      )}
-      {connectTargetId && (
-        <ModeBanner
-          text="Tap a node to connect it here"
-          onCancel={() => setConnectTargetId(null)}
-        />
-      )}
+      {/* mode banners: summarize mode retargets edge taps; bend mode
+          retargets the next canvas drag */}
       {summarizeMode && (
         <ModeBanner
           text={`Tap edges to summarize (${selectedEdgeIds.length} selected)`}
@@ -949,208 +1025,139 @@ export default function MapScreen() {
         />
       )}
 
-      {/* single-tap info card: read-only peek at a node or edge */}
-      {infoTarget && !sheetNodeId && !sheetEdgeId && !inspectorNodeId && (
-        <MapInfoCard
-          infoTarget={infoTarget}
-          doc={doc}
-          visible={visible}
-          zoomedIds={zoomedIds}
-          onZoomStep={(deeper) => zoomSelectionStep(deeper, width / 2, height / 2)}
-          onCloseEdge={() => {
-            setInfoTarget(null);
-            setZoomEdgeIds([]);
-          }}
-        />
+      {/* single-tap info card: read-only peek at an edge; for a node it
+          carries a peek of the newest note that opens the notes sheet.
+          The camera keeps the object clear of the bottom panel */}
+      {infoTarget && !menuNodeId && !menuEdgeId && !inspectorNodeId && (
+        <BottomPanel onHeight={setPanelHeight}>
+          <MapInfoCard
+            infoTarget={infoTarget}
+            doc={doc}
+            visible={visible}
+            zoomedIds={zoomedIds}
+            onOpenNotes={(nodeId) => setNotesNodeId(nodeId)}
+            onZoomStep={(deeper) => zoomSelectionStep(deeper, width / 2, height / 2)}
+            onCloseEdge={() => {
+              setInfoTarget(null);
+              setZoomEdgeIds([]);
+            }}
+          />
+        </BottomPanel>
       )}
 
-      {/* double-tap node sheet: everything that mutates this node */}
-      {sheetNodeId &&
-        (() => {
-          const node = doc.nodes[sheetNodeId];
-          if (!node) return null;
-          return (
-            <NodeActionSheet
-              node={node}
-              onAddTo={() => {
-                setSheetNodeId(null);
-                setKindPicker({ nodeId: node.id, direction: "child" });
-              }}
-              onBeAddedTo={() => {
-                setSheetNodeId(null);
-                setKindPicker({ nodeId: node.id, direction: "parent" });
-              }}
-              onConnectTo={() => startConnect(node.id)}
-              onBeConnectedTo={() => startConnectReverse(node.id)}
-              onCopy={() => {
-                setClipboard(snapshotNode(doc, node.id));
-                setSheetNodeId(null);
-              }}
-              onNotes={() => {
-                setSheetNodeId(null);
-                setNotesNodeId(node.id);
-              }}
-              onStatus={() => {
-                setSheetNodeId(null);
-                setStatusPickerNodeId(node.id);
-              }}
-              onColor={() => {
-                setSheetNodeId(null);
-                setColorPicker({ kind: "node", id: node.id, title: node.title });
-              }}
-              onRemove={() => confirmRemoveNode(node)}
-              onClose={() => setSheetNodeId(null)}
-            />
-          );
-        })()}
-
-      {/* free-space kind picker: first step of a double tap on empty
-          canvas — pick the kind of the new node, then the create form
-          opens at the tapped position. With a non-empty clipboard a Paste
-          tile joins, recreating the snapshot at the tapped point */}
-      {freeSpacePicker && (
-        <FreeSpacePicker
-          hasClipboard={clipboard !== null}
-          onPickKind={(mode) => {
-            setFreeSpacePicker(null);
-            setDraft({ title: "", detail: "" });
-            setCreateTarget({ mode, x: freeSpacePicker.x, y: freeSpacePicker.y });
-          }}
-          onPaste={() => pasteClipboardAt(freeSpacePicker.x, freeSpacePicker.y)}
-          onClose={() => setFreeSpacePicker(null)}
-        />
+      {/* double-tap node menu: everything that mutates this node */}
+      {menuNode && (
+        <BottomPanel onHeight={setPanelHeight}>
+          <NodeMenu
+            node={menuNode}
+            run={run}
+            onPickKind={(direction, kind) => {
+              // the start* helpers close overlays (this menu included)
+              if (direction === "successor") {
+                if (kind === "goal") startCreateAttachedGoal(menuNode.id);
+                else startCreate(kind, menuNode.id);
+              } else {
+                startCreateReverse(kind, menuNode.id);
+              }
+            }}
+            onEditDetails={() => openInspector(menuNode.id)}
+            onCopy={() => {
+              setClipboard(snapshotNode(doc, menuNode.id));
+              setMenuNodeId(null);
+            }}
+            onColor={(color) => {
+              run(setNodeColor(menuNode.id, color));
+              setMenuNodeId(null);
+            }}
+            onRemove={() => removeNodeNow(menuNode)}
+            onDismiss={() => setMenuNodeId(null)}
+          />
+        </BottomPanel>
       )}
 
-      {/* kind picker: second step of "Add to" / "Be added to" — pick the
-          kind of the new node, then the create form opens */}
-      {kindPicker &&
-        (() => {
-          const anchor = doc.nodes[kindPicker.nodeId];
-          if (!anchor) return null;
-          const pick = (mode: "goal" | "task" | "record") => {
-            const { nodeId, direction } = kindPicker;
-            setKindPicker(null);
-            if (direction === "child") {
-              if (mode === "goal") startCreateAttachedGoal(nodeId);
-              else startCreate(mode, nodeId);
-            } else {
-              startCreateReverse(mode, nodeId);
-            }
-          };
-          return (
-            <KindPickerSheet
-              anchor={anchor}
-              direction={kindPicker.direction}
-              onPick={pick}
-              onClose={() => setKindPicker(null)}
-            />
-          );
-        })()}
-
-      {/* status picker: second step of the node sheet's "Status" action */}
-      {statusPickerNodeId &&
-        (() => {
-          const node = doc.nodes[statusPickerNodeId];
-          if (!node) return null;
-          return (
-            <StatusPickerSheet
-              node={node}
-              doc={doc}
-              run={run}
-              onClose={() => setStatusPickerNodeId(null)}
-            />
-          );
-        })()}
-
-      {/* color picker: second step of the node/edge sheet's "Color"
-          action — a palette of swatches plus Default (clear); picking one
-          applies it through run() and closes the sheet. The title is
-          captured when the picker opens, so render touches no refs */}
-      {colorPicker && (
-        <ColorPickerSheet
-          title={colorPicker.title}
-          onPick={pickColor}
-          onClose={() => setColorPicker(null)}
-        />
+      {/* create menu: double tap on empty canvas — pick the kind of the
+          new node and the create form opens at the tapped position. With
+          a non-empty clipboard a Paste row joins, recreating the snapshot
+          at the tapped point */}
+      {createPicker && (
+        <BottomPanel onHeight={setPanelHeight}>
+          <CreateMenu
+            hasClipboard={clipboard !== null}
+            onPickKind={(mode) => {
+              setCreatePicker(null);
+              setDraft({ title: "", detail: "" });
+              setCreateTarget({ mode, x: createPicker.x, y: createPicker.y });
+            }}
+            onPaste={() => pasteClipboardAt(createPicker.x, createPicker.y)}
+          />
+        </BottomPanel>
       )}
 
       {/* selection-bar long-press on a road: copy the whole road (every
           selected edge deep-copied with its subtree and endpoints) or
           edit the route query that produced it */}
-      {roadSheetOpen && (
-        <RoadSheet
-          title={selectionEnds ? `${selectionEnds.from} → ${selectionEnds.to}` : "Road"}
-          steps={selectedVmEdges.length}
-          onCopyRoad={() => {
-            const ids = visible.filter((e) => zoomEdgeIdSet.has(e.id)).map((e) => e.id);
-            if (ids.length > 0) setClipboard(snapshotRoad(doc, ids));
-            setRoadSheetOpen(false);
-          }}
-          onEditRouteQuery={() => {
-            setRoadSheetOpen(false);
-            routeQuery.setRouteMode(true);
-          }}
-          onClose={() => setRoadSheetOpen(false)}
+      {roadMenuOpen && (
+        <BottomPanel onHeight={setPanelHeight}>
+          <RoadMenu
+            title={
+              selectionEnds
+                ? `${selectionEnds.from} → ${selectionEnds.to} · ${selectedVmEdges.length} steps`
+                : "Road"
+            }
+            onCopyRoad={() => {
+              const ids = visible.filter((e) => zoomEdgeIdSet.has(e.id)).map((e) => e.id);
+              if (ids.length > 0) setClipboard(snapshotRoad(doc, ids));
+              setRoadMenuOpen(false);
+            }}
+            onEditRouteQuery={() => {
+              setRoadMenuOpen(false);
+              routeQuery.setRouteMode(true);
+            }}
+          />
+        </BottomPanel>
+      )}
+
+      {/* double-tap edge menu: expand / summarize / copy / straighten /
+          color / remove */}
+      {menuEdge && menuEdgeFrom && menuEdgeTo && (
+        <BottomPanel onHeight={setPanelHeight}>
+          <EdgeMenu
+            edge={menuEdge}
+            title={`${menuEdgeFrom.title} → ${menuEdgeTo.title}`}
+            onExpand={() => expandEdge(menuEdge.id)}
+            onSummarize={() => startSummarize(menuEdge.id)}
+            onCopy={() => {
+              setClipboard(snapshotEdge(doc, menuEdge.id));
+              setMenuEdgeId(null);
+            }}
+            onStraighten={() => {
+              run(setEdgeBend(menuEdge.id, null));
+              setMenuEdgeId(null);
+            }}
+            onColor={(color) => {
+              run(setEdgeColor(menuEdge.id, color));
+              setMenuEdgeId(null);
+            }}
+            onRemove={() => removeEdgeNow(menuEdge)}
+          />
+        </BottomPanel>
+      )}
+
+      {/* notes sheet: the node's full notes list with add/edit/delete,
+          opened from the info card's peek row. The info card stays put
+          underneath; text entry stacks the note editor on top */}
+      {notesNode && (
+        <NotesSheet
+          node={notesNode}
+          run={run}
+          onAddNote={() => setNoteDraft({ nodeId: notesNode.id, text: "" })}
+          onEditNote={(noteId, text) => setNoteDraft({ nodeId: notesNode.id, noteId, text })}
+          onClose={() => setNotesNodeId(null)}
         />
       )}
 
-      {/* double-tap edge sheet: expand / summarize / copy / straighten / remove */}
-      {sheetEdge && sheetEdgeFrom && sheetEdgeTo && (
-        <EdgeActionSheet
-          edge={sheetEdge}
-          fromTitle={sheetEdgeFrom.title}
-          toTitle={sheetEdgeTo.title}
-          layer={edgeDepth(doc, sheetEdge.id)}
-          onExpand={() => expandEdge(sheetEdge.id)}
-          onSummarize={() => startSummarize(sheetEdge.id)}
-          onCopy={() => {
-            setClipboard(snapshotEdge(doc, sheetEdge.id));
-            setSheetEdgeId(null);
-          }}
-          onStraighten={() => {
-            run(setEdgeBend(sheetEdge.id, null));
-            setSheetEdgeId(null);
-          }}
-          onColor={() => {
-            setSheetEdgeId(null);
-            setColorPicker({
-              kind: "edge",
-              id: sheetEdge.id,
-              title: `${sheetEdgeFrom.title} → ${sheetEdgeTo.title}`,
-            });
-          }}
-          onRemove={() => confirmRemoveEdge(sheetEdge)}
-          onClose={() => setSheetEdgeId(null)}
-        />
-      )}
-
-      {/* notes sheet: the node's notes newest-first, with add/edit/delete */}
-      {notesNodeId &&
-        (() => {
-          const node = doc.nodes[notesNodeId];
-          if (!node) return null;
-          return (
-            <NotesSheet
-              node={node}
-              run={run}
-              onEditNote={(noteId, text) => {
-                // iOS shows only one Modal at a time: swap the list for
-                // the editor, which reopens it on close
-                setNotesNodeId(null);
-                setNoteDraft({ nodeId: node.id, noteId, text });
-              }}
-              onAddNote={() => {
-                // iOS shows only one Modal at a time: swap the list for
-                // the editor, which reopens it on close
-                setNotesNodeId(null);
-                setNoteDraft({ nodeId: node.id, text: "" });
-              }}
-              onClose={() => setNotesNodeId(null)}
-            />
-          );
-        })()}
-
-      {/* note editor: add a new note or edit an existing one */}
+      {/* note editor: add a new note or edit an existing one, opened from
+          the notes sheet */}
       {noteDraft && noteDraftNode && (
         <NoteEditorSheet
           nodeTitle={noteDraftNode.title}

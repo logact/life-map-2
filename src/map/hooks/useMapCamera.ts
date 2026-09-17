@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
-import { FitView } from "@/app/fitZoom";
+import { FitView } from "@/map/fitZoom";
 import { MAX_USER_SCALE, MIN_USER_SCALE } from "../constants";
 import { composedCam } from "../utils";
 
@@ -30,6 +30,7 @@ export function useMapCamera(width: number, height: number) {
   // continuous pinch camera zoom, anchored at the pinch midpoint (mx, my):
   // the world point under it keeps its screen position
   const pinchCameraZoom = (ratio: number, mx: number, my: number) => {
+    cancelCameraTween();
     const z = Math.min(MAX_USER_SCALE, Math.max(MIN_USER_SCALE, userScaleRef.current * ratio));
     if (z === userScaleRef.current) return;
     const cam = fitRef.current;
@@ -45,6 +46,31 @@ export function useMapCamera(width: number, height: number) {
     });
   };
 
+  // programmatic camera pan (e.g. keeping a focused object clear of the
+  // bottom panel): a short ease-out tween. Any user gesture cancels it —
+  // see cancelCameraTween — so the camera never fights the finger
+  const tweenRafRef = useRef<number | null>(null);
+  const cancelCameraTween = () => {
+    if (tweenRafRef.current !== null) {
+      cancelAnimationFrame(tweenRafRef.current);
+      tweenRafRef.current = null;
+    }
+  };
+  const panByAnimated = (dx: number, dy: number, ms = 180) => {
+    cancelCameraTween();
+    const start = viewportRef.current;
+    const t0 = Date.now();
+    const tick = () => {
+      const t = Math.min(1, (Date.now() - t0) / ms);
+      const ease = 1 - Math.pow(1 - t, 3);
+      const v = { x: start.x + dx * ease, y: start.y + dy * ease };
+      viewportRef.current = v;
+      setViewport(v);
+      tweenRafRef.current = t < 1 ? requestAnimationFrame(tick) : null;
+    };
+    tweenRafRef.current = requestAnimationFrame(tick);
+  };
+
   return {
     viewport,
     setViewport,
@@ -54,5 +80,7 @@ export function useMapCamera(width: number, height: number) {
     baseFitRef,
     fitRef,
     pinchCameraZoom,
+    panByAnimated,
+    cancelCameraTween,
   };
 }

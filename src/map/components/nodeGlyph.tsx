@@ -8,7 +8,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-import { INK } from "@/app/theme";
+import { INK } from "@/ui/theme";
 import { LONG_PRESS_MS } from "../constants";
 import { styles } from "../styles";
 import { NodeViewModel } from "../types";
@@ -47,9 +47,11 @@ function PulsingRing(props: { x: number; y: number; size: number; borderRadius: 
   );
 }
 
-// one node on the canvas: tap shows info / double-tap opens its sheet
+// one node on the canvas: tap shows info / double-tap opens its menu
 // (handled by the parent), long-press arms it so a following movement
-// becomes a drag that repositions it in the domain
+// becomes a drag that repositions it in the domain. While focused it also
+// shows a connect handle: dragging from it onto another node creates an
+// edge (drag direction = edge direction).
 function DraggableNode(props: {
   n: NodeViewModel;
   screenX: number;
@@ -64,12 +66,18 @@ function DraggableNode(props: {
   pulsing: boolean;
   dimmed: boolean;
   armed: boolean;
+  // focused and not armed for moving: the connect handle is showing
+  connectable: boolean;
   borderStyle: "dashed" | "dotted" | "solid";
   onPress: (id: string) => void;
   onArm: (id: string) => void;
   onDragStart: (id: string, x: number, y: number) => void;
   onDragMove: (id: string, x: number, y: number) => void;
   onDragEnd: (id: string, x: number, y: number) => void;
+  // connect-drag from the handle, in screen coordinates
+  onConnectStart: (id: string) => void;
+  onConnectMove: (id: string, pageX: number, pageY: number) => void;
+  onConnectEnd: (id: string, pageX: number, pageY: number) => void;
 }) {
   const size = props.size;
   // task corners keep their 12/56 ratio under the zoom
@@ -115,6 +123,35 @@ function DraggableNode(props: {
         const { n, scale, onDragEnd } = latest.current;
         onDragEnd(n.id, dragOrigin.current.x + g.dx / scale, dragOrigin.current.y + g.dy / scale);
       },
+    }),
+  );
+
+  // the connect handle's responder: claims the touch immediately (the
+  // handle only exists on a focused node), reports screen coordinates —
+  // the screen converts to world space and hit-tests the drop target
+  // eslint-disable-next-line react-hooks/refs
+  const [connectResponder] = useState(() =>
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => latest.current.connectable,
+      onPanResponderGrant: () => latest.current.onConnectStart(latest.current.n.id),
+      onPanResponderMove: (e) =>
+        latest.current.onConnectMove(
+          latest.current.n.id,
+          e.nativeEvent.pageX,
+          e.nativeEvent.pageY,
+        ),
+      onPanResponderRelease: (e) =>
+        latest.current.onConnectEnd(
+          latest.current.n.id,
+          e.nativeEvent.pageX,
+          e.nativeEvent.pageY,
+        ),
+      onPanResponderTerminate: (e) =>
+        latest.current.onConnectEnd(
+          latest.current.n.id,
+          e.nativeEvent.pageX,
+          e.nativeEvent.pageY,
+        ),
     }),
   );
 
@@ -167,6 +204,15 @@ function DraggableNode(props: {
           </Text>
         )}
       </Pressable>
+      {/* connect handle: rides the node's right edge; a sibling of the
+          Pressable so its responder never fights the tap/long-press */}
+      {props.connectable && (
+        <View
+          {...connectResponder.panHandlers}
+          hitSlop={12}
+          style={[styles.connectHandle, { right: -7, top: size / 2 - 9 }]}
+        />
+      )}
     </View>
   );
 }
@@ -187,11 +233,15 @@ export function CanvasNode(props: {
   selected: boolean;
   dimmed: boolean;
   armed: boolean;
+  connectable: boolean;
   onPress: (id: string) => void;
   onArm: (id: string) => void;
   onDragStart: (id: string, x: number, y: number) => void;
   onDragMove: (id: string, x: number, y: number) => void;
   onDragEnd: (id: string, x: number, y: number) => void;
+  onConnectStart: (id: string) => void;
+  onConnectMove: (id: string, pageX: number, pageY: number) => void;
+  onConnectEnd: (id: string, pageX: number, pageY: number) => void;
 }) {
   const { n, pos } = props;
   const size = nodeSize(n.kind) * props.pinScale;
@@ -225,12 +275,16 @@ export function CanvasNode(props: {
         pulsing={pulsing}
         dimmed={props.dimmed}
         armed={props.armed}
+        connectable={props.connectable}
         borderStyle={borderStyle}
         onPress={props.onPress}
         onArm={props.onArm}
         onDragStart={props.onDragStart}
         onDragMove={props.onDragMove}
         onDragEnd={props.onDragEnd}
+        onConnectStart={props.onConnectStart}
+        onConnectMove={props.onConnectMove}
+        onConnectEnd={props.onConnectEnd}
       />
     </Fragment>
   );

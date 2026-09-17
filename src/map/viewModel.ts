@@ -70,8 +70,6 @@ export function nodeInfoLines(doc: LifeMapDoc, node: NodeData): string[] {
     if (node.note) lines.push(node.note);
     if (node.occurredAt) lines.push(`Occurred ${fmtDate(node.occurredAt)}`);
   }
-  if (node.notes.length > 0) {
-    lines.push(`${node.notes.length} note${node.notes.length === 1 ? "" : "s"}`);
-  }
+  // the notes themselves render as the card's notes section
   return lines;
 }

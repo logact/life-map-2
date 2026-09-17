@@ -1,7 +1,7 @@
 import { RefObject, useState } from "react";
 import { Keyboard } from "react-native";
 
-import { computeFitView } from "@/app/fitZoom";
+import { computeFitView } from "@/map/fitZoom";
 import { edgeDepth, LifeMapDoc } from "@/domain/doc";
 import { searchNotes } from "@/domain/search";
 import { revealEdge } from "@/domain/visibility";

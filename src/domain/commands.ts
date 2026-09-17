@@ -179,6 +179,18 @@ export function renameNode(id: Id, title: string): Recipe {
   };
 }
 
+// the inspector's detail field: a goal's description, a record's note.
+// Tasks carry no detail, so the command no-ops for them; empty clears.
+export function setNodeDetail(id: Id, detail: string): Recipe {
+  return (draft) => {
+    const node = draft.nodes[id];
+    if (!node) return;
+    const value = detail.trim();
+    if (node.kind === "goal") node.description = value || undefined;
+    else if (node.kind === "record") node.note = value;
+  };
+}
+
 export function setNodeColor(id: Id, color?: string): Recipe {
   return (draft) => {
     const node = draft.nodes[id];

@@ -19,6 +19,7 @@ import {
   renameNode,
   setEdgeBend,
   setNodeColor,
+  setNodeDetail,
   summarizeEdges,
   transitionNodeStatus,
   updateNote,
@@ -278,5 +279,26 @@ describe("pastePayload", () => {
     expect(root.childEdgeIds).toHaveLength(2);
     expect(root.bend).toBeDefined();
     expect(next.rootEdgeIds).toContain(paste.rootEdgeIds[0]);
+  });
+});
+
+
+describe("setNodeDetail", () => {
+  it("sets and clears a goal's description", () => {
+    const { doc, h } = fixture();
+    const next = expectRoundTrip(doc, setNodeDetail(h, "feel great"));
+    expect(next.nodes[h].description).toBe("feel great");
+    const cleared = run(next, setNodeDetail(h, "   "));
+    expect(cleared.nodes[h].description).toBeUndefined();
+  });
+
+  it("sets a record's note and no-ops on tasks", () => {
+    let { doc, t1 } = fixture();
+    const r = addFreeNode("record", "R", "", { x: 0, y: 0 });
+    doc = run(doc, r.recipe);
+    doc = expectRoundTrip(doc, setNodeDetail(r.nodeId, "it happened"));
+    expect(doc.nodes[r.nodeId].note).toBe("it happened");
+    const [, patches] = produceWithPatches(doc, setNodeDetail(t1, "nope"));
+    expect(patches).toHaveLength(0);
   });
 });

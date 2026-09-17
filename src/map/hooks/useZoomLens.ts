@@ -1,6 +1,6 @@
 import { RefObject, useLayoutEffect, useRef, useState } from "react";
 
-import { computeFitView, FitView } from "@/app/fitZoom";
+import { computeFitView, FitView } from "@/map/fitZoom";
 import { useDocStore } from "@/state/docStore";
 import { visibleEdges, zoomInIds, zoomOutIds } from "@/domain/visibility";
 import { composedCam } from "../utils";

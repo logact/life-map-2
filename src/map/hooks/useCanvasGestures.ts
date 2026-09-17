@@ -1,7 +1,7 @@
 import { RefObject, useLayoutEffect, useRef, useState } from "react";
 import { PanResponder } from "react-native";
 
-import { FitView } from "@/app/fitZoom";
+import { FitView } from "@/map/fitZoom";
 import { DOUBLE_TAP_MS, PINCH_RATIO } from "../constants";
 
 // The container claims empty-space touches immediately (node Pressables
@@ -23,6 +23,8 @@ export function useCanvasGestures(params: {
   setViewport: (v: { x: number; y: number }) => void;
   pinchCameraZoom: (ratio: number, mx: number, my: number) => void;
   zoomSelectionStep: (deeper: boolean, mx: number, my: number) => void;
+  // a user gesture cancels any programmatic camera tween in flight
+  cancelCameraTween: () => void;
   bendDragRef: RefObject<{ edgeId: string; x: number; y: number } | null>;
   setBendDrag: (b: { edgeId: string; x: number; y: number } | null) => void;
   closeOverlays: () => void;
@@ -71,6 +73,7 @@ export function useCanvasGestures(params: {
         panMoved.current = false;
         pinchStart.current = null;
         pinching.current = false;
+        latest.current.cancelCameraTween();
       },
       onPanResponderMove: (e, g) => {
         const touches = e.nativeEvent.touches;

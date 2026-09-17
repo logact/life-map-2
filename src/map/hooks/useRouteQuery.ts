@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Alert, Keyboard } from "react-native";
 
-import { FitView } from "@/app/fitZoom";
+import { FitView } from "@/map/fitZoom";
 import { EdgeData, LifeMapDoc } from "@/domain/doc";
 import { findRoutes, RouteResult } from "@/domain/route";
 import { MAX_ROUTE_CANDIDATES } from "../constants";

@@ -727,11 +727,11 @@ export default function MapScreen() {
     setZoomEdgeIds(p.rootEdgeIds);
   };
 
-  // load the life-roadmap seed over the current map (create menu's
+  // load the tutorial seed over the current map (create menu's
   // destructive row): a single replaceDoc edit, so undo restores the
   // previous map. The lens, history and camera reset to a folded,
   // centered view of the new map
-  const loadSeedRoadmap = () => {
+  const loadSeedTutorial = () => {
     run(replaceDoc(buildSeedDoc(width / 2, height / 3)));
     zoomHistoryRef.current = [];
     const folded = new Set<string>();
@@ -1065,7 +1065,7 @@ export default function MapScreen() {
               setCreateTarget({ mode, x: createPicker.x, y: createPicker.y });
             }}
             onPaste={() => pasteClipboardAt(createPicker.x, createPicker.y)}
-            onLoadSeed={loadSeedRoadmap}
+            onLoadSeed={loadSeedTutorial}
           />
         </BottomPanel>
       )}

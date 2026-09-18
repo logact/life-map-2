@@ -1,7 +1,8 @@
 # Life Plan — Autumn 2026
 
-*Written 2026-09-18. This document is the narrative version of the plan; the
-Life Map app holds the same plan as a living map (`src/domain/seedDoc.ts`).
+*Written 2026-09-18. This document is the narrative version of the plan; it
+shipped as the Life Map app's first-launch seed (`src/domain/seedDoc.ts`)
+until the tutorial map replaced it later the same day.
 Three areas, all started around mid-year. Each area is written as a chain of
 steps: do X to achieve sub-goal Y, then the next step, until the final goal.*
 

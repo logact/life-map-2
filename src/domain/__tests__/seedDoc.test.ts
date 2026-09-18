@@ -7,9 +7,9 @@ import { buildSeedDoc } from "../seedDoc";
 import { edgeStatus, goalStatus } from "../status";
 import { visibleEdges } from "../visibility";
 
-// the seed is a real life, so it deserves the same invariant checks as any
-// user-built doc — plus the property the whole design is about: each area
-// is one directed road from its first step to its main goal
+// the seed is the app's tutorial, so it deserves the same invariant checks
+// as any user-built doc — plus the property the whole design is about: one
+// directed road from the first lesson to the final goal
 describe("buildSeedDoc", () => {
   const doc = buildSeedDoc(200, 280);
 
@@ -28,66 +28,59 @@ describe("buildSeedDoc", () => {
     return e.id;
   }
 
-  it("contains the three life areas plus the isolated ideas node", () => {
-    for (const title of ["Life Map App", "Get Stronger", "English", "Ideas"]) {
+  it("contains the tour goals plus the isolated ideas node", () => {
+    for (const title of ["Goals are the destinations", "Make this map yours", "Ideas"]) {
       expect(byTitle(title).kind).toBe("goal");
     }
     expect(doc.rootNodeIds).toContain(byTitle("Ideas").id);
   });
 
-  it("each area is one directed road from its first step to its main goal", () => {
+  it("is one directed road from the first lesson to the final goal", () => {
     const visible = visibleEdges(doc, new Set());
-    const chain = (from: string, to: string, expected: string[]) => {
-      const routes = findRoutes(doc, visible, byTitle(from).id, byTitle(to).id, 8);
-      expect(routes).toHaveLength(1);
-      expect(routes[0].nodes.map((n) => n.title)).toEqual(expected);
-    };
-    chain("Core canvas & gestures", "Life Map App", [
-      "Core canvas & gestures",
-      "Persistence, undo, layers",
-      "Polish: routes, notes, search",
-      "Trust blockers",
-      "Life Map App",
-    ]);
-    // the collapsed program segment routes as one hop; the week phases hide inside it
-    chain("Gear up & learn form", "Get Stronger", [
-      "Gear up & learn form",
-      "12-week beginner program",
-      "Squat 100 kg",
-      "Bench 70 kg",
-      "Deadlift 120 kg",
-      "Get Stronger",
-    ]);
-    chain("Anki & weekly journal", "English", [
-      "Anki & weekly journal",
-      "Listening without subtitles",
-      "Read a whole book",
-      "Find a language partner",
-      "English",
+    const routes = findRoutes(
+      doc,
+      visible,
+      byTitle("Tap any node — its card opens below").id,
+      byTitle("Make this map yours").id,
+      8,
+    );
+    expect(routes).toHaveLength(1);
+    // the collapsed layers segment routes as one hop; the zoom lessons hide inside it
+    expect(routes[0].nodes.map((n) => n.title)).toEqual([
+      "Tap any node — its card opens below",
+      "Notes hide one tap deeper",
+      "Long-press to drag me anywhere",
+      "Connect: drag from my ring to another node",
+      "Goals are the destinations",
+      "Double-tap empty space to create",
+      "Roads have layers — pinch to peek inside",
+      "Make this map yours",
     ]);
   });
 
   it("each road segment shows the status of the step it leads to", () => {
-    expect(edgeStatus(doc, segment("Gear up & learn form", "12-week beginner program"))).toBe("done");
-    expect(edgeStatus(doc, segment("12-week beginner program", "Squat 100 kg"))).toBe("in-progress");
-    expect(edgeStatus(doc, segment("Bench 70 kg", "Deadlift 120 kg"))).toBe("todo");
-    expect(edgeStatus(doc, segment("Polish: routes, notes, search", "Trust blockers"))).toBe(
+    expect(edgeStatus(doc, segment("Tap any node — its card opens below", "Notes hide one tap deeper"))).toBe(
+      "done",
+    );
+    expect(edgeStatus(doc, segment("Notes hide one tap deeper", "Long-press to drag me anywhere"))).toBe(
       "in-progress",
+    );
+    expect(edgeStatus(doc, segment("Long-press to drag me anywhere", "Connect: drag from my ring to another node"))).toBe(
+      "todo",
+    );
+    // the segment into the reached milestone reads done with it
+    expect(edgeStatus(doc, segment("Connect: drag from my ring to another node", "Goals are the destinations"))).toBe(
+      "done",
+    );
+    // the collapsed layers segment shows the first unfinished hidden step
+    expect(edgeStatus(doc, segment("Double-tap empty space to create", "Roads have layers — pinch to peek inside"))).toBe(
+      "todo",
     );
   });
 
-  it("main goals are destinations: todo until manually marked done (GAPS.md #7)", () => {
-    expect(goalStatus(doc, byTitle("Life Map App").id)).toBe("todo");
-    expect(goalStatus(doc, byTitle("Get Stronger").id)).toBe("todo");
-    expect(goalStatus(doc, byTitle("English").id)).toBe("todo");
-    // the one reached milestone goal was completed manually
-    expect(goalStatus(doc, byTitle("12-week beginner program").id)).toBe("done");
-  });
-
-  it("keeps the three areas as independent islands — no invented relations", () => {
-    const visible = visibleEdges(doc, new Set());
-    expect(findRoutes(doc, visible, byTitle("Get Stronger").id, byTitle("Life Map App").id, 8)).toEqual([]);
-    expect(findRoutes(doc, visible, byTitle("English").id, byTitle("Get Stronger").id, 8)).toEqual([]);
+  it("the milestone goal was marked done; the destination stays todo (GAPS.md #7)", () => {
+    expect(goalStatus(doc, byTitle("Goals are the destinations").id)).toBe("done");
+    expect(goalStatus(doc, byTitle("Make this map yours").id)).toBe("todo");
   });
 
   it("keeps records as leaves", () => {
@@ -97,7 +90,7 @@ describe("buildSeedDoc", () => {
     }
   });
 
-  it("backdates every historical timestamp into the past", () => {
+  it("stamps every timestamp at build time — a tutorial has no fake history", () => {
     const now = Date.now();
     for (const n of Object.values(doc.nodes)) {
       for (const t of [n.startedAt, n.completedAt, n.occurredAt, n.createdAt]) {
@@ -108,8 +101,6 @@ describe("buildSeedDoc", () => {
         expect(note.updatedAt).toBeLessThanOrEqual(now);
       }
     }
-    // the one future date on the map is the daily-driver target
-    expect(byTitle("Life Map App").targetDate).toBeDefined();
   });
 
   it("round-trips through the sqlite row shape exactly", () => {

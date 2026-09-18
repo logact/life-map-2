@@ -1,9 +1,11 @@
 # GAPS.md — What the app could not express
 
 Honest record from encoding a real life (app development, gym, English;
-June → September 2026) into the map via the app's own command API
-(`src/domain/seedDoc.ts`). Each entry: what the real roadmap needed, what
-the model offers, and the workaround used — if any.
+June → September 2026) into the map via the app's own command API. That
+encoding shipped as the first-launch seed until the tutorial map replaced it
+on 2026-09-18 (see `src/domain/seedDoc.ts`); the gaps below remain open.
+Each entry: what the real roadmap needed, what the model offers, and the
+workaround used — if any.
 
 ## 1. Recurring habits have no home
 
@@ -25,11 +27,11 @@ values are numbers, but the model has no metric fields. A goal has a
 ## 3. Backdating is impossible in-app
 
 Every command stamps `Date.now()`. A user who logs yesterday's workout
-records it as today; a map with real history (like this seed) cannot be
-produced through the UI at all — the seed patches `startedAt` /
+records it as today; a map with real history (like that seed) cannot be
+produced through the UI at all — the seed patched `startedAt` /
 `completedAt` / `occurredAt` / note times in a raw recipe after building.
 
-**Consequence:** this map is not reproducible by in-app use alone, and any
+**Consequence:** that map was not reproducible by in-app use alone, and any
 late logging by hand will silently carry the wrong date.
 
 ## 4. Edges carry no meaning
@@ -84,5 +86,6 @@ can be attached. Records are text only.
 
 ---
 
-*Filed alongside the seed, 2026-09-18. Items 1–3 feel like the real product
-gaps for daily-use tracking; 4–9 are acceptable constraints of a map metaphor.*
+*Filed alongside the original seed on 2026-09-18 — the day the tutorial map
+replaced it. Items 1–3 feel like the real product gaps for daily-use
+tracking; 4–9 are acceptable constraints of a map metaphor.*

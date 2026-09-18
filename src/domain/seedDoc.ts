@@ -14,37 +14,22 @@ import {
 } from "./commands";
 import { emptyDoc, Id, LifeMapDoc, NodeKind } from "./doc";
 
-// the first-launch seed: one real life — this app's development, gym, and
-// English learning — built entirely through the same commands the UI drives,
-// so the document obeys every invariant a user-built one does. Each area is
-// ONE directed road: it starts at the first step and ends at the main goal
-// as the destination, so progress reads as travel along the road (each
-// segment takes the status of the step it leads to). Records dot the
-// roadside; detail hides inside expanded segments.
+// the first-launch seed: a self-guided tour of the app. ONE directed road
+// walks a new user through the whole gesture language — tap, notes, drag,
+// connect, goals, create, layers — and ends at the invitation to replace
+// the tour with a life of their own. Built entirely through the same
+// commands the UI drives, so the document obeys every invariant a
+// user-built one does. The first lessons are pre-marked done and one is
+// in-progress, so the three status styles are visible on first launch.
 //
-// Only the timestamps cheat: commands stamp Date.now(), so the real history
-// (June → September 2026) is patched in by the final recipe below.
-// Colors are picks from the Okabe-Ito palette (src/ui/palette.ts).
-// What the model could NOT express is recorded in GAPS.md.
+// A tutorial has no history, so no backdating: every timestamp is stamped
+// honestly at build time. Colors are picks from the Okabe-Ito palette
+// (src/ui/palette.ts).
 
 const BLUE = "#0072B2";
-const ORANGE = "#E69F00";
-const GREEN = "#009E73";
-
-const at = (month: number, day: number, hour = 10): number => new Date(2026, month - 1, day, hour).getTime();
-
-interface Backdate {
-  startedAt?: number;
-  completedAt?: number;
-  occurredAt?: number;
-  createdAt?: number;
-  targetDate?: number;
-}
 
 export function buildSeedDoc(cx: number, cy: number): LifeMapDoc {
   const steps: Recipe[] = [];
-  const dates = new Map<Id, Backdate>();
-  const noteDates = new Map<Id, { createdAt: number; updatedAt: number }>();
 
   const free = (kind: NodeKind, title: string, detail: string, x: number, y: number): Id => {
     const c = addFreeNode(kind, title, detail, { x, y });
@@ -56,185 +41,104 @@ export function buildSeedDoc(cx: number, cy: number): LifeMapDoc {
     steps.push(setNodeColor(id, color));
     return id;
   };
-  // a step on a road: a free-standing task the road passes through
-  const step = (title: string, x: number, y: number): Id => free("task", title, "", x, y);
-  // a road segment from -> to, colored by its area
-  const road = (fromId: Id, toId: Id, color: string): Id => {
+  // a lesson on the tour: a free-standing task the road passes through
+  const lesson = (title: string, x: number, y: number): Id => free("task", title, "", x, y);
+  // a road segment from -> to, in the tour's color
+  const road = (fromId: Id, toId: Id): Id => {
     const c = connectNodes(fromId, toId);
-    steps.push(c.recipe, setEdgeColor(c.edgeId, color));
+    steps.push(c.recipe, setEdgeColor(c.edgeId, BLUE));
     return c.edgeId;
   };
-  // a record dots the roadside of the step it belongs to
-  const record = (parentId: Id, title: string, noteText: string, x: number, y: number, when: number): Id => {
+  // a record dots the roadside of the lesson it belongs to
+  const record = (parentId: Id, title: string, noteText: string, x: number, y: number): Id => {
     const c = addChildNode(parentId, "record", title, noteText, { x, y });
     steps.push(c.recipe);
-    dates.set(c.nodeId, { occurredAt: when, createdAt: when });
     return c.nodeId;
   };
-  const done = (id: Id, startedAt: number, completedAt: number) => {
+  const done = (id: Id) => {
     steps.push(transitionNodeStatus(id, "start"), transitionNodeStatus(id, "complete"));
-    dates.set(id, { startedAt, completedAt });
   };
-  const started = (id: Id, since: number) => {
+  const started = (id: Id) => {
     steps.push(transitionNodeStatus(id, "start"));
-    dates.set(id, { startedAt: since });
   };
-  const note = (id: Id, text: string, createdAt: number, updatedAt = createdAt) => {
-    const c = addNote(id, text);
-    steps.push(c.recipe);
-    noteDates.set(c.noteId, { createdAt, updatedAt });
+  const note = (id: Id, text: string) => {
+    steps.push(addNote(id, text).recipe);
   };
 
-  // ---- road 1: this app, from a working canvas to a daily driver ----
-  const appGoal = goal("Life Map App", "Make Life Map 2 my daily-driver planner", cx + 360, cy - 230, BLUE);
-  dates.set(appGoal, { targetDate: at(10, 15) });
-  note(appGoal, "North star: one infinite map, no lists.", at(6, 8));
-  note(appGoal, "Backlog: habit recurrence? map export?", at(9, 16));
+  const ROAD = cy - 40;
 
-  const sCore = step("Core canvas & gestures", cx - 380, cy - 230);
-  done(sCore, at(6, 15), at(7, 12));
-  record(sCore, "First map rendered on canvas", "just dots and lines, but mine", cx - 420, cy - 320, at(6, 14));
-  record(sCore, "Ran on my phone via Expo Go", "", cx - 330, cy - 330, at(6, 28));
-
-  const sPersist = step("Persistence, undo, layers", cx - 190, cy - 230);
-  done(sPersist, at(7, 20), at(8, 28));
-  record(sPersist, "Undo/redo saved me from a mis-drag", "", cx - 190, cy - 330, at(8, 22));
-
-  const sPolish = step("Polish: routes, notes, search", cx - 10, cy - 230);
-  started(sPolish, at(9, 5));
-
-  // the last stretch is a checklist, not a single step: the four tasks fan
-  // out under it and the road continues when they are all done
-  const sTrust = step("Trust blockers", cx + 160, cy - 230);
-  started(sTrust, at(9, 10));
-  const trustItems: [string, number, number, number?][] = [
-    ["Fix bugs from BUGS.md", cx + 70, cy - 110, at(9, 10)],
-    ["Seed my real life data", cx + 170, cy - 90, at(9, 17)],
-  ];
-  for (const [title, x, y, since] of trustItems) {
-    const c = addChildNode(sTrust, "task", title, "", { x, y });
-    steps.push(c.recipe);
-    if (since) started(c.nodeId, since);
-  }
-  for (const [title, x, y] of [
-    ["App icon & splash screen", cx + 250, cy - 120],
-    ["Backup/export my map", cx + 320, cy - 70],
-  ] as const) {
-    steps.push(addChildNode(sTrust, "task", title, "", { x, y }).recipe);
-  }
-
-  road(sCore, sPersist, BLUE);
-  road(sPersist, sPolish, BLUE);
-  road(sPolish, sTrust, BLUE);
-  road(sTrust, appGoal, BLUE);
-
-  // ---- road 2: the gym, from gear to the big lifts ----
-  const gymGoal = goal(
-    "Get Stronger",
-    "Consistent gym habit + progressive overload: squat 100 kg, bench 70 kg, deadlift 120 kg",
-    cx + 440,
-    cy + 40,
-    ORANGE,
+  const sTap = lesson("Tap any node — its card opens below", cx - 560, ROAD);
+  done(sTap);
+  note(sTap, "The card holds the dates, the status buttons, and the title — tap the title to edit it in place.");
+  record(
+    sTap,
+    "Records are dated dots",
+    "A moment on a step's roadside. Records are leaves: nothing attaches under them.",
+    cx - 630,
+    ROAD + 90,
   );
 
-  const sGear = step("Gear up & learn form", cx - 360, cy + 40);
-  done(sGear, at(6, 15), at(6, 20));
-  record(sGear, "Bought lifting shoes", "last excuse gone", cx - 420, cy + 120, at(6, 20));
+  const sNotes = lesson("Notes hide one tap deeper", cx - 400, ROAD);
+  done(sNotes);
+  // notes stack newest-first: the older line goes in first, so the card's
+  // peek shows the one that explains the sheet
+  note(sNotes, "Goals, tasks, and records all carry notes like this one.");
+  note(sNotes, "Tap the peeked note on my card to open the full sheet — add, edit, delete.");
 
-  // the program milestone sits mid-road; the segment into it expands into
-  // the two halves of the program (zoom the segment to see them)
-  const sProgram = free("goal", "12-week beginner program", "", cx - 120, cy + 40);
-  steps.push(transitionNodeStatus(sProgram, "complete"));
-  dates.set(sProgram, { targetDate: at(9, 13), completedAt: at(9, 13) });
-  record(sProgram, "Week 12 done — 12 weeks straight", "", cx - 120, cy - 50, at(9, 13));
+  const sDrag = lesson("Long-press to drag me anywhere", cx - 240, ROAD);
+  started(sDrag);
+  note(sDrag, "Long-press a node to move it. Long-press an edge, then drag, to bend it.");
 
-  const gearToProgram = road(sGear, sProgram, ORANGE);
-  const w1 = expandEdge(gearToProgram, { dx: 0, dy: -40 });
-  steps.push(w1.recipe, renameNode(w1.midNodeId, "Weeks 1–6"));
-  done(w1.midNodeId, at(6, 22), at(8, 2));
-  const w2 = expandEdge(w1.childEdgeIds[1], { dx: 0, dy: -40 });
-  steps.push(w2.recipe, renameNode(w2.midNodeId, "Weeks 7–12"));
-  done(w2.midNodeId, at(8, 3), at(9, 13));
-
-  // the habit is not a gate on the road — it runs alongside it, anchored at
-  // the program that built it
-  const habit = free("task", "Gym 3x/week", "", cx - 120, cy + 160);
-  steps.push(connectNodes(sProgram, habit).recipe);
-  started(habit, at(6, 22));
-  record(habit, "Skipped a week — work crunch", "back on it the week after", cx - 220, cy + 220, at(8, 17));
-
-  const sSquat = step("Squat 100 kg", cx + 40, cy + 40);
-  started(sSquat, at(9, 14));
-  note(sSquat, "Current: 90×5. Brace, knees out, hips back.", at(9, 14));
-  record(sSquat, "Squat 90×5 — PR", "", cx + 40, cy + 130, at(9, 8));
-
-  const sBench = step("Bench 70 kg", cx + 170, cy + 40);
-  started(sBench, at(9, 14));
-  record(sBench, "Bench 60×8", "", cx + 170, cy + 130, at(9, 11));
-
-  const sDeadlift = step("Deadlift 120 kg", cx + 300, cy + 40);
-  record(sDeadlift, "Deadlift 105×3 — current best", "", cx + 300, cy + 130, at(9, 15));
-
-  road(sProgram, sSquat, ORANGE);
-  road(sSquat, sBench, ORANGE);
-  road(sBench, sDeadlift, ORANGE);
-  road(sDeadlift, gymGoal, ORANGE);
-
-  // ---- road 3: english, from daily contact to speaking ----
-  const engGoal = goal(
-    "English",
-    "General improvement — steady daily contact, no exam",
-    cx + 330,
-    cy + 310,
-    GREEN,
+  const sConnect = lesson("Connect: drag from my ring to another node", cx - 80, ROAD);
+  note(
+    sConnect,
+    "Tap a node to focus it — the ring is its connect handle. Drag direction = road direction; drop anywhere else to cancel.",
   );
-  note(engGoal, "Weakest: speaking speed. Listening much better since June.", at(9, 12));
 
-  const sWords = step("Anki & weekly journal", cx - 330, cy + 310);
-  started(sWords, at(6, 21));
-  record(sWords, "First journal entry", "", cx - 370, cy + 400, at(6, 21));
-  record(sWords, "1,500 words in Anki", "", cx - 280, cy + 410, at(8, 2));
+  // the mid-road milestone shows what a reached goal looks like: solid,
+  // struck through, marked done by hand
+  const gMilestone = goal(
+    "Goals are the destinations",
+    "Every road ends at a goal. Reach one, tap it, Mark done — Reopen undoes it.",
+    cx + 80,
+    ROAD,
+    BLUE,
+  );
+  steps.push(transitionNodeStatus(gMilestone, "complete"));
 
-  const sListen = step("Listening without subtitles", cx - 170, cy + 310);
-  started(sListen, at(7, 6));
-  record(sListen, "Followed a whole podcast episode", "", cx - 170, cy + 400, at(8, 25));
+  const sCreate = lesson("Double-tap empty space to create", cx + 240, ROAD);
+  note(sCreate, "Goal, task, or record at the tapped point. The same menu can reload this tutorial.");
 
-  const sBook = step("Read a whole book", cx - 10, cy + 310);
-  done(sBook, at(6, 25), at(8, 30));
-  record(sBook, "Finished Atomic Habits", "took two months, worth it", cx - 10, cy + 410, at(8, 30));
+  const sLayers = lesson("Roads have layers — pinch to peek inside", cx + 400, ROAD);
+  note(
+    sLayers,
+    "The road into me hides two steps. Pinch spread — or tap the segment and Zoom in — to reveal them; squeeze folds back.",
+  );
 
-  const sPartner = step("Find a language partner", cx + 150, cy + 310);
+  const gYours = goal(
+    "Make this map yours",
+    "Rename me, drag me, delete me — then double-tap the canvas and start your own road. Undo is top-right, always.",
+    cx + 560,
+    ROAD,
+    BLUE,
+  );
 
-  road(sWords, sListen, GREEN);
-  road(sListen, sBook, GREEN);
-  road(sBook, sPartner, GREEN);
-  road(sPartner, engGoal, GREEN);
+  road(sTap, sNotes);
+  road(sNotes, sDrag);
+  road(sDrag, sConnect);
+  road(sConnect, gMilestone);
+  road(gMilestone, sCreate);
+  // the last stretch is layered: two micro-lessons hide inside the segment
+  // (pinch or Zoom in on it to see them)
+  const intoLayers = road(sCreate, sLayers);
+  const z1 = expandEdge(intoLayers, { dx: 0, dy: -40 });
+  steps.push(z1.recipe, renameNode(z1.midNodeId, "Spread to zoom into a road"));
+  const z2 = expandEdge(z1.childEdgeIds[1], { dx: 0, dy: -40 });
+  steps.push(z2.recipe, renameNode(z2.midNodeId, "Squeeze to fold it back"));
+  road(sLayers, gYours);
 
-  // the three areas are parallel — no invented cross-links: a road between
-  // goals is earned by a real dependency, and there isn't one yet
-  goal("Ideas", "Parking lot for unplaced thoughts", cx + 20, cy + 150, "#999933"); // isolated on purpose
-
-  // real history: patch every timestamp the commands stamped as "now"
-  steps.push((draft) => {
-    for (const [id, d] of dates) {
-      const n = draft.nodes[id];
-      if (!n) continue;
-      if (d.startedAt !== undefined) n.startedAt = d.startedAt;
-      if (d.completedAt !== undefined) n.completedAt = d.completedAt;
-      if (d.occurredAt !== undefined) n.occurredAt = d.occurredAt;
-      if (d.createdAt !== undefined) n.createdAt = d.createdAt;
-      if (d.targetDate !== undefined) n.targetDate = d.targetDate;
-    }
-    for (const node of Object.values(draft.nodes)) {
-      for (const n of node.notes) {
-        const t = noteDates.get(n.id);
-        if (t) {
-          n.createdAt = t.createdAt;
-          n.updatedAt = t.updatedAt;
-        }
-      }
-    }
-  });
+  // stray thoughts park off the road until they earn one — isolated on purpose
+  goal("Ideas", "Park stray thoughts here — no road until one is earned.", cx, cy + 150, "#999933");
 
   let doc = emptyDoc();
   for (const recipe of steps) {

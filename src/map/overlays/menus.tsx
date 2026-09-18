@@ -160,7 +160,7 @@ export function EdgeMenu(props: {
 
 // double-tap empty canvas: create a node at the tapped point (the create
 // form opens next), or paste the clipboard snapshot there. The last row
-// replaces the whole map with the life-roadmap seed (destructive; it
+// replaces the whole map with the tutorial seed (destructive; it
 // confirms in place and undo restores the old map)
 export function CreateMenu(props: {
   hasClipboard: boolean;
@@ -184,8 +184,8 @@ export function CreateMenu(props: {
   }
   entries.push("sep", {
     key: "seed",
-    label: "Load life roadmap",
-    glyph: "🗺",
+    label: "Load the tutorial",
+    glyph: "🎓",
     onPress: () => props.onLoadSeed(),
     destructive: true,
   });

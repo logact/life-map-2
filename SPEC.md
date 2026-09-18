@@ -129,7 +129,7 @@ Local **SQLite** (`lifemap.db`, WAL mode) — no server, no account.
 - **Save** = full rewrite inside one transaction, debounced through a
   serialized save queue (`scheduleSave`) so rapid mutations stay ordered.
 - **Load** on app start; an empty database — or, exactly once, a database
-  from before the seed existed — seeds the real-life initial map (§3.5). The
+  from before the seed existed — seeds the tutorial map (§3.5). The
   `seed_applied` meta flag records that the seed has fired; every launch
   after that loads the user's own edits.
 - Snapshots (`snapshotLifeMap` / `restoreLifeMap`) use the same row shape as
@@ -216,10 +216,10 @@ form, notes, route query, note search).
   same-parent edges, then confirm), Copy (deep), Straighten (only when
   bent), Color, Remove edge.
 - **Create menu** (double-tap empty canvas): Goal / Task / Record at the
-  tapped point, plus Paste when the clipboard is non-empty, plus **Load life
-  roadmap** — a separated destructive row (two-tap confirm) that replaces
-  the whole map with the seed via one `replaceDoc` edit, so undo restores
-  the old map; lens and camera reset to a folded, centered view.
+  tapped point, plus Paste when the clipboard is non-empty, plus **Load the
+  tutorial** — a separated destructive row (two-tap confirm) that replaces
+  the whole map with the tutorial seed via one `replaceDoc` edit, so undo
+  restores the old map; lens and camera reset to a folded, centered view.
 - **Inline editing**: on the node's single-tap info card, tapping the
   title or the description/note row turns it into a text field in place
   (the panel rides above the keyboard); the edit commits on submit, on
@@ -251,18 +251,19 @@ form, notes, route query, note search).
 
 ### 3.5 First-launch seed
 
-First launch (empty DB) seeds the owner's real map (`src/domain/seedDoc.ts`):
-three independent life areas, each ONE directed road from its first step to
-its main goal as destination — Life Map App (canvas → persistence → polish →
-trust-blocker checklist → the daily-driver goal, target Oct 15), Get
-Stronger (gear up → the 12-week program, its approach segment expanded into
-week phases → squat → bench → deadlift → the goal), and English (Anki &
-journal → listening → a whole book → a language partner → the fluency goal).
-Records dot the roadsides, backdated June→September 2026; each road takes
-its area's palette color; an isolated "Ideas" node floats unconnected. What
-the model could not express is recorded in `GAPS.md`. The same seed loads on
-demand from the create menu's "Load life roadmap" row (§3.4) — no reinstall
-needed.
+First launch (empty DB) seeds the tutorial map (`src/domain/seedDoc.ts`): ONE
+directed road of lessons that teaches the whole gesture language by example —
+tap (the info card), notes, long-press drag, the connect handle, goals as
+destinations (a mid-road milestone goal marked done), double-tap create, and
+road layers (the last stretch is expanded, hiding two zoom micro-lessons) —
+ending at the "Make this map yours" goal. A record dots the roadside; the
+first lessons are pre-done and one is in-progress, so all three status styles
+show on first launch; an isolated "Ideas" node floats unconnected. A tutorial
+has no history, so every timestamp stamps honestly at build time. The same
+tutorial loads on demand from the create menu's "Load the tutorial" row
+(§3.4) — no reinstall needed. The earlier real-life seed it replaced is
+recorded in `LIFE_PLAN.md`, and what that encoding could not express lives on
+in `GAPS.md`.
 
 ---
 

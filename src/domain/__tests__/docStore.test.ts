@@ -128,7 +128,7 @@ describe("docStore", () => {
     const s = store.getState();
     expect(s.loaded).toBe(true);
     expect(s.doc).not.toBe(legacy);
-    expect(Object.values(s.doc.nodes).some((n) => n.title === "Life Map App")).toBe(true);
+    expect(Object.values(s.doc.nodes).some((n) => n.title === "Make this map yours")).toBe(true);
     expect(savedDocs.length).toBeGreaterThan(0); // the replacement is persisted
     expect(mockSetMeta).toHaveBeenCalledWith("seed_applied", "1");
 

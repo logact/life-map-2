@@ -1,7 +1,6 @@
 import { useState } from "react";
 
-import { Recipe, StatusAction, transitionNodeStatus } from "@/domain/commands";
-import { EdgeData, isRecord, isTask, NodeData, NodeKind } from "@/domain/doc";
+import { EdgeData, isRecord, NodeData, NodeKind } from "@/domain/doc";
 import { PALETTE } from "@/ui/palette";
 import { MenuCard, MenuEntry } from "../components/bottomPanel";
 
@@ -24,18 +23,15 @@ const kindLabel = (kind: NodeKind) => kind[0].toUpperCase() + kind.slice(1);
 
 // double-tap node menu: everything that mutates this node, grouped —
 // Create (directed: successor = this → new, predecessor = new → this),
-// Edit, Copy, and a separated destructive row that confirms in place
+// Color, Copy, and a separated destructive row that confirms in place.
+// Not here: text info (title, description/note) edits in place on the
+// single-tap info card, and status transitions live there too
 export function NodeMenu(props: {
   node: NodeData;
-  run: (recipe: Recipe) => void;
   onPickKind: (direction: "successor" | "predecessor", kind: NodeKind) => void;
-  onEditDetails: () => void;
   onCopy: () => void;
   onColor: (color?: string) => void;
   onRemove: () => void;
-  // leaf actions that fire inside the menu (status transitions) dismiss it
-  // through here, so the node's new outline is visible right away
-  onDismiss: () => void;
 }) {
   const { node } = props;
   const [step, setStep] = useState<"root" | "successor" | "predecessor" | "color">("root");
@@ -82,37 +78,6 @@ export function NodeMenu(props: {
     return <MenuCard title="Color" entries={entries} />;
   }
 
-  // status rows: one per legal transition from the current state, labeled
-  // by target state; they act immediately and dismiss the menu
-  const statusRows: MenuEntry[] = [];
-  const pushStatus = (label: string, action: StatusAction) => {
-    statusRows.push({
-      key: `status-${action}`,
-      label,
-      onPress: () => {
-        props.run(transitionNodeStatus(node.id, action));
-        props.onDismiss();
-      },
-    });
-  };
-  if (isTask(node)) {
-    const status = node.status ?? "todo";
-    if (status === "todo") {
-      pushStatus("Start", "start");
-      pushStatus("Mark done", "complete");
-    } else if (status === "in-progress") {
-      pushStatus("Pause", "pause");
-      pushStatus("Mark done", "complete");
-    } else {
-      pushStatus("Reopen", "reopen");
-    }
-  } else if (node.kind === "goal") {
-    // a goal's status is derived from its tasks; the only stored override
-    // is the manual completion flag
-    if (node.completedAt) pushStatus("Reopen", "reopen");
-    else pushStatus("Mark done", "complete");
-  }
-
   const entries: MenuEntry[] = [];
   // records are leaves: a record can never point at a created node
   if (!isRecord(node)) {
@@ -131,8 +96,6 @@ export function NodeMenu(props: {
   });
   entries.push(
     "sep",
-    { key: "edit", label: "Edit details", onPress: () => props.onEditDetails() },
-    ...statusRows,
     { key: "color", label: "Color", dot: node.color, onPress: () => setStep("color") },
     "sep",
     // a trimmed snapshot: payload only, never the node's edges
@@ -196,11 +159,14 @@ export function EdgeMenu(props: {
 }
 
 // double-tap empty canvas: create a node at the tapped point (the create
-// form opens next), or paste the clipboard snapshot there
+// form opens next), or paste the clipboard snapshot there. The last row
+// replaces the whole map with the life-roadmap seed (destructive; it
+// confirms in place and undo restores the old map)
 export function CreateMenu(props: {
   hasClipboard: boolean;
   onPickKind: (kind: NodeKind) => void;
   onPaste: () => void;
+  onLoadSeed: () => void;
 }) {
   const entries: MenuEntry[] = (["goal", "task", "record"] as NodeKind[]).map((kind) => ({
     key: kind,
@@ -216,6 +182,13 @@ export function CreateMenu(props: {
       onPress: () => props.onPaste(),
     });
   }
+  entries.push("sep", {
+    key: "seed",
+    label: "Load life roadmap",
+    glyph: "🗺",
+    onPress: () => props.onLoadSeed(),
+    destructive: true,
+  });
   return <MenuCard title="Create" entries={entries} />;
 }
 

@@ -37,6 +37,10 @@ CREATE TABLE IF NOT EXISTS edges (
   bend_x REAL,
   bend_y REAL
 );
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `;
 
 // ---------- migrations ----------
@@ -355,6 +359,22 @@ export async function loadDoc(): Promise<LifeMapDoc | null> {
   const noteRows = await db.getAllAsync<NoteRow>("SELECT * FROM notes ORDER BY position ASC");
   const edgeRows = await db.getAllAsync<EdgeRow>("SELECT * FROM edges");
   return rowsToDoc(nodeRows, noteRows, edgeRows);
+}
+
+// ---------- meta: app-level flags that are not map content ----------
+
+export async function getMeta(key: string): Promise<string | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ value: string }>("SELECT value FROM meta WHERE key = ?", [key]);
+  return row?.value ?? null;
+}
+
+export async function setMeta(key: string, value: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    [key, value],
+  );
 }
 
 // ---------- save queue ----------

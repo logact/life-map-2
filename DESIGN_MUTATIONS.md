@@ -91,8 +91,7 @@ disabled-grayed.
 |---|---|---|---|
 | Create | **New successor** | goal, task | Opens kind submenu (Goal / Task / Record) in the same panel → picking a kind opens the create form sheet → on save, the new node fans out around this one (golden-angle, as today) with the edge pointing this → new. |
 | Create | **New predecessor** | all | Same flow with the edge pointing new → this; kind submenu offers Goal / Task only (records are leaves: a new record cannot point here). |
-| Edit | **Edit details** | all | Opens the inspector form sheet (title + kind-appropriate fields). *Restored a flow that was unreachable before this redesign.* |
-| Edit | **Status: ‹verb›** | goal, task | One menu item per *legal* transition from the current state, labeled by its target state — see §5.2. Acts immediately, no follow-up UI. Records show none. |
+| Edit | **Inline on the info card** | all | Title and the goal's description / record's note edit in place on the single-tap info card (tap the text; commits on submit, blur, or tap-away); the card also carries the status row — current status plus one button per *legal* transition, labeled by its target state (§5.2), acting immediately. There is no inspector sheet. |
 | Edit | **Color** | all | Opens a swatch submenu in the same panel (palette + Default). Pick applies at once. |
 | Clipboard | **Copy** | all | Copies the trimmed snapshot (payload only, never edges). Silent confirmation; clipboard enables Paste in the create menu. |
 | — | **Remove** | all | Separated at the bottom, visually destructive. First tap arms it in place ("tap again to remove"); second tap removes. Arming resets when the menu closes. |
@@ -106,16 +105,19 @@ row carries a direction icon (● = this node, ○ = new node: ●→○ success
 
 ### 5.2 Status items (labels by target state)
 
-| Kind | Current | Menu items |
+The status row lives on the node's single-tap info card: the current
+status plus one button per legal transition, acting immediately.
+
+| Kind | Current | Buttons |
 |---|---|---|
 | task | todo | **Start** · **Mark done** |
 | task | in-progress | **Pause** · **Mark done** |
 | task | done | **Reopen** |
 | goal | open | **Mark done** |
 | goal | done | **Reopen** |
-| record | — | (no status items) |
+| record | — | (no status row) |
 
-A goal's derived status stays derived; the items toggle only the manual
+A goal's derived status stays derived; the buttons toggle only the manual
 completion flag (unchanged semantics).
 
 ### 5.3 Remove semantics (unchanged)
@@ -179,12 +181,14 @@ bar lives at the top of the screen).
 
 ## 9. What stays a sheet — and why
 
-Create-node form, inspector, notes sheet, note editor, route query panel,
+Create-node form, notes sheet, note editor, route query panel,
 note search. These are reading/writing tasks where a keyboard is up and the
 canvas is background anyway; a modal sheet is the right container. Everything
 that is a *verb on a visible object* never uses a sheet. Notes live in the
 modal notes sheet (list + add/edit/delete), opened from a newest-note peek on
 the node's single-tap info card; their text editor is a sheet stacked on top.
+Short single-field text (node title, description/note) edits inline on the
+info card — the panel rides above the keyboard for it.
 
 ## 10. Attention rules (the concentration half of the fix)
 
@@ -222,12 +226,13 @@ the node's single-tap info card; their text editor is a sheet stacked on top.
 | Node sheet: 9 tiles in a modal | Node menu in the bottom panel, grouped, per-kind (§5) |
 | Edge sheet modal | Edge menu in the bottom panel (§7) |
 | Kind picker sheet | Kind submenu in the same panel (§5.1) |
-| Status picker sheet | Legal transitions listed directly in the menu (§5.2) |
+| Status picker sheet | Legal transitions as buttons on the info card's status row (§5.2) |
 | Color picker sheet | Swatch submenu in the same panel |
 | Connect to / Be connected to + mode banner | Drag from connect handle (§6) |
 | Remove confirmed via sheet | Two-tap in-place confirm |
 | Info card pinned to bottom of screen | Info card in the bottom panel + camera accommodation |
-| Inspector unreachable (no entry point) | "Edit details" menu item restores it |
+| Info card read-only | Node card edits title/description inline; edge card edits color via inline swatches |
+| Inspector reachable via "Edit details" menu item | Inspector removed — editing is inline on the info card |
 | Summarize mode | Kept as the only mode |
 | Undo/redo, zoom lens, route query, notes | Unchanged |
 

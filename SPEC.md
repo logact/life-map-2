@@ -124,9 +124,14 @@ Local **SQLite** (`lifemap.db`, WAL mode) — no server, no account.
   updated_at, position)`.
 - `edges(id, node1_id, node2_id, parent_edge_id, position, layer, color,
   bend_x, bend_y)` — stores the whole edge tree.
+- `meta(key, value)` — app-level flags that are not map content (currently
+  just `seed_applied`).
 - **Save** = full rewrite inside one transaction, debounced through a
   serialized save queue (`scheduleSave`) so rapid mutations stay ordered.
-- **Load** on app start; an empty database seeds the built-in demo map.
+- **Load** on app start; an empty database — or, exactly once, a database
+  from before the seed existed — seeds the real-life initial map (§3.5). The
+  `seed_applied` meta flag records that the seed has fired; every launch
+  after that loads the user's own edits.
 - Snapshots (`snapshotLifeMap` / `restoreLifeMap`) use the same row shape as
   the DB and double as the **undo/redo memento**: every edit snapshots the
   pre-edit state (100-step stacks; view state like zoom/camera is excluded).
@@ -177,8 +182,8 @@ Reduce-motion OS setting replaces pulse/march with static outlines.
 
 | Gesture | Target | Action |
 |---|---|---|
-| Single tap | node | Focus: info card in the bottom panel (kind · status · dates, plus a peek of the newest note — the full list opens in a notes sheet) + spotlight (connected edges light up, rest dims) + connect handle on the node |
-| Single tap | edge | Info card in the bottom panel (layer, status, hidden sub-edges, Zoom in/Collapse buttons) + edge becomes the zoom **selection** |
+| Single tap | node | Focus: info card in the bottom panel (kind · dates, a status row with the legal transition buttons, plus a peek of the newest note — the full list opens in a notes sheet). The title and the goal's description / record's note edit in place (tap the text; saves on submit, blur, or tap-away) + spotlight (connected edges light up, rest dims) + connect handle on the node |
+| Single tap | edge | Info card in the bottom panel (layer, status, hidden sub-edges, Zoom in/Collapse buttons, inline color swatches) + edge becomes the zoom **selection** |
 | Single tap | empty canvas | Dismiss the panel; clear selection (unless locked) |
 | Double tap (300ms) | node | Node menu in the bottom panel |
 | Double tap | edge | Edge menu in the bottom panel |
@@ -199,24 +204,31 @@ panel area; an already-visible object never moves, and any user gesture
 cancels the tween. Submenus (kind picker, color swatches) open one level
 down inside the same panel. Destructive rows confirm in place: first tap
 arms ("tap again"), second fires. Sheets survive only for text work (create
-form, inspector, notes, route query, note search).
+form, notes, route query, note search).
 
 - **Node menu**: New successor (creates a node this one points to:
   goal/task/record), New predecessor (creates a node pointing here:
   goal/task — records are leaves, so neither a record node nor a record
-  predecessor can point at anything), Edit details (inspector),
-  one row per legal status transition labeled by target state
-  (Start / Pause / Mark done / Reopen; goals only Mark done / Reopen;
-  records none), Color (palette + Default), Copy (trimmed payload
-  snapshot), Remove. New nodes fan out around the anchor at the golden
-  angle (radius 120).
+  predecessor can point at anything), Color (palette + Default), Copy
+  (trimmed payload snapshot), Remove. New nodes fan out around the anchor
+  at the golden angle (radius 120).
 - **Edge menu**: Expand (leaf edges only), Summarize with… (multi-select
   same-parent edges, then confirm), Copy (deep), Straighten (only when
   bent), Color, Remove edge.
 - **Create menu** (double-tap empty canvas): Goal / Task / Record at the
-  tapped point, plus Paste when the clipboard is non-empty.
-- **Inspector** (edit title/description/note + status actions): text saves
-  on Save; status buttons act immediately.
+  tapped point, plus Paste when the clipboard is non-empty, plus **Load life
+  roadmap** — a separated destructive row (two-tap confirm) that replaces
+  the whole map with the seed via one `replaceDoc` edit, so undo restores
+  the old map; lens and camera reset to a folded, centered view.
+- **Inline editing**: on the node's single-tap info card, tapping the
+  title or the description/note row turns it into a text field in place
+  (the panel rides above the keyboard); the edit commits on submit, on
+  blur, or when the card dismisses. The card also carries the status row:
+  current status plus one button per legal transition (tasks Start /
+  Pause / Mark done / Reopen; goals only Mark done / Reopen, toggling the
+  manual completion flag; records none), acting immediately. The edge
+  card carries inline color swatches (palette + Default, applied
+  immediately, undoable).
 - **Notes**: the node's single-tap info card shows only a peek of the
   newest note; tapping it opens the modal notes sheet — full list
   (newest first), add, edit, delete (in-place two-tap). Text entry opens
@@ -237,13 +249,20 @@ form, inspector, notes, route query, note search).
 - Mode banners (dark pill) announce only genuinely multi-step modes:
   summarize and bend-drag — each with Cancel.
 
-### 3.5 Demo seed
+### 3.5 First-launch seed
 
-First launch (empty DB) seeds a demo map: Health/Career/Family/Friends goals,
-a 3-layer expanded Health→Career road with side branches, tasks in every
-status, a manual goal completion, a record, an isolated node, and a
-route-test subgraph (5 valid directed paths RT Start→RT End plus a dead end
-and a wrong-direction back-road).
+First launch (empty DB) seeds the owner's real map (`src/domain/seedDoc.ts`):
+three independent life areas, each ONE directed road from its first step to
+its main goal as destination — Life Map App (canvas → persistence → polish →
+trust-blocker checklist → the daily-driver goal, target Oct 15), Get
+Stronger (gear up → the 12-week program, its approach segment expanded into
+week phases → squat → bench → deadlift → the goal), and English (Anki &
+journal → listening → a whole book → a language partner → the fluency goal).
+Records dot the roadsides, backdated June→September 2026; each road takes
+its area's palette color; an isolated "Ideas" node floats unconnected. What
+the model could not express is recorded in `GAPS.md`. The same seed loads on
+demand from the create menu's "Load life roadmap" row (§3.4) — no reinstall
+needed.
 
 ---
 

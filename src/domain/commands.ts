@@ -215,6 +215,17 @@ export function setEdgeBend(id: Id, bend: { x: number; y: number } | null): Reci
   };
 }
 
+// swap in a whole document (the seed loader): one edit, so undo restores
+// the previous map in a single step
+export function replaceDoc(next: LifeMapDoc): Recipe {
+  return (draft) => {
+    draft.nodes = next.nodes;
+    draft.edges = next.edges;
+    draft.rootNodeIds = next.rootNodeIds;
+    draft.rootEdgeIds = next.rootEdgeIds;
+  };
+}
+
 // ---------- deletion ----------
 
 export function removeNode(id: Id): Recipe {

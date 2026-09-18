@@ -22,16 +22,16 @@ import {
   Recipe,
   removeEdge,
   removeNode,
-  renameNode,
+  replaceDoc,
   setEdgeBend,
   setEdgeColor,
   setNodeColor,
-  setNodeDetail,
   summarizeEdges,
   updateNote,
 } from "@/domain/commands";
 import { ClipboardPayload, snapshotEdge, snapshotNode, snapshotRoad } from "@/domain/clipboard";
-import { EdgeData, isGoal, isRecord, NodeData } from "@/domain/doc";
+import { EdgeData, NodeData } from "@/domain/doc";
+import { buildSeedDoc } from "@/domain/seedDoc";
 import { visibleEdges } from "@/domain/visibility";
 import { useDocStore } from "@/state/docStore";
 import { computeFitView } from "@/map/fitZoom";
@@ -49,7 +49,7 @@ import { useNoteSearch } from "@/map/hooks/useNoteSearch";
 import { useRouteQuery } from "@/map/hooks/useRouteQuery";
 import { useZoomLens } from "@/map/hooks/useZoomLens";
 import { CreateMenu, EdgeMenu, NodeMenu, RoadMenu } from "@/map/overlays/menus";
-import { CreateNodeForm, InspectorSheet } from "@/map/overlays/forms";
+import { CreateNodeForm } from "@/map/overlays/forms";
 import { MapInfoCard } from "@/map/overlays/mapInfoCard";
 import { NoteEditorSheet, NotesSheet } from "@/map/overlays/notes";
 import { RoutesModal } from "@/map/overlays/routesModal";
@@ -139,10 +139,6 @@ export default function MapScreen() {
   // creation flow: what the form is making
   const [createTarget, setCreateTarget] = useState<CreateTarget | null>(null);
   const [draft, setDraft] = useState({ title: "", detail: "" });
-  // inspector flow: which node's panel is open, and its editable text.
-  // Status buttons act immediately; title/description/note wait for Save.
-  const [inspectorNodeId, setInspectorNodeId] = useState<string | null>(null);
-  const [inspectorDraft, setInspectorDraft] = useState({ title: "", detail: "" });
   // notes flow: the info card shows only a peek of the newest note; the
   // notes sheet (notesNodeId) holds the full list, and the note being
   // added or edited sits in the editor sheet (noteId present = editing
@@ -161,7 +157,6 @@ export default function MapScreen() {
     setNodeFocusId(null);
     setMenuNodeId(null);
     setMenuEdgeId(null);
-    setInspectorNodeId(null);
     setNotesNodeId(null);
     setNoteDraft(null);
     setCreatePicker(null);
@@ -368,7 +363,7 @@ export default function MapScreen() {
   }, []);
 
   // load the persisted map once on mount; the store seeds (and persists)
-  // the demo map itself when the database is empty or unreadable
+  // the initial map itself when the database is empty or unreadable
   useEffect(() => {
     useDocStore.getState().load({ width, height });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -498,37 +493,6 @@ export default function MapScreen() {
     routeQuery.openWithSelection(selectionEnds);
   };
 
-  // "Edit details" in the node menu: seed the inspector draft from the
-  // node, then open it (the goal's detail is its description, the
-  // record's is its note; tasks have no detail field)
-  const openInspector = (id: string) => {
-    const node = doc.nodes[id];
-    if (!node) return;
-    setMenuNodeId(null);
-    setInfoTarget(null);
-    setInspectorDraft({
-      title: node.title,
-      detail: isGoal(node) ? (node.description ?? "") : isRecord(node) ? (node.note ?? "") : "",
-    });
-    setInspectorNodeId(id);
-  };
-
-  const saveInspector = () => {
-    if (!inspectorNodeId) return;
-    const node = doc.nodes[inspectorNodeId];
-    if (!node) return;
-    const title = inspectorDraft.title.trim();
-    if (!title) return;
-    const id = node.id;
-    const detail = inspectorDraft.detail;
-    // one composed recipe: the whole save is a single undo step
-    run((d) => {
-      renameNode(id, title)(d);
-      setNodeDetail(id, detail)(d);
-    });
-    setInspectorNodeId(null);
-  };
-
   // the note editor opens over the notes sheet / info card (they stay
   // put underneath); closing just returns to them
   const closeNoteEditor = () => setNoteDraft(null);
@@ -555,7 +519,6 @@ export default function MapScreen() {
     setDragArmedId(null);
     setMenuNodeId(null);
     setMenuEdgeId(null);
-    setInspectorNodeId(null);
     setInfoTarget({ kind: "node", id });
     // spotlight the node's directly-connected edges (visual only)
     setNodeFocusId(id);
@@ -764,6 +727,21 @@ export default function MapScreen() {
     setZoomEdgeIds(p.rootEdgeIds);
   };
 
+  // load the life-roadmap seed over the current map (create menu's
+  // destructive row): a single replaceDoc edit, so undo restores the
+  // previous map. The lens, history and camera reset to a folded,
+  // centered view of the new map
+  const loadSeedRoadmap = () => {
+    run(replaceDoc(buildSeedDoc(width / 2, height / 3)));
+    zoomHistoryRef.current = [];
+    const folded = new Set<string>();
+    zoomedIdsRef.current = folded;
+    setZoomedIds(folded);
+    setZoomEdgeIds([]);
+    camera.setViewport({ x: 0, y: 0 });
+    closeOverlays();
+  };
+
   const expandEdge = (edgeId: string) => {
     const edge = useDocStore.getState().doc.edges[edgeId];
     if (!edge) return;
@@ -841,8 +819,8 @@ export default function MapScreen() {
     setSummarizeMode(false);
   };
 
-  // render nothing until the persisted map (or the seeded demo map) is in
-  // place, so gestures never mutate a map that is about to be replaced
+  // render nothing until the persisted map (or the seeded initial map) is
+  // in place, so gestures never mutate a map that is about to be replaced
   if (!loaded) {
     return <View style={styles.container} />;
   }
@@ -1028,13 +1006,14 @@ export default function MapScreen() {
       {/* single-tap info card: read-only peek at an edge; for a node it
           carries a peek of the newest note that opens the notes sheet.
           The camera keeps the object clear of the bottom panel */}
-      {infoTarget && !menuNodeId && !menuEdgeId && !inspectorNodeId && (
+      {infoTarget && !menuNodeId && !menuEdgeId && (
         <BottomPanel onHeight={setPanelHeight}>
           <MapInfoCard
             infoTarget={infoTarget}
             doc={doc}
             visible={visible}
             zoomedIds={zoomedIds}
+            run={run}
             onOpenNotes={(nodeId) => setNotesNodeId(nodeId)}
             onZoomStep={(deeper) => zoomSelectionStep(deeper, width / 2, height / 2)}
             onCloseEdge={() => {
@@ -1050,7 +1029,6 @@ export default function MapScreen() {
         <BottomPanel onHeight={setPanelHeight}>
           <NodeMenu
             node={menuNode}
-            run={run}
             onPickKind={(direction, kind) => {
               // the start* helpers close overlays (this menu included)
               if (direction === "successor") {
@@ -1060,7 +1038,6 @@ export default function MapScreen() {
                 startCreateReverse(kind, menuNode.id);
               }
             }}
-            onEditDetails={() => openInspector(menuNode.id)}
             onCopy={() => {
               setClipboard(snapshotNode(doc, menuNode.id));
               setMenuNodeId(null);
@@ -1070,7 +1047,6 @@ export default function MapScreen() {
               setMenuNodeId(null);
             }}
             onRemove={() => removeNodeNow(menuNode)}
-            onDismiss={() => setMenuNodeId(null)}
           />
         </BottomPanel>
       )}
@@ -1089,6 +1065,7 @@ export default function MapScreen() {
               setCreateTarget({ mode, x: createPicker.x, y: createPicker.y });
             }}
             onPaste={() => pasteClipboardAt(createPicker.x, createPicker.y)}
+            onLoadSeed={loadSeedRoadmap}
           />
         </BottomPanel>
       )}
@@ -1216,25 +1193,6 @@ export default function MapScreen() {
         onConfirm={routeQuery.confirmPickedRoutes}
         onClose={() => routeQuery.setRoutes([])}
       />
-
-      {/* inspector: edit the node's info. Status buttons act at
-          once through run(); text edits stay local until Save */}
-      {inspectorNodeId &&
-        (() => {
-          const node = doc.nodes[inspectorNodeId];
-          if (!node) return null;
-          return (
-            <InspectorSheet
-              node={node}
-              doc={doc}
-              draft={inspectorDraft}
-              onDraftChange={setInspectorDraft}
-              run={run}
-              onSave={saveInspector}
-              onClose={() => setInspectorNodeId(null)}
-            />
-          );
-        })()}
 
       {/* create form: goal (title + description), task (title),
           record (title + note) */}

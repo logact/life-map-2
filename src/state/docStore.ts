@@ -2,9 +2,14 @@ import { applyPatches, enablePatches, Patch, produceWithPatches } from "immer";
 import { create } from "zustand";
 
 import { Recipe } from "@/domain/commands";
-import { buildDemoDoc } from "@/domain/demoDoc";
+import { buildSeedDoc } from "@/domain/seedDoc";
 import { emptyDoc, LifeMapDoc } from "@/domain/doc";
-import { loadDoc, scheduleSave } from "@/data/mapDb";
+import { getMeta, loadDoc, scheduleSave, setMeta } from "@/data/mapDb";
+
+// records that the real-life seed has been applied: installs that predate
+// the seed (they hold the old demo map) get it once, on their first launch
+// after the seed shipped, and never again — later edits are the user's own
+const SEED_APPLIED_KEY = "seed_applied";
 
 enablePatches();
 
@@ -24,8 +29,8 @@ interface HistoryEntry {
 
 export interface DocStore {
   doc: LifeMapDoc;
-  // false until the persisted map (or the seeded demo map) is in place, so
-  // gestures never mutate a map that is about to be replaced
+  // false until the persisted map (or the seeded initial map) is in place,
+  // so gestures never mutate a map that is about to be replaced
   loaded: boolean;
   canUndo: boolean;
   canRedo: boolean;
@@ -82,17 +87,25 @@ export function createDocStore() {
       // load NEVER leaves the app on a blank screen: any failure (corrupt
       // rows, open failure, first launch) resolves to a valid seeded document
       try {
-        const doc = await loadDoc();
-        if (doc) {
+        const [doc, seedApplied] = await Promise.all([loadDoc(), getMeta(SEED_APPLIED_KEY)]);
+        if (doc && seedApplied !== null) {
           set({ doc, loaded: true });
           return;
         }
+        console.log(
+          doc
+            ? "[docStore] replacing the pre-seed map with the initial seed (once)"
+            : "[docStore] empty database, seeding the initial map",
+        );
       } catch (err) {
-        console.warn("[docStore] load failed, seeding demo map", err);
+        console.warn("[docStore] load failed, seeding initial map", err);
       }
-      const doc = buildDemoDoc(screen.width / 2, screen.height / 3);
+      const doc = buildSeedDoc(screen.width / 2, screen.height / 3);
       set({ doc, loaded: true });
       scheduleSave(doc);
+      setMeta(SEED_APPLIED_KEY, "1").catch((err) =>
+        console.warn("[docStore] seed flag save failed", err),
+      );
     },
   }));
 }

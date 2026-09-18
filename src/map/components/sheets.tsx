@@ -3,50 +3,13 @@ import { Pressable, Text, View } from "react-native";
 import { LONG_PRESS_MS } from "../constants";
 import { styles } from "../styles";
 
-// small outlined pill used for the inspector's status actions
+// small outlined pill used for in-panel actions (the edge card's zoom
+// controls, the notes sheet's edit/delete)
 export function SheetButton(props: { label: string; onPress: () => void }) {
   return (
     <Pressable style={styles.inspectorButton} onPress={props.onPress}>
       <Text style={styles.inspectorButtonText}>{props.label}</Text>
     </Pressable>
-  );
-}
-
-// peek card content for a single tap: title plus a few fact lines,
-// rendered inside the bottom panel. Read-only by default
-// (pointerEvents="none", canvas touches pass through and dismiss it);
-// with actions/onClose it becomes interactive — the edge card's zoom
-// controls and close button
-export function InfoCard(props: {
-  title: string;
-  lines: string[];
-  actions?: { label: string; onPress: () => void }[];
-  onClose?: () => void;
-}) {
-  const interactive = props.actions !== undefined || props.onClose !== undefined;
-  return (
-    <View style={styles.infoCard} pointerEvents={interactive ? "auto" : "none"}>
-      <View style={styles.infoHeader}>
-        <Text style={[styles.infoTitle, { flex: 1 }]}>{props.title}</Text>
-        {props.onClose && (
-          <Pressable onPress={props.onClose} hitSlop={8}>
-            <Text style={styles.infoClose}>✕</Text>
-          </Pressable>
-        )}
-      </View>
-      {props.lines.map((l, i) => (
-        <Text key={i} style={styles.infoMeta}>
-          {l}
-        </Text>
-      ))}
-      {props.actions && props.actions.length > 0 && (
-        <View style={styles.infoActions}>
-          {props.actions.map((a) => (
-            <SheetButton key={a.label} label={a.label} onPress={a.onPress} />
-          ))}
-        </View>
-      )}
-    </View>
   );
 }
 

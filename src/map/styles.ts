@@ -288,13 +288,6 @@ export const styles = StyleSheet.create({
     fontSize: 13,
     color: INK.secondary,
   },
-  menuBackdrop: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
   formBackdrop: {
     flex: 1,
     backgroundColor: BACKDROP,
@@ -353,32 +346,6 @@ export const styles = StyleSheet.create({
     color: "#ffffff",
     fontWeight: "600",
   },
-  inspectorWrap: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  inspectorSheet: {
-    backgroundColor: "#ffffff",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    borderTopWidth: 1,
-    borderColor: INK.subtle,
-    padding: 24,
-    gap: 14,
-  },
-  inspectorStatusRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  inspectorStatusText: {
-    fontSize: 14,
-    color: INK.primary,
-    fontWeight: "600",
-  },
   inspectorButton: {
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -391,12 +358,8 @@ export const styles = StyleSheet.create({
     color: INK.primary,
     fontWeight: "600",
   },
-  inspectorMeta: {
-    fontSize: 12,
-    color: INK.secondary,
-  },
-  // read-only peek card content; rendered inside the BottomPanel shell,
-  // which provides the card chrome
+  // info card content; rendered inside the BottomPanel shell, which
+  // provides the card chrome. The node's title/detail edit in place here
   infoCard: {
     width: "100%",
     gap: 4,
@@ -425,6 +388,78 @@ export const styles = StyleSheet.create({
   infoMeta: {
     fontSize: 13,
     color: INK.secondary,
+  },
+  // inline editing on the node info card: the inputs keep the display
+  // text's metrics, marked as editable by a subtle underline/border
+  infoTitleInput: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: INK.primary,
+    padding: 0,
+    paddingVertical: 2,
+    borderBottomWidth: 1,
+    borderBottomColor: INK.secondary,
+  },
+  infoDetailPlaceholder: {
+    fontSize: 13,
+    color: INK.secondary,
+    fontStyle: "italic",
+  },
+  infoDetailInput: {
+    fontSize: 13,
+    color: INK.primary,
+    borderWidth: 1,
+    borderColor: INK.subtle,
+    borderRadius: 8,
+    padding: 8,
+    minHeight: 44,
+    textAlignVertical: "top",
+  },
+  // inline color editing on the edge info card: palette swatches plus a
+  // default (∅) entry; the active color carries a dark ring
+  swatchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 8,
+    flexWrap: "wrap",
+  },
+  swatch: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  swatchSelected: {
+    borderColor: INK.primary,
+  },
+  swatchDefault: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: INK.subtle,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  swatchDefaultText: {
+    fontSize: 12,
+    color: INK.secondary,
+  },
+  // status row on the node info card: current status plus one button per
+  // legal transition
+  infoStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 2,
+  },
+  infoStatusText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: INK.primary,
   },
   // notes peek on the node info card: just the newest note (truncated)
   // plus a "view all" row — the full list lives in the notes sheet
@@ -496,6 +531,12 @@ export const styles = StyleSheet.create({
     bottom: 0,
     alignItems: "center",
     padding: 16,
+  },
+  // keyboard-avoidance shell around the panel: padding mode lifts the
+  // panel above the keyboard while an info-card field is being edited
+  bottomPanelKav: {
+    width: "100%",
+    alignItems: "center",
   },
   bottomPanel: {
     width: "100%",

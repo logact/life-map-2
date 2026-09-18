@@ -1,30 +1,37 @@
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 
-import { enablePatches, produceWithPatches } from "immer";
+import { enablePatches, produce, produceWithPatches } from "immer";
 
-import { addChildNode, addFreeNode, expandEdge, moveNode, renameNode } from "../commands";
+import { addChildNode, addFreeNode, expandEdge, moveNode, renameNode, replaceDoc } from "../commands";
 import { emptyDoc, LifeMapDoc } from "../doc";
-import { buildDemoDoc } from "../demoDoc";
-import { docToRows, loadDoc, rowsToDoc } from "@/data/mapDb";
+import { buildSeedDoc } from "../seedDoc";
+import { docToRows, getMeta, loadDoc, rowsToDoc, setMeta } from "@/data/mapDb";
 import { createDocStore } from "@/state/docStore";
 
 enablePatches();
 
 // docStore imports mapDb (expo-sqlite); the store tests don't touch the DB,
-// so only the two side-effecting functions are mocked
+// so only the side-effecting functions are mocked
 const savedDocs: LifeMapDoc[] = [];
 jest.mock("@/data/mapDb", () => ({
   ...jest.requireActual<typeof import("@/data/mapDb")>("@/data/mapDb"),
   scheduleSave: jest.fn((doc: LifeMapDoc) => savedDocs.push(doc)),
   loadDoc: jest.fn(),
+  getMeta: jest.fn(),
+  setMeta: jest.fn(),
 }));
 
 
 const mockLoadDoc = loadDoc as jest.MockedFunction<typeof loadDoc>;
+const mockGetMeta = getMeta as jest.MockedFunction<typeof getMeta>;
+const mockSetMeta = setMeta as jest.MockedFunction<typeof setMeta>;
 
 beforeEach(() => {
   savedDocs.length = 0;
   mockLoadDoc.mockReset();
+  // default: the seed flag is already written, so a persisted doc loads as-is
+  mockGetMeta.mockReset().mockResolvedValue("1");
+  mockSetMeta.mockReset().mockResolvedValue(undefined);
 });
 
 describe("docStore", () => {
@@ -99,29 +106,76 @@ describe("docStore", () => {
     expect(store.getState().canUndo).toBe(false);
   });
 
-  it("load falls back to a seeded demo doc on failure — never a blank screen (B2)", async () => {
+  it("load falls back to a seeded doc on failure — never a blank screen (B2)", async () => {
     mockLoadDoc.mockRejectedValue(new Error("db exploded"));
     const store = createDocStore();
     await store.getState().load({ width: 800, height: 600 });
     const s = store.getState();
     expect(s.loaded).toBe(true);
-    expect(Object.keys(s.doc.nodes).length).toBeGreaterThan(0); // demo content
+    expect(Object.keys(s.doc.nodes).length).toBeGreaterThan(0); // seed content
     expect(savedDocs.length).toBeGreaterThan(0); // seeded doc persisted
   });
 
+  it("a pre-seed install gets the seed once, then keeps the user's map", async () => {
+    // an install from before the seed existed: content is present but the
+    // seed_applied flag was never written
+    const legacyAdd = addFreeNode("goal", "Old demo map", "", { x: 0, y: 0 });
+    const legacy = produce(emptyDoc(), legacyAdd.recipe);
+    mockLoadDoc.mockResolvedValue(legacy);
+    mockGetMeta.mockResolvedValue(null);
+    const store = createDocStore();
+    await store.getState().load({ width: 800, height: 600 });
+    const s = store.getState();
+    expect(s.loaded).toBe(true);
+    expect(s.doc).not.toBe(legacy);
+    expect(Object.values(s.doc.nodes).some((n) => n.title === "Life Map App")).toBe(true);
+    expect(savedDocs.length).toBeGreaterThan(0); // the replacement is persisted
+    expect(mockSetMeta).toHaveBeenCalledWith("seed_applied", "1");
+
+    // next launch: the flag is set, so the (possibly edited) map loads untouched
+    const seeded = store.getState().doc;
+    mockLoadDoc.mockResolvedValue(seeded);
+    mockGetMeta.mockResolvedValue("1");
+    const store2 = createDocStore();
+    await store2.getState().load({ width: 800, height: 600 });
+    expect(store2.getState().doc).toBe(seeded);
+    expect(savedDocs.length).toBe(1); // nothing re-saved
+  });
+
   it("load uses the persisted doc when present", async () => {
-    const persisted = buildDemoDoc(100, 100);
+    const persisted = buildSeedDoc(100, 100);
     mockLoadDoc.mockResolvedValue(persisted);
     const store = createDocStore();
     await store.getState().load({ width: 800, height: 600 });
     expect(store.getState().doc).toBe(persisted);
     expect(savedDocs).toHaveLength(0);
   });
+
+  it("replacing the whole doc (seed loader) is one undoable edit", () => {
+    const store = createDocStore();
+    const add = addFreeNode("goal", "G", "", { x: 1, y: 2 });
+    store.getState().run(add.recipe);
+
+    const seed = buildSeedDoc(400, 300);
+    store.getState().run(replaceDoc(seed));
+    const s = store.getState();
+    expect(s.doc.nodes[add.nodeId]).toBeUndefined();
+    expect(Object.keys(s.doc.nodes).length).toBe(Object.keys(seed.nodes).length);
+    expect(s.canUndo).toBe(true);
+    expect(s.canRedo).toBe(false);
+
+    // a single undo restores the pre-replacement map exactly
+    store.getState().undo();
+    const restored = store.getState().doc;
+    expect(Object.keys(restored.nodes)).toEqual([add.nodeId]);
+    expect(restored.edges).toEqual({});
+    expect(store.getState().canRedo).toBe(true);
+  });
 });
 
 describe("docToRows/rowsToDoc", () => {
-  it("round-trips the demo doc exactly", () => {
-    const doc = buildDemoDoc(400, 300);
+  it("round-trips the seed doc exactly", () => {
+    const doc = buildSeedDoc(400, 300);
     const rows = docToRows(doc);
     expect(rowsToDoc(rows.nodes, rows.notes, rows.edges)).toEqual(doc);
   });
@@ -141,7 +195,7 @@ describe("docToRows/rowsToDoc", () => {
   });
 
   it("skips corrupt node rows and their orphan edges instead of throwing (B2)", () => {
-    const doc = buildDemoDoc(400, 300);
+    const doc = buildSeedDoc(400, 300);
     const rows = docToRows(doc);
     rows.nodes[0].data = "{not json";
     const corruptNodeId = rows.nodes[0].id;
@@ -154,7 +208,7 @@ describe("docToRows/rowsToDoc", () => {
   });
 
   it("reads the legacy occuredAt key (pre-migration data)", () => {
-    const doc = buildDemoDoc(400, 300);
+    const doc = buildSeedDoc(400, 300);
     const rows = docToRows(doc);
     const recRow = rows.nodes.find((r) => r.kind === "record")!;
     const data = JSON.parse(recRow.data);

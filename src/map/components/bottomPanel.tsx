@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, Text, View } from "react-native";
 
 import { styles } from "../styles";
 
@@ -9,19 +9,26 @@ import { styles } from "../styles";
 // (the accommodation effect in the map screen). Non-modal: touches outside
 // the card fall through to the canvas, which dismisses the panel and
 // retargets in the same motion. Reports its height so the camera knows
-// how much room to make.
+// how much room to make. The info card edits text in place, so the panel
+// rides above the keyboard (padding avoidance, same policy as the sheets).
 export function BottomPanel(props: {
   onHeight: (height: number) => void;
   children: React.ReactNode;
 }) {
   return (
     <View style={styles.bottomPanelWrap} pointerEvents="box-none">
-      <View
-        style={styles.bottomPanel}
-        onLayout={(e) => props.onHeight(e.nativeEvent.layout.height)}
+      <KeyboardAvoidingView
+        style={styles.bottomPanelKav}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        pointerEvents="box-none"
       >
-        {props.children}
-      </View>
+        <View
+          style={styles.bottomPanel}
+          onLayout={(e) => props.onHeight(e.nativeEvent.layout.height)}
+        >
+          {props.children}
+        </View>
+      </KeyboardAvoidingView>
     </View>
   );
 }

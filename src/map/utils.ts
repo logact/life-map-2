@@ -29,10 +29,19 @@ export function nodeSize(kind: NodeKind): number {
   return NODE_SIZE;
 }
 
-// golden angle: successive children fan out around the parent without
-// landing on top of each other
-export function childPosition(parent: NodeData, index: number): { x: number; y: number } {
-  const angle = index * 2.4; // ~137.5 degrees
+// roads read as climbing straight from bottom to top: a successor lands
+// directly above its anchor, a predecessor directly below (screen y points
+// down, so "above" is a negative angle). Repeated adds fan out within
+// 45 degrees of that line; the golden-step fraction keeps them from
+// stacking, and the first add hits the line dead-center
+export function childPosition(
+  parent: NodeData,
+  index: number,
+  side: "successor" | "predecessor",
+): { x: number; y: number } {
+  const frac = (0.5 + index * 0.618) % 1;
+  const axis = side === "successor" ? -Math.PI / 2 : Math.PI / 2;
+  const angle = axis + (frac - 0.5) * (Math.PI / 2);
   return {
     x: parent.x + Math.cos(angle) * CHILD_RADIUS,
     y: parent.y + Math.sin(angle) * CHILD_RADIUS,

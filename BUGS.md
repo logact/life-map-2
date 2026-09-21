@@ -126,7 +126,7 @@ Tip offset uses world `nodeSize/2`, but at ≥ 1× zoom nodes render at a fixed 
 
 `src/app/map.tsx:321`, `:1953`, `:1980`
 
-Golden-angle index derives from current edge count; after removing a child, the next add reuses an angle and stacks exactly on a sibling.
+Fan-slot index derives from current edge count; after removing a child, the next add reuses a fan slot and stacks exactly on a sibling.
 
 - **Fix:** derive the angle from surviving children's actual positions (first free slot), or keep a per-parent monotonically increasing counter.
 - **Verify:** add 3 children, delete one, add another → no overlap.

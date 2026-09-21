@@ -47,7 +47,7 @@ Ordered so early items unblock later ones.
   `onPanResponderTerminate` → `onDragEnd` → `run()`: a system-stolen drag persists a partial position and pushes an undo entry. Add `onDragCancel` that resets `drag`/`dragArmedId` without committing.
 
 - [ ] **B10. Child nodes overlap after a deletion. 🟡** `src/app/map.tsx:321` + `:1953`/`:1980`.
-  Golden-angle index derives from the *current* edge count; after removing a child, the next add reuses its angle and lands exactly on a sibling. Track a monotonic per-parent child counter (needs B17's migration) or derive the angle from existing children's actual angles.
+  Fan-slot index derives from the *current* edge count; after removing a child, the next add reuses its fan slot and lands exactly on a sibling. Track a monotonic per-parent child counter (needs B17's migration) or derive the slot from existing children's actual positions.
 
 ### Phase 3 — interaction & rendering correctness
 

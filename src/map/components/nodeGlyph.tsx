@@ -81,11 +81,11 @@ function DraggableNode(props: {
   onConnectEnd: (id: string, pageX: number, pageY: number) => void;
 }) {
   const size = props.size;
-  // task corners keep their 12/56 ratio under the zoom
-  const borderRadius = props.n.kind === "task" ? size * (12 / 56) : size / 2;
+  // task corners round at a fixed share of the pin, so they scale with it
+  const borderRadius = props.n.kind === "task" ? size * 0.2 : size / 2;
   // the title tracks the pin: natural size at >= 1x, shrinking (with a
   // floor) when zoomed out, and dropping out when the node becomes a dot
-  const baseFont = props.n.kind === "record" ? 9 : 13;
+  const baseFont = props.n.kind === "record" ? 8 : 11;
   const fontSize = Math.max(6, Math.round(baseFont * props.shrink));
   const showTitle = size >= 18;
   // keep even the smallest node tappable at a comfortable touch target
@@ -245,7 +245,7 @@ export function CanvasNode(props: {
   // camera, so a zoomed-out view keeps its proportions (no overlap)
   const shrink = Math.min(1, props.camScale);
   const size = nodeSize(n.kind) * shrink;
-  const borderRadius = n.kind === "task" ? size * (12 / 56) : size / 2;
+  const borderRadius = n.kind === "task" ? size * 0.2 : size / 2;
   const pulsing = n.status === "in-progress" && !props.reduceMotion;
   // outline style carries status: todo=dashed, in-progress=dotted
   // (breathing ring when motion is allowed), done=solid

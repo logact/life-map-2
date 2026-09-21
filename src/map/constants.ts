@@ -1,8 +1,8 @@
 // ---------- Shared constants for the map screen ----------
 
-export const NODE_SIZE = 72;
-export const TASK_SIZE = 56;
-export const RECORD_SIZE = 30;
+export const NODE_SIZE = 52;
+export const TASK_SIZE = 40;
+export const RECORD_SIZE = 20;
 
 // double tap on empty canvas = pick a node kind and create it there;
 // long-press on a node or edge arms it for dragging (move the node /
@@ -32,8 +32,8 @@ export const LENS_FRAME_FILL = 0.6;
 // domain search also stops at its own hop limit)
 export const MAX_ROUTE_CANDIDATES = 8;
 
-// golden angle: successive children fan out around the parent without
-// landing on top of each other
+// new successors / predecessors land this far from their anchor — directly
+// above / below, fanning out when the spot is taken (roads climb bottom to top)
 export const CHILD_RADIUS = 120;
 
 // a collapsed edge is broken into one segment per hidden child edge;

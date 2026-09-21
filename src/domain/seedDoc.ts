@@ -65,31 +65,34 @@ export function buildSeedDoc(cx: number, cy: number): LifeMapDoc {
     steps.push(addNote(id, text).recipe);
   };
 
-  const ROAD = cy - 40;
+  // the road climbs straight from the bottom of the map to the top — the
+  // same direction new successors grow in, so the tour teaches the map's
+  // reading direction by example
+  const ry = (i: number) => Math.round(cy + 350 - i * 100);
 
-  const sTap = lesson("Tap any node — its card opens below", cx - 560, ROAD);
+  const sTap = lesson("Tap any node — its card opens below", cx, ry(0));
   done(sTap);
   note(sTap, "The card holds the dates, the status buttons, and the title — tap the title to edit it in place.");
   record(
     sTap,
     "Records are dated dots",
     "A moment on a step's roadside. Records are leaves: nothing attaches under them.",
-    cx - 630,
-    ROAD + 90,
+    cx - 90,
+    ry(0) + 20,
   );
 
-  const sNotes = lesson("Notes hide one tap deeper", cx - 400, ROAD);
+  const sNotes = lesson("Notes hide one tap deeper", cx, ry(1));
   done(sNotes);
   // notes stack newest-first: the older line goes in first, so the card's
   // peek shows the one that explains the sheet
   note(sNotes, "Goals, tasks, and records all carry notes like this one.");
   note(sNotes, "Tap the peeked note on my card to open the full sheet — add, edit, delete.");
 
-  const sDrag = lesson("Long-press to drag me anywhere", cx - 240, ROAD);
+  const sDrag = lesson("Long-press to drag me anywhere", cx, ry(2));
   started(sDrag);
   note(sDrag, "Long-press a node to move it. Long-press an edge, then drag, to bend it.");
 
-  const sConnect = lesson("Connect: drag from my ring to another node", cx - 80, ROAD);
+  const sConnect = lesson("Connect: drag from my ring to another node", cx, ry(3));
   note(
     sConnect,
     "Tap a node to focus it — the ring is its connect handle. Drag direction = road direction; drop anywhere else to cancel.",
@@ -100,16 +103,16 @@ export function buildSeedDoc(cx: number, cy: number): LifeMapDoc {
   const gMilestone = goal(
     "Goals are the destinations",
     "Every road ends at a goal. Reach one, tap it, Mark done — Reopen undoes it.",
-    cx + 80,
-    ROAD,
+    cx,
+    ry(4),
     BLUE,
   );
   steps.push(transitionNodeStatus(gMilestone, "complete"));
 
-  const sCreate = lesson("Double-tap empty space to create", cx + 240, ROAD);
+  const sCreate = lesson("Double-tap empty space to create", cx, ry(5));
   note(sCreate, "Goal, task, or record at the tapped point. The same menu can reload this tutorial.");
 
-  const sLayers = lesson("Roads have layers — pinch to peek inside", cx + 400, ROAD);
+  const sLayers = lesson("Roads have layers — pinch to peek inside", cx, ry(6));
   note(
     sLayers,
     "The road into me hides two steps. Pinch spread — or tap the segment and Zoom in — to reveal them; squeeze folds back.",
@@ -118,8 +121,8 @@ export function buildSeedDoc(cx: number, cy: number): LifeMapDoc {
   const gYours = goal(
     "Make this map yours",
     "Rename me, drag me, delete me — then double-tap the canvas and start your own road. Undo is top-right, always.",
-    cx + 560,
-    ROAD,
+    cx,
+    ry(7),
     BLUE,
   );
 
@@ -131,14 +134,14 @@ export function buildSeedDoc(cx: number, cy: number): LifeMapDoc {
   // the last stretch is layered: two micro-lessons hide inside the segment
   // (pinch or Zoom in on it to see them)
   const intoLayers = road(sCreate, sLayers);
-  const z1 = expandEdge(intoLayers, { dx: 0, dy: -40 });
+  const z1 = expandEdge(intoLayers);
   steps.push(z1.recipe, renameNode(z1.midNodeId, "Spread to zoom into a road"));
-  const z2 = expandEdge(z1.childEdgeIds[1], { dx: 0, dy: -40 });
+  const z2 = expandEdge(z1.childEdgeIds[1]);
   steps.push(z2.recipe, renameNode(z2.midNodeId, "Squeeze to fold it back"));
   road(sLayers, gYours);
 
   // stray thoughts park off the road until they earn one — isolated on purpose
-  goal("Ideas", "Park stray thoughts here — no road until one is earned.", cx, cy + 150, "#999933");
+  goal("Ideas", "Park stray thoughts here — no road until one is earned.", cx + 110, cy + 270, "#999933");
 
   let doc = emptyDoc();
   for (const recipe of steps) {

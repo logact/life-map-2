@@ -20,7 +20,7 @@ export const styles = StyleSheet.create({
     borderColor: "#d4d4d9",
     alignItems: "center",
     justifyContent: "center",
-    padding: 6,
+    padding: 4,
     ...SHADOW.card,
   },
   nodeSelected: {
@@ -58,13 +58,13 @@ export const styles = StyleSheet.create({
     padding: 2,
   },
   nodeTitle: {
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: "600",
     color: INK.primary,
     textAlign: "center",
   },
   nodeTitleRecord: {
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: "500",
   },
   queryButton: {

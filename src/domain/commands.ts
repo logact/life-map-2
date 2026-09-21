@@ -247,10 +247,10 @@ export function removeEdge(id: Id): Recipe {
 // ---------- structure ----------
 
 // insert a synthetic midpoint task into a leaf edge, as two child edges:
-// from -> mid -> to. The midpoint sits between the endpoints, bowed out
-// perpendicular so the bend shows; the default bow grows with the edge
-// (min 60) so both halves keep room for further expansion at any depth.
-// Marked synthetic so status rollups skip it.
+// from -> mid -> to. By default the midpoint sits dead-center on the road
+// line between the endpoints — on a vertical road that's directly above
+// the lower node and directly under the upper one. Marked synthetic so
+// status rollups skip it.
 export function expandEdge(edgeId: Id, offset?: { dx: number; dy: number }) {
   const mid = makeTask(0, 0, "");
   mid.synthetic = true;
@@ -271,10 +271,11 @@ export function expandEdge(edgeId: Id, offset?: { dx: number; dy: number }) {
         mid.x = mx + offset.dx;
         mid.y = my + offset.dy;
       } else {
-        const len = Math.hypot(to.x - from.x, to.y - from.y);
-        const bow = Math.max(60, len * 0.3);
-        mid.x = mx + (len > 0 ? (-(to.y - from.y) / len) * bow : 0);
-        mid.y = my + (len > 0 ? ((to.x - from.x) / len) * bow : -bow);
+        // a zero-length edge splits straight up so the midpoint doesn't
+        // stack on its endpoints
+        mid.x = mx;
+        mid.y = my;
+        if (from.x === to.x && from.y === to.y) mid.y -= 60;
       }
       draft.nodes[mid.id] = mid;
       e1.fromId = edge.fromId;

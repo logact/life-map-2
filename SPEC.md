@@ -23,9 +23,9 @@ optional `color`, `notes[]`, and adjacency lists `startEdges` / `endEdges`.
 
 | Kind   | Class    | Shape on map            | Extra fields |
 |--------|----------|-------------------------|--------------|
-| Goal   | `Goal`   | Large circle (72)       | `description?`, `targetDate?`, `completedAt?` |
-| Task   | `Task`   | Rounded square (56)     | `status` (stored), `startedAt?`, `completedAt?` |
-| Record | `Record` | Small dot (30)          | `note`, `createdAt`, `occuredAt` — a leaf; nothing attaches under it |
+| Goal   | `Goal`   | Large circle (52)       | `description?`, `targetDate?`, `completedAt?` |
+| Task   | `Task`   | Rounded square (40)     | `status` (stored), `startedAt?`, `completedAt?` |
+| Record | `Record` | Small dot (20)          | `note`, `createdAt`, `occuredAt` — a leaf; nothing attaches under it |
 
 ### 1.2 Edges — directed roads with layers
 
@@ -154,7 +154,7 @@ from domain objects directly. Flow: gesture → `run(mutate)` → mutate domain 
   only, ≤ 1, floor 0.25) applies only when the **fit button** (one-tap
   overview) is pressed.
 - *Pinch zoom* multiplies the base camera (0.25×–4×), anchored at the pinch
-  midpoint. Nodes render at natural size (72/56/30) at ≥ 1×; below 1× pins
+  midpoint. Nodes render at natural size (52/40/20) at ≥ 1×; below 1× pins
   and titles shrink with the camera (titles drop out under 18px pins), so
   proportions — and no-overlap — hold at every zoom. Lens steps
   reveal/collapse children in place — a spread that lands too cramped
@@ -216,8 +216,9 @@ form, notes, route query, note search).
   goal/task/record), New predecessor (creates a node pointing here:
   goal/task — records are leaves, so neither a record node nor a record
   predecessor can point at anything), Color (palette + Default), Copy
-  (trimmed payload snapshot), Remove. New nodes fan out around the anchor
-  at the golden angle (radius 120).
+  (trimmed payload snapshot), Remove. New nodes land along the road
+  direction: successors directly above the anchor, predecessors directly
+  below, fanning out within 45 degrees of that line (radius 120).
 - **Edge menu**: Expand (leaf edges only), Summarize with… (multi-select
   same-parent edges, then confirm), Copy (deep), Straighten (only when
   bent), Color, Remove edge.

@@ -693,16 +693,19 @@ export default function MapScreen() {
     if (!title) return;
     const detail = draft.detail.trim();
 
-    // fan new nodes around the anchor; index from existing links so
-    // repeated adds don't stack nodes on top of each other
-    const degree = (id: string) =>
-      Object.values(doc.edges).filter((e) => e.fromId === id || e.toId === id).length;
+    // fan new nodes along the road direction (see childPosition); index by
+    // the same-direction edge count so repeated adds don't stack nodes on
+    // top of each other
+    const outDegree = (id: string) =>
+      Object.values(doc.edges).filter((e) => e.fromId === id).length;
+    const inDegree = (id: string) =>
+      Object.values(doc.edges).filter((e) => e.toId === id).length;
 
     if ("childId" in createTarget) {
       // predecessor: the new node points at the current one
       const child = doc.nodes[createTarget.childId];
       if (!child) return;
-      const pos = childPosition(child, degree(child.id));
+      const pos = childPosition(child, inDegree(child.id), "predecessor");
       run(addParentNode(createTarget.childId, createTarget.mode, title, detail, pos).recipe);
     } else if ("x" in createTarget) {
       // free node at the double-tapped position
@@ -713,7 +716,7 @@ export default function MapScreen() {
     } else if ("parentId" in createTarget) {
       const parent = doc.nodes[createTarget.parentId];
       if (!parent) return;
-      const pos = childPosition(parent, degree(parent.id));
+      const pos = childPosition(parent, outDegree(parent.id), "successor");
       run(addChildNode(createTarget.parentId, createTarget.mode, title, detail, pos).recipe);
     }
     setCreateTarget(null);

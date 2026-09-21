@@ -246,6 +246,59 @@ export function removeEdge(id: Id): Recipe {
 
 // ---------- structure ----------
 
+// insert a REAL node mid-road: A -> B becomes A -> N -> B. The two halves
+// take over the old edge's slot and parent (same layer), inherit its color,
+// and the old edge's sub-road (if any) rides with the half that still
+// travels to the original destination. Records can't be inserted: they are
+// leaves, and a mid-road record would have to point onward.
+export function insertNodeIntoEdge(
+  edgeId: Id,
+  kind: NodeKind,
+  title: string,
+  detail: string,
+  pos: { x: number; y: number },
+) {
+  if (kind === "record") throw new DomainError("records are leaves");
+  const node = makeNodeOfKind(kind, pos.x, pos.y, title, detail);
+  const e1 = makeEdgeData("", node.id, null);
+  const e2 = makeEdgeData(node.id, "", null);
+  return {
+    nodeId: node.id,
+    edgeIds: [e1.id, e2.id] as Id[],
+    recipe: (draft: Draft<LifeMapDoc>) => {
+      const edge = draft.edges[edgeId];
+      if (!edge) throw new DomainError(`no such edge: ${edgeId}`);
+      const from = mustNode(draft, edge.fromId);
+      mustNode(draft, edge.toId);
+      // stacked endpoints would hide the new node under the pile
+      if (from.x === node.x && from.y === node.y) node.y -= 60;
+      e1.fromId = edge.fromId;
+      e1.parentEdgeId = edge.parentEdgeId;
+      e1.color = edge.color;
+      e2.toId = edge.toId;
+      e2.parentEdgeId = edge.parentEdgeId;
+      e2.color = edge.color;
+      e2.childEdgeIds = edge.childEdgeIds;
+      for (const childId of edge.childEdgeIds) {
+        const child = draft.edges[childId];
+        if (child) child.parentEdgeId = e2.id;
+      }
+      // the halves replace the old edge at its exact slot, keeping the
+      // container's layout order
+      const container = edge.parentEdgeId
+        ? draft.edges[edge.parentEdgeId]?.childEdgeIds
+        : draft.rootEdgeIds;
+      const at = container?.indexOf(edgeId) ?? -1;
+      if (container && at >= 0) container.splice(at, 1, e1.id, e2.id);
+      else container?.push(e1.id, e2.id);
+      draft.edges[e1.id] = e1;
+      draft.edges[e2.id] = e2;
+      draft.nodes[node.id] = node;
+      delete draft.edges[edgeId];
+    },
+  };
+}
+
 // insert a synthetic midpoint task into a leaf edge, as two child edges:
 // from -> mid -> to. By default the midpoint sits dead-center on the road
 // line between the endpoints — on a vertical road that's directly above

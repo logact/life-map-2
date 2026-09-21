@@ -10,6 +10,7 @@ import {
   connectNodes,
   DomainError,
   expandEdge,
+  insertNodeIntoEdge,
   moveNode,
   pastePayload,
   Recipe,
@@ -18,6 +19,7 @@ import {
   removeNote,
   renameNode,
   setEdgeBend,
+  setEdgeColor,
   setNodeColor,
   setNodeDetail,
   summarizeEdges,
@@ -134,6 +136,69 @@ describe("expandEdge", () => {
     const mid = next.nodes[ex.midNodeId];
     expect(mid.x).toBeCloseTo((a.x + b.x) / 2);
     expect(mid.y).toBeCloseTo((a.y + b.y) / 2);
+  });
+});
+
+describe("insertNodeIntoEdge", () => {
+  it("splits an edge into from -> N -> to at the old edge's slot", () => {
+    const { doc, e1, h, t1 } = fixture();
+    const ins = insertNodeIntoEdge(e1, "task", "N", "d", { x: 5, y: 5 });
+    const next = expectRoundTrip(doc, ins.recipe);
+    expect(next.edges[e1]).toBeUndefined();
+    const [h1, h2] = ins.edgeIds.map((id) => next.edges[id]);
+    expect([h1.fromId, h1.toId]).toEqual([h, ins.nodeId]);
+    expect([h2.fromId, h2.toId]).toEqual([ins.nodeId, t1]);
+    expect(h1.parentEdgeId).toBeNull();
+    expect(h2.parentEdgeId).toBeNull();
+    // the halves occupy the old edge's exact slot in rootEdgeIds
+    const slot = doc.rootEdgeIds.indexOf(e1);
+    expect(next.rootEdgeIds.slice(slot, slot + 2)).toEqual(ins.edgeIds);
+    const n = next.nodes[ins.nodeId];
+    expect(n.kind).toBe("task");
+    expect([n.title, n.x, n.y]).toEqual(["N", 5, 5]);
+  });
+
+  it("keeps the old sub-road on the half that still reaches the destination", () => {
+    let { doc, e1 } = fixture();
+    doc = run(doc, setEdgeColor(e1, "#f00"));
+    const ex = expandEdge(e1);
+    doc = run(doc, ex.recipe);
+    const ins = insertNodeIntoEdge(e1, "goal", "N", "", { x: 5, y: 5 });
+    const next = expectRoundTrip(doc, ins.recipe);
+    const [h1, h2] = ins.edgeIds.map((id) => next.edges[id]);
+    expect(h2.childEdgeIds).toEqual(ex.childEdgeIds);
+    expect(next.edges[ex.childEdgeIds[0]].parentEdgeId).toBe(h2.id);
+    expect(h1.childEdgeIds).toEqual([]);
+    // both halves inherit the old road's color
+    expect(h1.color).toBe("#f00");
+    expect(h2.color).toBe("#f00");
+  });
+
+  it("splices the halves into the parent edge's child list at the same slot", () => {
+    let { doc, e1 } = fixture();
+    const ex = expandEdge(e1); // children [H -> mid, mid -> T1]
+    doc = run(doc, ex.recipe);
+    const ins = insertNodeIntoEdge(ex.childEdgeIds[0], "task", "N", "", { x: 1, y: 1 });
+    const next = expectRoundTrip(doc, ins.recipe);
+    expect(next.edges[e1].childEdgeIds).toEqual([...ins.edgeIds, ex.childEdgeIds[1]]);
+    const [h1, h2] = ins.edgeIds.map((id) => next.edges[id]);
+    expect(h1.parentEdgeId).toBe(e1);
+    expect(h2.parentEdgeId).toBe(e1);
+  });
+
+  it("rejects records and missing edges", () => {
+    const { doc, e1 } = fixture();
+    expect(() => insertNodeIntoEdge(e1, "record", "R", "", { x: 0, y: 0 })).toThrow(DomainError);
+    const ins = insertNodeIntoEdge("nope", "task", "N", "", { x: 0, y: 0 });
+    expect(() => run(doc, ins.recipe)).toThrow(DomainError);
+  });
+
+  it("nudges the node off a stacked endpoint", () => {
+    const { doc, e1, h } = fixture();
+    const a = doc.nodes[h];
+    const ins = insertNodeIntoEdge(e1, "task", "N", "", { x: a.x, y: a.y });
+    const next = run(doc, ins.recipe);
+    expect(next.nodes[ins.nodeId].y).toBe(a.y - 60);
   });
 });
 

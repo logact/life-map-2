@@ -18,6 +18,7 @@ import {
   addParentNode,
   connectNodes,
   expandEdge as expandEdgeCmd,
+  insertNodeIntoEdge,
   pastePayload,
   Recipe,
   removeEdge,
@@ -701,12 +702,38 @@ export default function MapScreen() {
     const inDegree = (id: string) =>
       Object.values(doc.edges).filter((e) => e.toId === id).length;
 
+    // insert N mid-road when exactly one VISIBLE road touches the anchor in
+    // the requested direction: A -> B becomes A -> N -> B at the layer the
+    // user is looking at (a collapsed sub-road rides along with the N -> B
+    // half). No road (nothing to insert into) or a fork (which road?) falls
+    // back to a fresh branch; records always branch — they are leaves and
+    // could not point onward
+    const tryInsert = (anchorId: string, direction: "successor" | "predecessor") => {
+      const roads = visible.filter(
+        (e) => (direction === "successor" ? e.fromId : e.toId) === anchorId,
+      );
+      if (createTarget.mode === "record") return false;
+      if (roads.length !== 1) return false;
+      const road = roads[0];
+      const a = doc.nodes[road.fromId];
+      const b = doc.nodes[road.toId];
+      if (!a || !b) return false;
+      const pos = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const ins = insertNodeIntoEdge(road.id, createTarget.mode, title, detail, pos);
+      run(ins.recipe);
+      // the two halves light up as the selection, like an expand
+      setZoomEdgeIds(ins.edgeIds);
+      return true;
+    };
+
     if ("childId" in createTarget) {
       // predecessor: the new node points at the current one
       const child = doc.nodes[createTarget.childId];
       if (!child) return;
-      const pos = childPosition(child, inDegree(child.id), "predecessor");
-      run(addParentNode(createTarget.childId, createTarget.mode, title, detail, pos).recipe);
+      if (!tryInsert(child.id, "predecessor")) {
+        const pos = childPosition(child, inDegree(child.id), "predecessor");
+        run(addParentNode(createTarget.childId, createTarget.mode, title, detail, pos).recipe);
+      }
     } else if ("x" in createTarget) {
       // free node at the double-tapped position
       run(
@@ -716,8 +743,10 @@ export default function MapScreen() {
     } else if ("parentId" in createTarget) {
       const parent = doc.nodes[createTarget.parentId];
       if (!parent) return;
-      const pos = childPosition(parent, outDegree(parent.id), "successor");
-      run(addChildNode(createTarget.parentId, createTarget.mode, title, detail, pos).recipe);
+      if (!tryInsert(parent.id, "successor")) {
+        const pos = childPosition(parent, outDegree(parent.id), "successor");
+        run(addChildNode(createTarget.parentId, createTarget.mode, title, detail, pos).recipe);
+      }
     }
     setCreateTarget(null);
   };

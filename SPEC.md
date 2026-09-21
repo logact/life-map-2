@@ -216,9 +216,15 @@ form, notes, route query, note search).
   goal/task/record), New predecessor (creates a node pointing here:
   goal/task — records are leaves, so neither a record node nor a record
   predecessor can point at anything), Color (palette + Default), Copy
-  (trimmed payload snapshot), Remove. New nodes land along the road
-  direction: successors directly above the anchor, predecessors directly
-  below, fanning out within 45 degrees of that line (radius 120).
+  (trimmed payload snapshot), Remove. When exactly one **visible** road
+  touches the anchor in the requested direction, the new node is inserted
+  mid-road instead: `A → B` becomes `A → N → B` at the layer on screen
+  (N at the old midpoint, both halves inherit the road's color and become
+  the selection; a collapsed sub-road rides with the `N → B` half).
+  Otherwise — no road, a fork, or a record successor — a fresh branch
+  lands along the road direction: successors directly above the anchor,
+  predecessors directly below, fanning out within 45 degrees of that line
+  (radius 120).
 - **Edge menu**: Expand (leaf edges only; the revealed child edges become
   the zoom selection, as after a pinch spread), Summarize with… (multi-select
   same-parent edges, then confirm), Copy (deep), Straighten (only when

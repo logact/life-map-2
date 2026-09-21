@@ -89,8 +89,8 @@ disabled-grayed.
 
 | Group | Item | Kinds | Behavior |
 |---|---|---|---|
-| Create | **New successor** | goal, task | Opens kind submenu (Goal / Task / Record) in the same panel → picking a kind opens the create form sheet → on save, the new node lands directly above this one (golden-step fan within 45°, radius 120 — roads climb bottom to top) with the edge pointing this → new. |
-| Create | **New predecessor** | all | Same flow with the edge pointing new → this; kind submenu offers Goal / Task only (records are leaves: a new record cannot point here). |
+| Create | **New successor** | goal, task | Opens kind submenu (Goal / Task / Record) in the same panel → picking a kind opens the create form sheet → on save: if exactly one **visible** road leaves this node and the kind isn't Record, the new node is inserted mid-road (`A → B` becomes `A → N → B` at the layer on screen; N lands on the old midpoint, both halves inherit the road's color and become the selection, a collapsed sub-road rides with the `N → B` half); otherwise (no road, a fork, Record) the new node lands directly above this one (golden-step fan within 45°, radius 120 — roads climb bottom to top) with the edge pointing this → new. |
+| Create | **New predecessor** | all | Same flow with the edge pointing new → this, inserting into the single visible road that enters this node when there is one; kind submenu offers Goal / Task only (records are leaves: a new record cannot point here). |
 | Edit | **Inline on the info card** | all | Title and the goal's description / record's note edit in place on the single-tap info card (tap the text; commits on submit, blur, or tap-away); the card also carries the status row — current status plus one button per *legal* transition, labeled by its target state (§5.2), acting immediately. There is no inspector sheet. |
 | Edit | **Color** | all | Opens a swatch submenu in the same panel (palette + Default). Pick applies at once. |
 | Clipboard | **Copy** | all | Copies the trimmed snapshot (payload only, never edges). Silent confirmation; clipboard enables Paste in the create menu. |

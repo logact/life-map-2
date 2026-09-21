@@ -219,7 +219,8 @@ form, notes, route query, note search).
   (trimmed payload snapshot), Remove. New nodes land along the road
   direction: successors directly above the anchor, predecessors directly
   below, fanning out within 45 degrees of that line (radius 120).
-- **Edge menu**: Expand (leaf edges only), Summarize with… (multi-select
+- **Edge menu**: Expand (leaf edges only; the revealed child edges become
+  the zoom selection, as after a pinch spread), Summarize with… (multi-select
   same-parent edges, then confirm), Copy (deep), Straighten (only when
   bent), Color, Remove edge.
 - **Create menu** (double-tap empty canvas): Goal / Task / Record at the

@@ -755,26 +755,32 @@ export default function MapScreen() {
     // expand is a DOMAIN edit (it creates a sub-node); zoom is the view
     // operation. Expanding zooms this edge open locally so the new
     // children show, without disturbing the rest of the map.
+    let childIds: string[];
     if (edge.childEdgeIds.length > 0) {
       // already expanded: the command would no-op, so just zoom it open
       // and record the REAL child ids for the selection-less squeeze
-      zoomHistoryRef.current.push(edge.childEdgeIds);
+      childIds = edge.childEdgeIds;
+      zoomHistoryRef.current.push(childIds);
     } else {
       const ex = expandEdgeCmd(edgeId);
       run(ex.recipe);
       // menu-expand bypasses zoomSelectionStep; record it so a
       // selection-less squeeze can undo this spread too
-      zoomHistoryRef.current.push(ex.childEdgeIds);
+      childIds = ex.childEdgeIds;
+      zoomHistoryRef.current.push(childIds);
     }
     const nextZoom = new Set(zoomedIdsRef.current).add(edgeId);
     zoomedIdsRef.current = nextZoom;
     setZoomedIds(nextZoom);
     setSelectedEdgeIds([]);
+    // the revealed children inherit the selection, exactly as a lens
+    // spread's children do — the parent is now hidden, so it can't
+    // stay selected
+    setZoomEdgeIds(childIds);
     setMenuEdgeId(null);
     setInfoTarget(null);
     // same room-making as a lens spread: frame the edge with its children
     const after = useDocStore.getState().doc;
-    const childIds = after.edges[edgeId]?.childEdgeIds ?? [];
     camera.frameNodes(edgeEndpointNodes(after, [edgeId, ...childIds]));
   };
 

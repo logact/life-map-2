@@ -22,7 +22,7 @@ export function useCanvasGestures(params: {
   fitRef: RefObject<FitView>;
   setViewport: (v: { x: number; y: number }) => void;
   pinchCameraZoom: (ratio: number, mx: number, my: number) => void;
-  zoomSelectionStep: (deeper: boolean, mx: number, my: number) => void;
+  zoomSelectionStep: (deeper: boolean) => void;
   // a user gesture cancels any programmatic camera tween in flight
   cancelCameraTween: () => void;
   bendDragRef: RefObject<{ edgeId: string; x: number; y: number } | null>;
@@ -101,10 +101,10 @@ export function useCanvasGestures(params: {
           detailAcc.current *= ratio;
           if (detailAcc.current >= PINCH_RATIO) {
             detailAcc.current = 1;
-            latest.current.zoomSelectionStep(true, mx, my);
+            latest.current.zoomSelectionStep(true);
           } else if (detailAcc.current <= 1 / PINCH_RATIO) {
             detailAcc.current = 1;
-            latest.current.zoomSelectionStep(false, mx, my);
+            latest.current.zoomSelectionStep(false);
           }
           return;
         }

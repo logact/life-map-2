@@ -56,12 +56,13 @@ function DraggableNode(props: {
   n: NodeViewModel;
   screenX: number;
   screenY: number;
-  // visual size in screen px (world size * pin scale)
+  // visual size in screen px: the node's natural size at >= 1x zoom,
+  // shrinking with the camera below it
   size: number;
   // camera zoom: gesture deltas are screen px, so world deltas = px / scale
   scale: number;
-  // pin scale for the title: tracks the fit-zoom, not the pinch zoom
-  textScale: number;
+  // 1 at natural zoom, tracking the camera below it — drives the title
+  shrink: number;
   selected: boolean;
   pulsing: boolean;
   dimmed: boolean;
@@ -82,11 +83,10 @@ function DraggableNode(props: {
   const size = props.size;
   // task corners keep their 12/56 ratio under the zoom
   const borderRadius = props.n.kind === "task" ? size * (12 / 56) : size / 2;
-  // the title shrinks with the fit-zoom, then drops out entirely when the
-  // node becomes a dot; the floor keeps it faintly readable meanwhile.
-  // Pinch zoom never inflates it (nodes are pins)
+  // the title tracks the pin: natural size at >= 1x, shrinking (with a
+  // floor) when zoomed out, and dropping out when the node becomes a dot
   const baseFont = props.n.kind === "record" ? 9 : 13;
-  const fontSize = Math.max(6, Math.round(baseFont * props.textScale));
+  const fontSize = Math.max(6, Math.round(baseFont * props.shrink));
   const showTitle = size >= 18;
   // keep even the smallest node tappable at a comfortable touch target
   const hitSlop = Math.max(0, (44 - size) / 2);
@@ -217,15 +217,12 @@ function DraggableNode(props: {
   );
 }
 
-// one visible node with its status ring: computes the pin sizing, outline
+// one visible node with its status ring: computes the size, outline
 // style and screen position, then renders the drag/press wrapper
 export function CanvasNode(props: {
   n: NodeViewModel;
   // live position: the drag override while dragging, else the domain
   pos: NodeViewModel;
-  // nodes are pins: positions follow the camera, but their size and
-  // title only shrink with the fit-zoom — pinch zoom-in never inflates them
-  pinScale: number;
   camScale: number;
   cameraX: number;
   cameraY: number;
@@ -244,7 +241,10 @@ export function CanvasNode(props: {
   onConnectEnd: (id: string, pageX: number, pageY: number) => void;
 }) {
   const { n, pos } = props;
-  const size = nodeSize(n.kind) * props.pinScale;
+  // pins never grow past natural size; below 1x they shrink with the
+  // camera, so a zoomed-out view keeps its proportions (no overlap)
+  const shrink = Math.min(1, props.camScale);
+  const size = nodeSize(n.kind) * shrink;
   const borderRadius = n.kind === "task" ? size * (12 / 56) : size / 2;
   const pulsing = n.status === "in-progress" && !props.reduceMotion;
   // outline style carries status: todo=dashed, in-progress=dotted
@@ -270,7 +270,7 @@ export function CanvasNode(props: {
         screenY={screenY}
         size={size}
         scale={props.camScale}
-        textScale={props.pinScale}
+        shrink={shrink}
         selected={props.selected}
         pulsing={pulsing}
         dimmed={props.dimmed}

@@ -1,14 +1,12 @@
 import { RefObject, useState } from "react";
 import { Keyboard } from "react-native";
 
-import { computeFitView } from "@/map/fitZoom";
+import { FitView } from "@/map/fitZoom";
 import { edgeDepth, LifeMapDoc } from "@/domain/doc";
 import { searchNotes } from "@/domain/search";
 import { revealEdge } from "@/domain/visibility";
 import { useDocStore } from "@/state/docStore";
 import { InfoTarget } from "../types";
-import { composedCam } from "../utils";
-import { deriveViewModel } from "../viewModel";
 
 // note query flow: keyword search across every note on the map. The hook
 // owns only its own state; the screen composes the mutual exclusion with
@@ -17,13 +15,13 @@ export function useNoteSearch(params: {
   doc: LifeMapDoc;
   width: number;
   height: number;
-  userScaleRef: RefObject<number>;
+  fitRef: RefObject<FitView>;
   setViewport: (v: { x: number; y: number }) => void;
   zoomedIdsRef: RefObject<Set<string>>;
   setZoomedIds: (s: Set<string>) => void;
   setInfoTarget: (t: InfoTarget | null) => void;
 }) {
-  const { doc, width, height, userScaleRef, setViewport, zoomedIdsRef, setZoomedIds, setInfoTarget } = params;
+  const { doc, width, height, fitRef, setViewport, zoomedIdsRef, setZoomedIds, setInfoTarget } = params;
   const [noteSearchMode, setNoteSearchMode] = useState(false);
   const [noteQuery, setNoteQuery] = useState("");
 
@@ -59,17 +57,14 @@ export function useNoteSearch(params: {
       zoomedIdsRef.current = nextZoom;
       setZoomedIds(nextZoom);
     }
-    // the reveal changed the visible nodes, so derive the new camera from
-    // them, then pan so the node lands at the screen center:
-    // userPan = (screenCenter - world * scale) - camOffset
-    const newCam = composedCam(
-      computeFitView(deriveViewModel(d, nextZoom).nodes, { width, height }),
-      userScaleRef.current,
-      { width, height },
-    );
+    // pan with the CURRENT camera (the reveal changed the visible nodes,
+    // but the camera no longer derives from them) so the node lands at
+    // the screen center: userPan = (screenCenter - world * scale) -
+    // camOffset
+    const cam = fitRef.current;
     setViewport({
-      x: width / 2 - node.x * newCam.scale - newCam.x,
-      y: height / 2 - node.y * newCam.scale - newCam.y,
+      x: width / 2 - node.x * cam.scale - cam.x,
+      y: height / 2 - node.y * cam.scale - cam.y,
     });
     Keyboard.dismiss();
     setInfoTarget({ kind: "node", id: node.id });

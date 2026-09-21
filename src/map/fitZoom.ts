@@ -1,9 +1,11 @@
-// Fit-zoom: the camera scale that lets the current set of nodes fit the
-// screen. World coordinates never change; screen = world * scale + offset.
-// The scale only zooms OUT (never past 1), so a sparse map renders at the
-// natural size; as items accumulate and their bounding box outgrows the
-// screen, the scale shrinks so everything stays visible and nothing
-// overlaps more than it did before (relative geometry is preserved).
+// Fit view: the camera scale/offset that lets a set of nodes fit the
+// screen. It is a MANUAL command now — the fit button's one-tap overview —
+// not the standing camera rule: the base camera is identity (natural
+// size) by default and only takes a computed fit when the button is
+// pressed. World coordinates never change; screen = world * scale +
+// offset. The scale only zooms OUT (never past 1), so a small map fits
+// at natural size; pinch zoom is clamped to [1, 4] on top of the fit,
+// so from the overview you can only spread back toward natural size.
 
 // smallest zoom the camera will use; content larger than this can still be
 // reached by panning
@@ -57,4 +59,24 @@ export function computeFitView(
     x: screen.width / 2 - ((minX + maxX) / 2) * scale,
     y: screen.height / 2 - ((minY + maxY) / 2) * scale,
   };
+}
+
+// bbox center of the node positions (no padding), null when empty; the
+// initial camera placement and the seed reset center this point on the
+// screen at natural size
+export function contentCenter(
+  nodes: { x: number; y: number }[],
+): { x: number; y: number } | null {
+  if (nodes.length === 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const n of nodes) {
+    if (n.x < minX) minX = n.x;
+    if (n.y < minY) minY = n.y;
+    if (n.x > maxX) maxX = n.x;
+    if (n.y > maxY) maxY = n.y;
+  }
+  return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
 }

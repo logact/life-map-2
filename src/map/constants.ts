@@ -12,17 +12,21 @@ export const LONG_PRESS_MS = 500;
 // two taps on the same target within this window = double tap
 export const DOUBLE_TAP_MS = 300;
 
-// two fingers on the canvas zoom the camera continuously; with an active
-// selection, each time the finger distance accumulates this ratio the
-// selection also steps one detail level (spread = reveal children,
-// squeeze = collapse to parents). Steps stay anchored at the pinch
-// midpoint: the world point under it keeps its screen position
+// two fingers on the canvas zoom the camera continuously (anchored at
+// the pinch midpoint); with an active selection, each time the finger
+// distance accumulates this ratio the selection also steps one detail
+// level (spread = reveal children, squeeze = collapse to parents)
 export const PINCH_RATIO = 1.3;
 
-// the pinch camera zoom multiplies the fit-zoom; clamped so the content
-// can't be lost at either extreme
-export const MIN_USER_SCALE = 0.5;
+// the pinch camera zoom multiplies the base camera; below 1 the pins and
+// titles shrink with it, so geometry stays proportional at every zoom
+export const MIN_USER_SCALE = 0.25;
 export const MAX_USER_SCALE = 4;
+
+// lens zoom-in framing: when a spread reveals a cramped group, the camera
+// zooms in until the group's span fills this share of the smaller screen
+// dimension (a camera that already gives the group room is left alone)
+export const LENS_FRAME_FILL = 0.6;
 
 // route query: cap on candidate roads listed between two nodes (the
 // domain search also stops at its own hop limit)

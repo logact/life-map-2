@@ -149,11 +149,17 @@ from domain objects directly. Flow: gesture → `run(mutate)` → mutate domain 
 
 **Camera**: `screen = world × cam.scale + cam offset + viewport pan`.
 
-- *Fit-zoom* (`fitZoom.ts`): recomputed each render from visible nodes; only
-  zooms **out** (≤ 1, floor 0.25) so a growing map always fits.
-- *Pinch zoom* multiplies the fit-zoom (0.5×–4×), anchored at the pinch
-  midpoint. Nodes are **pins**: pinch spreads the ground but never inflates
-  them past fit size; titles shrink with fit-zoom and drop out under 18px.
+- *Base camera*: identity (natural size) by default — on first content the
+  camera just centers on it. A computed fit (`fitZoom.ts`: zoom-**out**
+  only, ≤ 1, floor 0.25) applies only when the **fit button** (one-tap
+  overview) is pressed.
+- *Pinch zoom* multiplies the base camera (0.25×–4×), anchored at the pinch
+  midpoint. Nodes render at natural size (72/56/30) at ≥ 1×; below 1× pins
+  and titles shrink with the camera (titles drop out under 18px pins), so
+  proportions — and no-overlap — hold at every zoom. Lens steps
+  reveal/collapse children in place — a spread that lands too cramped
+  zooms the camera in toward the revealed group (a roomy camera is left
+  alone).
 - *Pan* = one-finger drag on empty canvas.
 - A world-anchored dot grid (spacing 28, doubling as needed) keeps a constant
   look at any zoom.
@@ -233,7 +239,9 @@ form, notes, route query, note search).
   newest note; tapping it opens the modal notes sheet — full list
   (newest first), add, edit, delete (in-place two-tap). Text entry opens
   the modal note editor on top.
-- **Undo/redo** buttons top-right; **route query** button opens the
+- **Undo/redo** buttons top-right, plus a **fit button** below them (one-tap
+  overview: the camera fits every visible node; pinch spread walks back to
+  natural size); **route query** button opens the
   From/To panel (type with autocomplete or tap nodes on canvas, swap ⇅);
   results list up to 8 candidate roads (steps + length), preview in blue,
   tick one/some/all → confirm: chosen edges become the zoom selection and

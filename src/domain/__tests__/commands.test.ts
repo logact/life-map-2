@@ -124,6 +124,23 @@ describe("expandEdge", () => {
     expect(run(doc, again.recipe)).toBe(doc); // untouched draft -> same reference
     expect(run(doc, again.recipe).edges[again.childEdgeIds[0]]).toBeUndefined();
   });
+
+  it("bows the midpoint perpendicular by default, proportional to the edge length", () => {
+    const { doc, e1, h, t1 } = fixture();
+    const ex = expandEdge(e1);
+    const next = expectRoundTrip(doc, ex.recipe);
+    const a = doc.nodes[h];
+    const b = doc.nodes[t1];
+    const mid = next.nodes[ex.midNodeId];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    // the midpoint's projection onto the edge is the exact midpoint…
+    const t = ((mid.x - a.x) * (b.x - a.x) + (mid.y - a.y) * (b.y - a.y)) / (len * len);
+    expect(t).toBeCloseTo(0.5);
+    // …and its perpendicular distance from the edge is max(60, 0.3 * len)
+    const projX = a.x + t * (b.x - a.x);
+    const projY = a.y + t * (b.y - a.y);
+    expect(Math.hypot(mid.x - projX, mid.y - projY)).toBeCloseTo(Math.max(60, len * 0.3));
+  });
 });
 
 describe("summarizeEdges (B4)", () => {

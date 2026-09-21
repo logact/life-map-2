@@ -1,5 +1,5 @@
 import { FitView } from "@/map/fitZoom";
-import { NodeData, NodeKind } from "@/domain/doc";
+import { Id, LifeMapDoc, NodeData, NodeKind } from "@/domain/doc";
 import {
   BREAKPOINT_GAP,
   CHILD_RADIUS,
@@ -37,6 +37,21 @@ export function childPosition(parent: NodeData, index: number): { x: number; y: 
     x: parent.x + Math.cos(angle) * CHILD_RADIUS,
     y: parent.y + Math.sin(angle) * CHILD_RADIUS,
   };
+}
+
+// the distinct endpoint nodes of the given edges — the group the camera
+// frames after a lens spread reveals children
+export function edgeEndpointNodes(doc: LifeMapDoc, edgeIds: Id[]): NodeData[] {
+  const nodes = new Map<Id, NodeData>();
+  for (const id of edgeIds) {
+    const e = doc.edges[id];
+    if (!e) continue;
+    const a = doc.nodes[e.fromId];
+    const b = doc.nodes[e.toId];
+    if (a) nodes.set(a.id, a);
+    if (b) nodes.set(b.id, b);
+  }
+  return [...nodes.values()];
 }
 
 // short readable date for the inspector's timestamps (epoch millis)

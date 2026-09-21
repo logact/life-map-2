@@ -34,7 +34,6 @@ import { EdgeData, NodeData } from "@/domain/doc";
 import { buildSeedDoc } from "@/domain/seedDoc";
 import { visibleEdges } from "@/domain/visibility";
 import { useDocStore } from "@/state/docStore";
-import { computeFitView } from "@/map/fitZoom";
 import { INK } from "@/ui/theme";
 import { EdgeGlyph } from "@/map/components/edgeGlyph";
 import { CanvasNode } from "@/map/components/nodeGlyph";
@@ -55,8 +54,8 @@ import { NoteEditorSheet, NotesSheet } from "@/map/overlays/notes";
 import { RoutesModal } from "@/map/overlays/routesModal";
 import { styles } from "@/map/styles";
 import { CreateTarget, InfoTarget } from "@/map/types";
-import { childPosition, composedCam, computeGridDots, nodeSize } from "@/map/utils";
-import { useMapViewModel } from "@/map/viewModel";
+import { childPosition, computeGridDots, edgeEndpointNodes, nodeSize } from "@/map/utils";
+import { deriveViewModel, useMapViewModel } from "@/map/viewModel";
 
 /**
  *
@@ -88,8 +87,8 @@ export default function MapScreen() {
   // camera and lens come first: the view model, the queries and the
   // gestures below all read their refs
   const camera = useMapCamera(width, height);
-  const { fitRef, baseFitRef, viewportRef, userScaleRef, setViewport } = camera;
-  const lens = useZoomLens({ width, height, fitRef, viewportRef, userScaleRef, setViewport });
+  const { fitRef, viewportRef, setViewport } = camera;
+  const lens = useZoomLens({ frameNodes: camera.frameNodes });
   const {
     zoomEdgeIds,
     setZoomEdgeIds,
@@ -209,25 +208,18 @@ export default function MapScreen() {
   // view models derived from it (memoized on [doc, zoomedIds])
   const { visible, vm } = useMapViewModel(doc, zoomedIds);
 
-  // camera: the fit-zoom (recomputed from the visible nodes so a crowded
-  // view shrinks into view) with the user's pinch zoom composed on top;
-  // the refs feed the once-created pan responder, synced on every commit
-  const fit = computeFitView(vm.nodes, { width, height });
-  const cam = composedCam(fit, camera.userScale, { width, height });
-  useLayoutEffect(() => {
-    baseFitRef.current = fit;
-    fitRef.current = cam;
-  });
-  // nodes render as map pins: pinch zoom spreads the ground beneath them
-  // but never grows them past their fit size, so zooming in adds room
-  // instead of crowding the map
-  const pinScale = fit.scale * Math.min(1, camera.userScale);
+  // camera: base (identity by default, a computed fit after the fit
+  // button) × pinch zoom, composed in useMapCamera; fitRef inside it
+  // feeds the once-created pan responder, synced on every commit.
+  // Nodes render at natural size (nodeSize) at >= 1x zoom, shrinking
+  // with the camera below it
+  const cam = camera.cam;
 
   const noteSearch = useNoteSearch({
     doc,
     width,
     height,
-    userScaleRef,
+    fitRef,
     setViewport,
     zoomedIdsRef,
     setZoomedIds,
@@ -302,7 +294,7 @@ export default function MapScreen() {
       const sx = n.x * camNow.scale + camNow.x + vp.x;
       const sy = n.y * camNow.scale + camNow.y + vp.y;
       const d = Math.hypot(sx - pageX, sy - pageY);
-      const hitR = Math.max(22, (nodeSize(n.kind) * pinScale) / 2) + 10;
+      const hitR = Math.max(22, (nodeSize(n.kind) * Math.min(1, camNow.scale)) / 2) + 10;
       if (d <= hitR && d < bestDist) {
         best = n.id;
         bestDist = d;
@@ -368,6 +360,17 @@ export default function MapScreen() {
     useDocStore.getState().load({ width, height });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // initial placement: the first time content shows up (the doc load is
+  // async), center it on screen at natural size; after that the camera
+  // belongs to the user
+  const centeredOnceRef = useRef(false);
+  useEffect(() => {
+    if (centeredOnceRef.current || vm.nodes.length === 0) return;
+    centeredOnceRef.current = true;
+    camera.centerOnContent(vm.nodes);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vm.nodes]);
 
   // bottom-dock accommodation: when a panel opens (or grows), ease the
   // camera up just enough that the panel's object stays clear of the
@@ -729,8 +732,8 @@ export default function MapScreen() {
 
   // load the tutorial seed over the current map (create menu's
   // destructive row): a single replaceDoc edit, so undo restores the
-  // previous map. The lens, history and camera reset to a folded,
-  // centered view of the new map
+  // previous map. The lens and history reset to a folded view, and the
+  // camera re-centers on the new map at natural size
   const loadSeedTutorial = () => {
     run(replaceDoc(buildSeedDoc(width / 2, height / 3)));
     zoomHistoryRef.current = [];
@@ -738,7 +741,8 @@ export default function MapScreen() {
     zoomedIdsRef.current = folded;
     setZoomedIds(folded);
     setZoomEdgeIds([]);
-    camera.setViewport({ x: 0, y: 0 });
+    const newDoc = useDocStore.getState().doc;
+    camera.centerOnContent(deriveViewModel(newDoc, folded).nodes);
     closeOverlays();
   };
 
@@ -765,6 +769,10 @@ export default function MapScreen() {
     setSelectedEdgeIds([]);
     setMenuEdgeId(null);
     setInfoTarget(null);
+    // same room-making as a lens spread: frame the edge with its children
+    const after = useDocStore.getState().doc;
+    const childIds = after.edges[edgeId]?.childEdgeIds ?? [];
+    camera.frameNodes(edgeEndpointNodes(after, [edgeId, ...childIds]));
   };
 
   // summarize mode: the menu's edge is pre-selected, further edge taps
@@ -920,7 +928,6 @@ export default function MapScreen() {
             key={n.id}
             n={n}
             pos={pos}
-            pinScale={pinScale}
             camScale={cam.scale}
             cameraX={cameraX}
             cameraY={cameraY}
@@ -986,6 +993,14 @@ export default function MapScreen() {
         </>
       )}
 
+      {/* fit button: one-tap overview — the base camera becomes a computed
+          fit of every visible node; pinch spread walks back to natural size */}
+      {!routeQuery.routeMode && !noteSearch.noteSearchMode && (
+        <Pressable style={styles.fitButton} onPress={() => camera.fitToContent(vm.nodes)}>
+          <Text style={styles.queryButtonText}>{"⛶\uFE0E"}</Text>
+        </Pressable>
+      )}
+
       {/* mode banners: summarize mode retargets edge taps; bend mode
           retargets the next canvas drag */}
       {summarizeMode && (
@@ -1015,7 +1030,7 @@ export default function MapScreen() {
             zoomedIds={zoomedIds}
             run={run}
             onOpenNotes={(nodeId) => setNotesNodeId(nodeId)}
-            onZoomStep={(deeper) => zoomSelectionStep(deeper, width / 2, height / 2)}
+            onZoomStep={(deeper) => zoomSelectionStep(deeper)}
             onCloseEdge={() => {
               setInfoTarget(null);
               setZoomEdgeIds([]);

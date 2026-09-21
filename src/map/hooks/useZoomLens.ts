@@ -1,27 +1,21 @@
-import { RefObject, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
-import { computeFitView, FitView } from "@/map/fitZoom";
 import { useDocStore } from "@/state/docStore";
 import { visibleEdges, zoomInIds, zoomOutIds } from "@/domain/visibility";
-import { composedCam } from "../utils";
-import { deriveViewModel } from "../viewModel";
+import { edgeEndpointNodes } from "../utils";
 
 // ---------- selection-scoped zoom ----------
 // The selection is the lens for zoom/collapse: a single tap selects an
 // edge, the route query selects a whole road. Zooming reveals the hidden
 // children of selected edges one level at a time; collapsing folds the
 // deepest selected frontier back into its parents. Pure view state —
-// zoom never touches the domain.
+// zoom never touches the domain. Revealed children appear in place; when
+// they land too cramped to work with, frameNodes stretches the camera
+// toward the group (the world itself never moves).
 export function useZoomLens(params: {
-  width: number;
-  height: number;
-  fitRef: RefObject<FitView>;
-  viewportRef: RefObject<{ x: number; y: number }>;
-  userScaleRef: RefObject<number>;
-  setViewport: (v: { x: number; y: number }) => void;
+  frameNodes: (nodes: { x: number; y: number }[]) => void;
 }) {
-  const { width, height, fitRef, viewportRef, userScaleRef, setViewport } = params;
-  const [zoomEdgeIds, setZoomEdgeIds] = useState<string[]>([]);
+  const { frameNodes } = params;  const [zoomEdgeIds, setZoomEdgeIds] = useState<string[]>([]);
   const zoomEdgeIdsRef = useRef(zoomEdgeIds);
   useLayoutEffect(() => {
     zoomEdgeIdsRef.current = zoomEdgeIds;
@@ -48,13 +42,12 @@ export function useZoomLens(params: {
   // even after the selection was accidentally cleared
   const zoomHistoryRef = useRef<string[][]>([]);
 
-  // One zoom step on the selection, anchored at (mx, my) so the content
-  // under the gesture stays put while the fit view reacts to the changed
-  // node set. Selection is hereditary: revealed children inherit it on
-  // zoom-in, parents inherit it on collapse. With no selection, a collapse
-  // pops the zoom history instead: a squeeze undoes the last spread even
-  // after the lens was accidentally cleared.
-  const zoomSelectionStep = (deeper: boolean, mx: number, my: number) => {
+  // One zoom step on the selection. Selection is hereditary: revealed
+  // children inherit it on zoom-in, parents inherit it on collapse. With
+  // no selection, a collapse pops the zoom history instead: a squeeze
+  // undoes the last spread even after the lens was accidentally cleared.
+  // A spread that lands cramped zooms the camera toward the group.
+  const zoomSelectionStep = (deeper: boolean) => {
     const d = useDocStore.getState().doc;
     const zoomed = zoomedIdsRef.current;
     let sel = zoomEdgeIdsRef.current;
@@ -80,10 +73,6 @@ export function useZoomLens(params: {
       }
       if (sel.length === 0) return;
     }
-    const cam = fitRef.current;
-    const vp = viewportRef.current;
-    const wx = (mx - vp.x - cam.x) / cam.scale;
-    const wy = (my - vp.y - cam.y) / cam.scale;
     // one lens step: reveal the selected edges' children (zoom in) or fold
     // the deepest selected frontier back into its parents (zoom out); the
     // revealed children / parents inherit the selection
@@ -98,7 +87,7 @@ export function useZoomLens(params: {
       next = r.next;
       inherited = r.parents;
     }
-    if (inherited.length === 0) return; // nothing to reveal/collapse: camera only
+    if (inherited.length === 0) return; // nothing to reveal/collapse
     if (deeper) {
       // remember the spread so a later selection-less squeeze can undo it
       zoomHistoryRef.current.push(inherited);
@@ -112,18 +101,11 @@ export function useZoomLens(params: {
       ...sel.filter((id) => visible.has(id)),
       ...inherited,
     ]);
-    // the visible node set changed, so re-derive the camera and solve the
-    // pan that keeps the anchor world point fixed:
-    // viewport = screen - world * scale - camOffset
-    const newCam = composedCam(
-      computeFitView(deriveViewModel(d, next).nodes, { width, height }),
-      userScaleRef.current,
-      { width, height },
-    );
-    setViewport({
-      x: mx - wx * newCam.scale - newCam.x,
-      y: my - wy * newCam.scale - newCam.y,
-    });
+    if (deeper) {
+      // make room to work inside the group: the spread edges and their
+      // revealed children, framed together (a roomy camera is left alone)
+      frameNodes(edgeEndpointNodes(d, [...sel, ...inherited]));
+    }
   };
 
   return {

@@ -108,9 +108,9 @@ A pending single-tap fires during route/note-search mode, opening an info card o
 
 `src/app/map.tsx:2191` vs `:1621`, `:2296`
 
-Tip offset uses world `nodeSize/2`, but node world-footprint shrinks by `1/userScale` for `userScale > 1`.
+Tip offset uses world `nodeSize/2`, but at ≥ 1× zoom nodes render at a fixed screen size, so their world footprint is `nodeSize / cam.scale` and shrinks as the camera zooms in.
 
-- **Fix:** multiply the offset by `Math.min(1, userScale) / userScale` (compute per-edge from `cam.scale`/`pinScale`).
+- **Fix:** divide the offset by `cam.scale` (compute per-edge from the composed camera).
 - **Verify:** pinch to max zoom → arrowheads still touch node borders.
 
 ### B13 — `expand` pollutes goal status rollup

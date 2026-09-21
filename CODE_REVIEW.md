@@ -55,7 +55,7 @@ Ordered so early items unblock later ones.
   Container has only `onStartShouldSetPanResponder`; node Pressables and SVG hit areas claim their touches and can't be stolen mid-gesture. Real fix: migrate to `react-native-gesture-handler` (installed but unused — R4). Interim: `onMoveShouldSetPanResponder` on the container, gated on nothing being armed.
 
 - [ ] **B12. Arrowheads float when pinch-zoomed in. 🟡** `src/app/map.tsx:2191` vs `:1621`/`:2296`.
-  Offset assumes node radius = `nodeSize/2` world units, but nodes render at `pinScale = fit.scale · min(1, userScale)`. Multiply the offset by `min(1, userScale) / userScale`.
+  Offset assumes node radius = `nodeSize/2` world units, but at ≥ 1× zoom nodes render at a fixed screen size, so their world footprint is `nodeSize / cam.scale`. Divide the offset by `cam.scale`.
 
 - [ ] **B13. Expanding a goal→task edge pollutes the goal's status. 🟡(domain)** `src/domain/lifeMap.ts:329`, `src/domain/status.ts:51`.
   `expand` inserts a synthetic `Task` midpoint; `goalStatus` counts it as a child task, so an expand can flip a goal's derived status. Fix: mark expand-midpoints (a `synthetic` flag or distinct kind) and exclude them in `goalStatus`, or make `goalStatus` walk chains to the real leaves.

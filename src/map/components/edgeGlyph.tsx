@@ -73,6 +73,19 @@ export function EdgeGlyph(props: {
         : "#aeaeb4";
   const edgeWidth = overridden ? 4 : Math.max(1.5, 3 - e.layer);
   const bend = props.liveBend ?? e.bend;
+  // the line runs rim-to-rim: nodes with a translucent fill would let a
+  // center-to-center line show through their interior, so both ends are
+  // pulled back to the node boundary
+  const ra = nodeSize(a.kind) / 2;
+  // start at the source rim, along the first segment (a -> bend when bent)
+  const sx = bend ? bend.x : b.x;
+  const sy = bend ? bend.y : b.y;
+  const sdx = sx - a.x;
+  const sdy = sy - a.y;
+  const slen = Math.hypot(sdx, sdy);
+  const soff = Math.min(ra, slen);
+  const startX = slen > 0 ? a.x + (sdx / slen) * soff : a.x;
+  const startY = slen > 0 ? a.y + (sdy / slen) * soff : a.y;
   // arrowhead at the target node's edge, pointing into it; the
   // direction comes from the LAST segment (bend -> target when bent)
   const ax = bend ? bend.x : a.x;
@@ -94,7 +107,15 @@ export function EdgeGlyph(props: {
   const bentPoints = bend ? `${a.x},${a.y} ${bend.x},${bend.y} ${b.x},${b.y}` : "";
   // a collapsed edge breaks into one equal-length segment per
   // hidden child edge; the gaps between segments are the breakpoints
-  const { segments, breakpoints } = splitPath(bend ? [a, bend, b] : [a, b], Math.max(1, e.hiddenCount));
+  const start = { x: startX, y: startY };
+  const tip = { x: tipX, y: tipY };
+  const trimmedPath = bend ? [start, bend, tip] : [start, tip];
+  // overlapping nodes can pull the trimmed ends past each other; the
+  // arrowhead still marks the target rim, but there is no line to draw
+  const lineVisible = bend || (tipX - startX) * ux + (tipY - startY) * uy > 0;
+  const { segments, breakpoints } = lineVisible
+    ? splitPath(trimmedPath, Math.max(1, e.hiddenCount))
+    : { segments: [], breakpoints: [] };
   // each segment of a collapsed edge takes its child edge's own
   // color and status; a leaf edge takes its own color
   const segStyles = segments.map((_, i) => {
@@ -105,7 +126,7 @@ export function EdgeGlyph(props: {
     }
     return { color: e.color ?? "#aeaeb4", status: e.status };
   });
-  const lastSeg = segStyles[segStyles.length - 1];
+  const lastSeg = segStyles[segStyles.length - 1] ?? { color: e.color ?? "#aeaeb4", status: e.status };
   return (
     <G opacity={props.dimmed ? 0.15 : 1}>
       {/* line style carries the edge's frontier status:

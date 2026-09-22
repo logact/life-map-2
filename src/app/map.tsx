@@ -929,6 +929,10 @@ export default function MapScreen() {
               const rim = target ? nodeSize(target.kind) / 2 : 0;
               const tipX = tx - ux * rim;
               const tipY = ty - uy * rim;
+              // start on the source rim so the preview never crosses it
+              const rim0 = nodeSize(from.kind) / 2;
+              const x1 = from.x + ux * rim0;
+              const y1 = from.y + uy * rim0;
               const wing = 5 / cam.scale;
               const back = 11 / cam.scale;
               const baseX = tipX - ux * back;
@@ -937,8 +941,8 @@ export default function MapScreen() {
               return (
                 <>
                   <Line
-                    x1={from.x}
-                    y1={from.y}
+                    x1={x1}
+                    y1={y1}
                     x2={tipX}
                     y2={tipY}
                     stroke={INK.primary}

@@ -19,8 +19,8 @@ import { styles } from "../styles";
 
 // tag picker sheet: every tag in the registry as a row (colored dot,
 // name, check when assigned to the current node). Tapping a row toggles
-// the assignment immediately (undoable, no confirm — the same contract
-// as the edge card's color swatches). A row's Edit affordance swaps it
+// the assignment immediately (undoable, no confirm). A row's Edit
+// affordance swaps it
 // for an inline editor (name field + palette strip + delete); the footer
 // creates a new tag and assigns it in one save. Rendered by the node
 // info card only while open — a single Modal whose content swaps in

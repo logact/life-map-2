@@ -19,18 +19,18 @@ into sub-roads layer by layer. The whole app is a single full-screen canvas.
 ### 1.1 Nodes — three kinds
 
 All nodes share: `id` (uuid), `x/y` (world coordinates), `title`, `kind`,
-optional `color`, `notes[]`, and adjacency lists `startEdges` / `endEdges`.
+`notes[]`, and adjacency lists `startEdges` / `endEdges`.
 
 | Kind   | Class    | Shape on map            | Extra fields |
 |--------|----------|-------------------------|--------------|
 | Goal   | `Goal`   | Large circle (52)       | `description?`, `targetDate?`, `completedAt?` |
-| Task   | `Task`   | Rounded square (40)     | `status` (stored), `startedAt?`, `completedAt?` |
+| Task   | `Task`   | Rounded square (40)     | `status` (stored), `startedAt?`, `completedAt?`, `recur?` + occurrence `log?` (§1.3) |
 | Record | `Record` | Small dot (20)          | `note`, `createdAt`, `occuredAt` — a leaf; nothing attaches under it |
 
 ### 1.2 Edges — directed roads with layers
 
 `Edge(node1 → node2)` is **directed** (arrowhead into `node2`). Each edge has
-`layer` (0 = root), optional `color`, optional `bend` point (renders as two
+`layer` (0 = root), an optional `bend` point (renders as two
 segments), and `childrenEdges` forming a tree:
 
 - **Expand** (`LifeMap.expand`): splits an edge by inserting a new Task
@@ -65,6 +65,16 @@ todo --start--> in-progress --complete--> done
 otherwise it rolls up child tasks — all done → done, any started →
 in-progress, else todo. Nothing cascades: completing a goal doesn't touch
 its tasks. Goals can be manually completed/reopened.
+
+**Recurring tasks step out of the machine** (`src/domain/recur.ts`): a task
+with a `recur` rule (every N days, every N weeks on picked weekdays, or
+every N months, from an anchor day) is never permanently done — `complete`
+appends to its occurrence `log` instead (backdatable like every stamp;
+`reopen` un-logs the latest; `start`/`pause` don't apply). Its status is
+derived from rule + log with attention semantics: due today or overdue →
+todo (the road into it asks with it); current or done today → done. Goal
+rollups skip recurring tasks entirely — an ongoing habit never blocks its
+goal's "done". A streak counts consecutive scheduled days with a log.
 
 **Edge status has frontier semantics** (`edgeStatus`): walk the hidden child
 chain in travel order, take the first non-done node status (skipping the
@@ -103,7 +113,7 @@ up to `max` candidates (UI caps at 8).
 Copy/paste works on **plain-data snapshots**, never live references — paste
 still works after the original is edited or deleted, and can repeat.
 
-- **Node copy**: payload only (kind/title/color/notes/kind data), no edges.
+- **Node copy**: payload only (kind/title/notes/kind data), no edges.
 - **Edge copy**: deep — endpoints + the whole `childrenEdges` subtree;
   endpoint copies are trimmed of outside edges.
 - **Road copy**: every selected edge with its subtree; shared nodes/edges
@@ -139,11 +149,11 @@ rename or recolor happens in one place, not per node.
 
 Local **SQLite** (`lifemap.db`, WAL mode) — no server, no account.
 
-- `nodes(id, kind, title, x, y, color, data)` — kind-specific fields live in
+- `nodes(id, kind, title, x, y, data)` — kind-specific fields live in
   the `data` JSON blob.
 - `notes(id, node_id → nodes ON DELETE CASCADE, text, created_at,
   updated_at, position)`.
-- `edges(id, node1_id, node2_id, parent_edge_id, position, layer, color,
+- `edges(id, node1_id, node2_id, parent_edge_id, position, layer,
   bend_x, bend_y)` — stores the whole edge tree.
 - `tags(id, name, color)` — the tag registry; a node's `tagIds` live in its
   `data` blob.
@@ -190,29 +200,35 @@ from domain objects directly. Flow: gesture → `run(mutate)` → mutate domain 
 ### 3.2 Visual language
 
 Grayscale theme (`theme.ts`: INK scale, `ACCENT` blue reserved for route
-highlights). User colors come from the 10-color Okabe-Ito palette
-(`palette.ts`) — colorblind-safe; node = colored border over faint fill,
-edge = colored stroke.
+highlights). **Status rides on color** (`STATUS_COLOR`): Okabe-Ito hues,
+colorblind-safe, none of them blue so the route highlight stays
+unambiguous. Objects with no status (records, and roads touching records)
+use neutral grays. Tag colors come from the 10-color Okabe-Ito palette
+(`palette.ts`).
 
-| Status      | Node outline                        | Edge line                    |
-|-------------|-------------------------------------|------------------------------|
-| todo        | dashed, tertiary gray               | dashed `6 6`                 |
-| in-progress | dotted, breathing ring (0.4↔1 opacity) | dotted `2 8`, dashes march toward target |
-| done        | solid; title struck through & faded | solid                        |
+| Status      | Node outline & edge stroke                          |
+|-------------|-----------------------------------------------------|
+| todo        | gray `#8e8e94`                                      |
+| in-progress | orange `#E69F00`                                    |
+| done        | green `#009E73`; node title also struck through & faded |
 
-A **collapsed edge** (hidden children) splits into one equal-length segment
-per hidden child, each segment taking its child's color and status, with gap
-markers at the breakpoints. Edge width thins with layer (`max(1.5, 3−layer)`);
-every directed edge ends in an arrowhead. All strokes and markers use
+Selection, route-preview and spotlight overrides (near-black, `ACCENT`
+blue, secondary gray) always win over status colors. A recurring task's
+pin carries a small ↻ badge at its corner — fading out with the title
+under 18px pins — that turns full ink while the habit is due. A
+**collapsed edge**
+(hidden children) splits into one equal-length segment per hidden child,
+each segment taking its child's status color, with solid markers at the
+breakpoints. Edge width thins with layer (`max(1.5, 3−layer)`); every
+directed edge ends in an arrowhead. All strokes and markers use
 non-scaling rendering so they keep a constant screen size at any zoom.
-Reduce-motion OS setting replaces pulse/march with static outlines.
 
 ### 3.3 Gestures
 
 | Gesture | Target | Action |
 |---|---|---|
 | Single tap | node | Focus: info card in the bottom panel (kind · dates, a status row with the legal transition buttons, plus a peek of the newest note — the full list opens in a notes sheet). The title and the goal's description / record's note edit in place (tap the text; saves on submit, blur, or tap-away) + the node itself highlights (no edge spotlight) + connect handle on the node |
-| Single tap | edge | Info card in the bottom panel (layer, status, hidden sub-edges, Zoom in/Collapse buttons, inline color swatches) + edge becomes the zoom **selection** |
+| Single tap | edge | Info card in the bottom panel (layer, status, hidden sub-edges, Zoom in/Collapse buttons) + edge becomes the zoom **selection** |
 | Single tap | empty canvas | Dismiss the panel; clear selection (unless locked) |
 | Double tap (300ms) | node | Node menu in the bottom panel |
 | Double tap | edge | Edge menu in the bottom panel |
@@ -230,7 +246,7 @@ the screen, never modal — no backdrop, no dimming; a tap elsewhere dismisses
 and retargets in one motion. When a panel opens or grows, the **camera eases
 the graph up** just enough that the panel's object stays visible above the
 panel area; an already-visible object never moves, and any user gesture
-cancels the tween. Submenus (kind picker, color swatches) open one level
+cancels the tween. Submenus (kind picker) open one level
 down inside the same panel. Destructive rows confirm in place: first tap
 arms ("tap again"), second fires. Sheets survive only for text work (create
 form, notes, route query, note search).
@@ -238,12 +254,12 @@ form, notes, route query, note search).
 - **Node menu**: New successor (creates a node this one points to:
   goal/task/record), New predecessor (creates a node pointing here:
   goal/task — records are leaves, so neither a record node nor a record
-  predecessor can point at anything), Color (palette + Default), Copy
+  predecessor can point at anything), Copy
   (trimmed payload snapshot), Remove. When exactly one **visible** road
   touches the anchor in the requested direction, the new node is inserted
   mid-road instead: `A → B` becomes `A → N → B` at the layer on screen
-  (N at the old midpoint, both halves inherit the road's color and become
-  the selection; a collapsed sub-road rides with the `N → B` half).
+  (N at the old midpoint, both halves become the
+  selection; a collapsed sub-road rides with the `N → B` half).
   Otherwise — no road, a fork, or a record successor — a fresh branch
   lands along the road direction: successors directly above the anchor,
   predecessors directly below, fanning out within 45 degrees of that line
@@ -251,7 +267,7 @@ form, notes, route query, note search).
 - **Edge menu**: Expand (leaf edges only; the revealed child edges become
   the zoom selection, as after a pinch spread), Summarize with… (multi-select
   same-parent edges, then confirm), Copy (deep), Straighten (only when
-  bent), Color, Remove edge.
+  bent), Remove edge.
 - **Create menu** (double-tap empty canvas): Goal / Task / Record at the
   tapped point, plus Paste when the clipboard is non-empty, plus **Load the
   tutorial** — a separated destructive row (two-tap confirm) that replaces
@@ -262,10 +278,15 @@ form, notes, route query, note search).
   (the panel rides above the keyboard); the edit commits on submit, on
   blur, or when the card dismisses. The card also carries the status row:
   current status plus one button per legal transition (tasks Start /
-  Pause / Mark done / Reopen; goals only Mark done / Reopen, toggling the
-  manual completion flag; records none), acting immediately. The edge
-  card carries inline color swatches (palette + Default, applied
-  immediately, undoable).
+  Pause / Mark done / Reopen — a recurring task instead logs: Log done /
+  Undo last log, and the row shows its due state with a "N logged ·
+  streak K" line underneath; goals only Mark done / Reopen, toggling the
+  manual completion flag; records none), acting immediately. Tappable
+  date rows (a record's Occurred, a task's Started/Done, a goal's Target
+  with a live countdown) open a small calendar and rewrite the stamp in
+  one undoable command; a task's Repeat row opens the recurrence rule
+  editor (frequency, interval, weekdays, Starts day; Clear stops it), and
+  a goal's target date can also be set right in the create form.
 - **Notes**: the node's single-tap info card shows only a peek of the
   newest note; tapping it opens the modal notes sheet — full list
   (newest first), add, edit, delete (in-place two-tap). Text entry opens
@@ -295,7 +316,9 @@ directed road of lessons that teaches the whole gesture language by example —
 tap (the info card), notes, long-press drag, the connect handle, goals as
 destinations (a mid-road milestone goal marked done), double-tap create, and
 road layers (the last stretch is expanded, hiding two zoom micro-lessons) —
-ending at the "Make this map yours" goal. A record dots the roadside; the
+ending at the "Make this map yours" goal. A record dots the roadside and a
+daily habit branches off it — logged twice, due today, so the recurrence
+badge and the Log done button demo live; the
 first lessons are pre-done and one is in-progress, so all three status styles
 show on first launch; an isolated "Ideas" node floats unconnected. A tutorial
 has no history, so every timestamp stamps honestly at build time. The same

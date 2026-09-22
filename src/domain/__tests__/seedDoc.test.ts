@@ -4,7 +4,7 @@ import { docToRows, rowsToDoc } from "@/data/mapDb";
 import { isRecord } from "../doc";
 import { findRoutes } from "../route";
 import { buildSeedDoc } from "../seedDoc";
-import { edgeStatus, goalStatus } from "../status";
+import { edgeStatus, goalStatus, nodeStatus } from "../status";
 import { visibleEdges } from "../visibility";
 
 // the seed is the app's tutorial, so it deserves the same invariant checks
@@ -81,6 +81,19 @@ describe("buildSeedDoc", () => {
   it("the milestone goal was marked done; the destination stays todo (GAPS.md #7)", () => {
     expect(goalStatus(doc, byTitle("Goals are the destinations").id)).toBe("done");
     expect(goalStatus(doc, byTitle("Make this map yours").id)).toBe("todo");
+  });
+
+  it("the roadside habit is recurring and due today", () => {
+    const habit = byTitle("Habits repeat — log me once a day");
+    expect(habit.recur).toBeDefined();
+    expect(habit.log).toHaveLength(2);
+    const now = Date.now();
+    // two honest logs (yesterday, the day before) and today still open
+    expect(nodeStatus(doc, habit.id, now)).toBe("todo");
+    // its branch off the creation lesson asks for attention with it
+    expect(
+      edgeStatus(doc, segment("Double-tap empty space to create", "Habits repeat — log me once a day"), now),
+    ).toBe("todo");
   });
 
   it("keeps records as leaves", () => {

@@ -7,14 +7,29 @@ on 2026-09-18 (see `src/domain/seedDoc.ts`); the gaps below remain open.
 Each entry: what the real roadmap needed, what the model offers, and the
 workaround used — if any.
 
-## 1. Recurring habits have no home
+## 1. Recurring habits have no home — fixed
 
-"Gym 3x/week", "Anki: 20 new words/week", "Weekly journal" are _ongoing_ —
-they are never done, yet they aren't a single task either. The model has no
-recurrence, no schedule, no streaks.
+Fixed 2026-09-22: tasks can repeat. The task card's Repeat row opens the
+rule editor (`src/map/overlays/recurSheet.tsx`): every N days, every N
+weeks on picked weekdays, or every N months, from a Starts day
+(`RecurRule` in `src/domain/doc.ts`, derivations in
+`src/domain/recur.ts`). A repeating task never finishes — **Log done**
+appends to its occurrence `log` (backdatable like every other stamp),
+**Undo last log** removes one. The card shows the due state (Due today /
+Overdue since … / Next … / Done today ✓) plus a running "N logged ·
+streak K" line, and the pin carries a ↻ badge that turns full ink when
+due. Attention semantics: due/overdue habits read as todo (their road
+asks with them), a current habit reads as done, and goal rollups skip
+habits entirely so an ongoing practice never blocks its goal. Occurrences
+live in the compact log — no record dots, so the map stays clean at habit
+scale (the missing series _view_ is #8). The goal's `targetDate` also
+became first-class: settable in the create form, with a live countdown on
+the card ("Sep 30 · in 8 days").
 
-**Workaround:** one standing task, permanently `in-progress`, with records
-attached per session. The title carries the frequency as text.
+- **Verify:** make a task repeat Every day, Log done → Done today ✓ with
+  streak 1; relaunch tomorrow → Due today, badge inked; Undo last log
+  removes the entry; create a goal with a target date → the card counts
+  down to it. Each edit undoes in one step.
 
 ## 2. No metrics or numeric progress
 
@@ -67,5 +82,6 @@ can be attached. Records are text only.
 ---
 
 _Filed alongside the original seed on 2026-09-18 — the day the tutorial map
-replaced it. Items 1–3 feel like the real product gaps for daily-use
-tracking; 4–9 are acceptable constraints of a map metaphor._
+replaced it. Items 1–3 felt like the real product gaps for daily-use
+tracking; 1 and 3 are now fixed, leaving 2 (metrics) as the open one.
+4–9 are acceptable constraints of a map metaphor._

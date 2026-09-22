@@ -8,6 +8,7 @@ import {
   expandEdge,
   Recipe,
   renameNode,
+  setNodeRecurrence,
   transitionNodeStatus,
 } from "./commands";
 import { emptyDoc, Id, LifeMapDoc, NodeKind } from "./doc";
@@ -15,13 +16,15 @@ import { emptyDoc, Id, LifeMapDoc, NodeKind } from "./doc";
 // the first-launch seed: a self-guided tour of the app. ONE directed road
 // walks a new user through the whole gesture language — tap, notes, drag,
 // connect, goals, create, layers — and ends at the invitation to replace
-// the tour with a life of their own. Built entirely through the same
+// the tour with a life of their own. A habit branches off the roadside:
+// repeating tasks never finish, they log. Built entirely through the same
 // commands the UI drives, so the document obeys every invariant a
 // user-built one does. The first lessons are pre-marked done and one is
 // in-progress, so the three status colors are visible on first launch.
 //
 // A tutorial has no history, so no backdating: every timestamp is stamped
-// honestly at build time.
+// honestly at build time — the habit's two logs are relative to the build,
+// leaving it due today so the badge and the Log done button show.
 
 export function buildSeedDoc(cx: number, cy: number): LifeMapDoc {
   const steps: Recipe[] = [];
@@ -103,6 +106,18 @@ export function buildSeedDoc(cx: number, cy: number): LifeMapDoc {
   const sCreate = lesson("Double-tap empty space to create", cx, ry(5));
   note(sCreate, "Goal, task, or record at the tapped point. The same menu can reload this tutorial.");
 
+  // a habit branches off the roadside: a repeating task never finishes —
+  // it logs each occurrence. Two logs (yesterday and the day before) leave
+  // it due today, so the pin badge and the Log done button demo live
+  const DAY = 86400000;
+  const habit = free("task", "Habits repeat — log me once a day", "", cx + 110, ry(5) - 10);
+  steps.push(
+    setNodeRecurrence(habit, { freq: "daily", interval: 1, anchor: Date.now() - 2 * DAY }),
+    transitionNodeStatus(habit, "complete", Date.now() - 2 * DAY),
+    transitionNodeStatus(habit, "complete", Date.now() - DAY),
+  );
+  note(habit, "Tap my card's Repeat row to change the rhythm. Miss a day and I ask again — the streak keeps count.");
+
   const sLayers = lesson("Roads have layers — pinch to peek inside", cx, ry(6));
   note(
     sLayers,
@@ -121,6 +136,7 @@ export function buildSeedDoc(cx: number, cy: number): LifeMapDoc {
   road(sDrag, sConnect);
   road(sConnect, gMilestone);
   road(gMilestone, sCreate);
+  road(sCreate, habit);
   // the last stretch is layered: two micro-lessons hide inside the segment
   // (pinch or Zoom in on it to see them)
   const intoLayers = road(sCreate, sLayers);

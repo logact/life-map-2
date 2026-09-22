@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PanResponder, Pressable, Text, View } from "react-native";
 import Animated, {
   Easing,
@@ -218,8 +218,9 @@ function DraggableNode(props: {
 }
 
 // one visible node with its status ring: computes the size, outline
-// style and screen position, then renders the drag/press wrapper
-export function CanvasNode(props: {
+// style and screen position, then renders the drag/press wrapper.
+// Memoized — see EdgeGlyph for why a shallow compare is enough
+export const CanvasNode = memo(function CanvasNode(props: {
   n: NodeViewModel;
   // live position: the drag override while dragging, else the domain
   pos: NodeViewModel;
@@ -288,4 +289,4 @@ export function CanvasNode(props: {
       />
     </Fragment>
   );
-}
+});

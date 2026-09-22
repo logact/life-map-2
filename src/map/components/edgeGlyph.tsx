@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { memo, useEffect } from "react";
 import { Circle, G, Line, Polygon, Polyline } from "react-native-svg";
 import Animated, {
   Easing,
@@ -43,7 +43,11 @@ function MarchingPolyline(props: { points: string; color: string; width: number 
 // one visible edge: the (possibly broken) line with per-segment status
 // styling, the arrowhead into the target node, breakpoint markers, the
 // wide invisible hit area, and the bend handle while a bend drag is armed
-export function EdgeGlyph(props: {
+// memoized: the view-model objects keep their identity across unrelated
+// renders (deriveViewModel is useMemo'd and posById reuses references),
+// and the screen hands over once-created dispatchers, so a shallow
+// compare skips every glyph its own props didn't change
+export const EdgeGlyph = memo(function EdgeGlyph(props: {
   e: EdgeViewModel;
   a: NodeViewModel;
   b: NodeViewModel;
@@ -200,4 +204,4 @@ export function EdgeGlyph(props: {
       )}
     </G>
   );
-}
+});

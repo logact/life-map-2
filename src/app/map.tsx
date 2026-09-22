@@ -659,6 +659,43 @@ export default function MapScreen() {
     setDragArmedId(id);
   };
 
+  // stable handler identities for the memoized glyphs: the implementations
+  // above close over render state (route mode, bend drag, …) and change on
+  // every commit, so the glyphs receive once-created dispatchers that call
+  // the latest implementation through a ref (same pattern as the once-
+  // created pan responders)
+  const glyphImplRef = useRef({
+    onNodePress,
+    onEdgePress,
+    onEdgeLongPress,
+    onNodeLongPress,
+    onConnectStart,
+    onConnectMove,
+    onConnectEnd,
+  });
+  useLayoutEffect(() => {
+    glyphImplRef.current = {
+      onNodePress,
+      onEdgePress,
+      onEdgeLongPress,
+      onNodeLongPress,
+      onConnectStart,
+      onConnectMove,
+      onConnectEnd,
+    };
+  });
+  const [glyphHandlers] = useState(() => ({
+    onNodePress: (id: string) => glyphImplRef.current.onNodePress(id),
+    onEdgePress: (id: string) => glyphImplRef.current.onEdgePress(id),
+    onEdgeLongPress: (id: string) => glyphImplRef.current.onEdgeLongPress(id),
+    onNodeLongPress: (id: string) => glyphImplRef.current.onNodeLongPress(id),
+    onConnectStart: (id: string) => glyphImplRef.current.onConnectStart(id),
+    onConnectMove: (id: string, pageX: number, pageY: number) =>
+      glyphImplRef.current.onConnectMove(id, pageX, pageY),
+    onConnectEnd: (id: string, pageX: number, pageY: number) =>
+      glyphImplRef.current.onConnectEnd(id, pageX, pageY),
+  }));
+
   // ---------- create / connect / remove flows ----------
 
   // "New successor": create a node of the chosen kind, pointed at by the
@@ -914,8 +951,8 @@ export default function MapScreen() {
                 liveBend={bendDrag && bendDrag.edgeId === e.id ? { x: bendDrag.x, y: bendDrag.y } : null}
                 camScale={cam.scale}
                 reduceMotion={reduceMotion}
-                onPress={onEdgePress}
-                onLongPress={onEdgeLongPress}
+                onPress={glyphHandlers.onEdgePress}
+                onLongPress={glyphHandlers.onEdgeLongPress}
               />
             );
           })}
@@ -992,14 +1029,14 @@ export default function MapScreen() {
             connectable={
               heldNodeId === n.id && dragArmedId !== n.id && !menuNodeId && !bendDrag
             }
-            onPress={onNodePress}
-            onArm={onNodeLongPress}
+            onPress={glyphHandlers.onNodePress}
+            onArm={glyphHandlers.onNodeLongPress}
             onDragStart={nodeDrag.onNodeDragStart}
             onDragMove={nodeDrag.onNodeDragMove}
             onDragEnd={nodeDrag.onNodeDragEnd}
-            onConnectStart={onConnectStart}
-            onConnectMove={onConnectMove}
-            onConnectEnd={onConnectEnd}
+            onConnectStart={glyphHandlers.onConnectStart}
+            onConnectMove={glyphHandlers.onConnectMove}
+            onConnectEnd={glyphHandlers.onConnectEnd}
           />
         );
       })}

@@ -637,4 +637,84 @@ export const styles = StyleSheet.create({
     borderColor: "#ffffff",
     ...SHADOW.card,
   },
+  // tappable date row on the info card / forms: a muted label and the
+  // value in ink, reading like the meta lines but inviting a tap
+  dateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 2,
+  },
+  dateRowLabel: {
+    fontSize: 13,
+    color: INK.secondary,
+  },
+  dateRowValue: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: INK.primary,
+    borderBottomWidth: 1,
+    borderBottomColor: INK.hairline,
+  },
+  // month calendar (date picker): nav header, weekday row, 7-wide grid;
+  // the selected day is filled, today is outlined
+  calHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  calNav: {
+    fontSize: 22,
+    fontWeight: "600",
+    color: INK.primary,
+    paddingHorizontal: 12,
+  },
+  calTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: INK.primary,
+  },
+  calRow: {
+    flexDirection: "row",
+  },
+  calDow: {
+    width: `${100 / 7}%`,
+    textAlign: "center",
+    fontSize: 11,
+    fontWeight: "600",
+    color: INK.tertiary,
+    paddingVertical: 4,
+  },
+  calGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+  },
+  calCell: {
+    width: `${100 / 7}%`,
+    aspectRatio: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+  },
+  calCellText: {
+    fontSize: 14,
+    color: INK.primary,
+  },
+  calCellSelected: {
+    backgroundColor: INK.primary,
+  },
+  calCellTextSelected: {
+    color: "#ffffff",
+    fontWeight: "700",
+  },
+  calCellToday: {
+    borderWidth: 1,
+    borderColor: INK.hairline,
+  },
+  calSummary: {
+    fontSize: 13,
+    color: INK.secondary,
+    textAlign: "center",
+  },
 });

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Alert, Keyboard } from "react-native";
 
-import { FitView } from "@/map/fitZoom";
 import { EdgeData, LifeMapDoc } from "@/domain/doc";
 import { findRoutes, RouteResult } from "@/domain/route";
 import { MAX_ROUTE_CANDIDATES } from "../constants";
@@ -13,13 +12,11 @@ import { MAX_ROUTE_CANDIDATES } from "../constants";
 export function useRouteQuery(params: {
   doc: LifeMapDoc;
   visible: EdgeData[];
-  cam: FitView;
-  width: number;
-  height: number;
-  setViewport: (v: { x: number; y: number }) => void;
+  // center a world point on screen (the camera owns the math)
+  centerOnPoint: (wx: number, wy: number) => void;
   setZoomEdgeIds: (ids: string[]) => void;
 }) {
-  const { doc, visible, cam, width, height, setViewport, setZoomEdgeIds } = params;
+  const { doc, visible, centerOnPoint, setZoomEdgeIds } = params;
   const [routeMode, setRouteMode] = useState(false);
   const [routeFromId, setRouteFromId] = useState<string | null>(null);
   const [routeToId, setRouteToId] = useState<string | null>(null);
@@ -105,11 +102,7 @@ export function useRouteQuery(params: {
     const ys = nodes.map((n) => n.y);
     const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
     const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-    // userPan = (screenCenter - world * scale) - camOffset
-    setViewport({
-      x: width / 2 - cx * cam.scale - cam.x,
-      y: height / 2 - cy * cam.scale - cam.y,
-    });
+    centerOnPoint(cx, cy);
   };
 
   // fill one route end from a suggestion tap or a canvas tap, then

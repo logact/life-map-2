@@ -1,4 +1,4 @@
-import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PanResponder, Pressable, Text, View } from "react-native";
 import Animated, {
   Easing,
@@ -8,39 +8,72 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
+import { NodeKind } from "@/domain/doc";
 import { INK } from "@/ui/theme";
 import { LONG_PRESS_MS } from "../constants";
+import { CameraSv } from "../hooks/useMapCamera";
 import { styles } from "../styles";
 import { NodeViewModel } from "../types";
 import { nodeSize } from "../utils";
 
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+// the camera math shared by every animated style below: node screen
+// position and size from the live shared values. Pins never grow past
+// natural size; below 1x they shrink with the camera, so a zoomed-out
+// view keeps its proportions (no overlap)
+function useNodeCamStyle(sv: CameraSv, n: NodeViewModel, pos: NodeViewModel) {
+  return useAnimatedStyle(() => {
+    const us = sv.userScale.value;
+    const camScale = sv.baseScale.value * us;
+    const camX = (sv.screenW.value / 2) * (1 - us) + us * sv.baseX.value;
+    const camY = (sv.screenH.value / 2) * (1 - us) + us * sv.baseY.value;
+    const size = nodeSize(n.kind) * Math.min(1, camScale);
+    const sx = pos.x * camScale + camX + sv.panX.value;
+    const sy = pos.y * camScale + camY + sv.panY.value;
+    return { left: sx - size / 2, top: sy - size / 2, width: size, height: size };
+  });
+}
+
+// the corner radius tracks the animated size: task corners round at a
+// fixed share of the pin, everything else is a circle
+function useNodeRadiusStyle(sv: CameraSv, kind: NodeKind) {
+  return useAnimatedStyle(() => {
+    const camScale = sv.baseScale.value * sv.userScale.value;
+    const size = nodeSize(kind) * Math.min(1, camScale);
+    return { borderRadius: kind === "task" ? size * 0.2 : size / 2 };
+  });
+}
+
 // in-progress node outline: a dotted ring breathing between 0.4 and 1.0
-// opacity, drawn behind the node so the title stays still
-function PulsingRing(props: { x: number; y: number; size: number; borderRadius: number; color: string }) {
-  const opacity = useSharedValue(1);
+// opacity, drawn inside the node wrapper (behind the pin) so it follows
+// the camera on the UI thread like everything else
+function PulsingRing(props: { sv: CameraSv; kind: NodeKind; color: string }) {
+  const breath = useSharedValue(1);
   useEffect(() => {
-    opacity.value = withRepeat(
+    breath.value = withRepeat(
       withTiming(0.4, { duration: 900, easing: Easing.inOut(Easing.ease) }),
       -1,
       true,
     );
-  }, [opacity]);
-  const animated = useAnimatedStyle(() => ({ opacity: opacity.value }));
+  }, [breath]);
+  const radiusStyle = useNodeRadiusStyle(props.sv, props.kind);
+  const animated = useAnimatedStyle(() => ({ opacity: breath.value }));
   return (
     <Animated.View
       pointerEvents="none"
       style={[
         {
           position: "absolute",
-          left: props.x - props.size / 2,
-          top: props.y - props.size / 2,
-          width: props.size,
-          height: props.size,
-          borderRadius: props.borderRadius,
+          left: 0,
+          top: 0,
+          right: 0,
+          bottom: 0,
           borderWidth: 2,
           borderStyle: "dotted",
           borderColor: props.color,
         },
+        radiusStyle,
         animated,
       ]}
     />
@@ -51,18 +84,16 @@ function PulsingRing(props: { x: number; y: number; size: number; borderRadius: 
 // (handled by the parent), long-press arms it so a following movement
 // becomes a drag that repositions it in the domain. While focused it also
 // shows a connect handle: dragging from it onto another node creates an
-// edge (drag direction = edge direction).
+// edge (drag direction = edge direction). Position, size, corner radius
+// and title scaling all follow the live camera on the UI thread — camera
+// moves never re-render this component
 function DraggableNode(props: {
   n: NodeViewModel;
-  screenX: number;
-  screenY: number;
-  // visual size in screen px: the node's natural size at >= 1x zoom,
-  // shrinking with the camera below it
-  size: number;
-  // camera zoom: gesture deltas are screen px, so world deltas = px / scale
-  scale: number;
-  // 1 at natural zoom, tracking the camera below it — drives the title
-  shrink: number;
+  pos: NodeViewModel;
+  // the live camera as shared values
+  sv: CameraSv;
+  // for hitSlop only (touch targets don't need 60fps): the settled mirror
+  settledCamScale: number;
   selected: boolean;
   pulsing: boolean;
   dimmed: boolean;
@@ -80,16 +111,14 @@ function DraggableNode(props: {
   onConnectMove: (id: string, pageX: number, pageY: number) => void;
   onConnectEnd: (id: string, pageX: number, pageY: number) => void;
 }) {
-  const size = props.size;
-  // task corners round at a fixed share of the pin, so they scale with it
-  const borderRadius = props.n.kind === "task" ? size * 0.2 : size / 2;
-  // the title tracks the pin: natural size at >= 1x, shrinking (with a
-  // floor) when zoomed out, and dropping out when the node becomes a dot
+  // the title's natural size (records are smaller); the animated style
+  // scales it with the camera below 1x, floored at 6px like before
   const baseFont = props.n.kind === "record" ? 8 : 11;
-  const fontSize = Math.max(6, Math.round(baseFont * props.shrink));
-  const showTitle = size >= 18;
   // keep even the smallest node tappable at a comfortable touch target
-  const hitSlop = Math.max(0, (44 - size) / 2);
+  const hitSlop = Math.max(
+    0,
+    (44 - nodeSize(props.n.kind) * Math.min(1, props.settledCamScale)) / 2,
+  );
   // the pan responder is created once, so it reads the latest props
   // through a ref instead of closing over stale ones
   const latest = useRef(props);
@@ -112,16 +141,20 @@ function DraggableNode(props: {
         onDragStart(n.id, n.x, n.y);
       },
       onPanResponderMove: (_e, g) => {
-        const { n, scale, onDragMove } = latest.current;
-        onDragMove(n.id, dragOrigin.current.x + g.dx / scale, dragOrigin.current.y + g.dy / scale);
+        const { n, sv, onDragMove } = latest.current;
+        // gesture deltas are screen px, so world deltas = px / camScale
+        const camScale = sv.baseScale.value * sv.userScale.value;
+        onDragMove(n.id, dragOrigin.current.x + g.dx / camScale, dragOrigin.current.y + g.dy / camScale);
       },
       onPanResponderRelease: (_e, g) => {
-        const { n, scale, onDragEnd } = latest.current;
-        onDragEnd(n.id, dragOrigin.current.x + g.dx / scale, dragOrigin.current.y + g.dy / scale);
+        const { n, sv, onDragEnd } = latest.current;
+        const camScale = sv.baseScale.value * sv.userScale.value;
+        onDragEnd(n.id, dragOrigin.current.x + g.dx / camScale, dragOrigin.current.y + g.dy / camScale);
       },
       onPanResponderTerminate: (_e, g) => {
-        const { n, scale, onDragEnd } = latest.current;
-        onDragEnd(n.id, dragOrigin.current.x + g.dx / scale, dragOrigin.current.y + g.dy / scale);
+        const { n, sv, onDragEnd } = latest.current;
+        const camScale = sv.baseScale.value * sv.userScale.value;
+        onDragEnd(n.id, dragOrigin.current.x + g.dx / camScale, dragOrigin.current.y + g.dy / camScale);
       },
     }),
   );
@@ -155,29 +188,41 @@ function DraggableNode(props: {
     }),
   );
 
+  const camStyle = useNodeCamStyle(props.sv, props.n, props.pos);
+  const radiusStyle = useNodeRadiusStyle(props.sv, props.n.kind);
+  // the title tracks the pin: scaled down with the camera (floored at 6px
+  // worth of shrink) and fading out when the node becomes a dot. A
+  // transform (not a fontSize animation) keeps it on the UI thread
+  const titleStyle = useAnimatedStyle(() => {
+    const camScale = props.sv.baseScale.value * props.sv.userScale.value;
+    const shrink = Math.min(1, camScale);
+    const size = nodeSize(props.n.kind) * shrink;
+    return {
+      opacity: size >= 18 ? 1 : 0,
+      transform: [{ scale: Math.max(6 / baseFont, shrink) }],
+    };
+  });
+
   return (
-    <View
+    <Animated.View
       {...dragResponder.panHandlers}
-      style={{
-        position: "absolute",
-        left: props.screenX - size / 2,
-        top: props.screenY - size / 2,
-        opacity: props.dimmed ? 0.2 : 1,
-      }}
+      style={[
+        { position: "absolute", opacity: props.dimmed ? 0.2 : 1 },
+        camStyle,
+      ]}
     >
-      <Pressable
+      {props.pulsing && !props.dimmed && (
+        <PulsingRing sv={props.sv} kind={props.n.kind} color={INK.secondary} />
+      )}
+      <AnimatedPressable
         onPress={() => props.onPress(props.n.id)}
         onLongPress={() => props.onArm(props.n.id)}
         delayLongPress={LONG_PRESS_MS}
         hitSlop={hitSlop}
         style={[
           styles.node,
-          {
-            width: size,
-            height: size,
-            borderRadius,
-            borderStyle: props.borderStyle,
-          },
+          { width: "100%", height: "100%", borderStyle: props.borderStyle },
+          radiusStyle,
           props.n.kind === "record" && styles.nodeRecord,
           // todo: dashed tertiary outline and title (grayscale status)
           props.n.status === "todo" && styles.nodeTodo,
@@ -190,43 +235,41 @@ function DraggableNode(props: {
           props.armed && styles.nodeArmed,
         ]}
       >
-        {showTitle && (
+        <Animated.View style={[{ alignItems: "center" }, titleStyle]}>
           <Text
             style={[
               styles.nodeTitle,
               props.n.kind === "record" && styles.nodeTitleRecord,
-              { fontSize },
               props.n.status === "todo" && styles.nodeTitleTodo,
               props.n.status === "done" && styles.nodeTitleDone,
             ]}
           >
             {props.n.title}
           </Text>
-        )}
-      </Pressable>
+        </Animated.View>
+      </AnimatedPressable>
       {/* connect handle: rides the node's right edge; a sibling of the
           Pressable so its responder never fights the tap/long-press */}
       {props.connectable && (
         <View
           {...connectResponder.panHandlers}
           hitSlop={12}
-          style={[styles.connectHandle, { right: -7, top: size / 2 - 9 }]}
+          style={[styles.connectHandle, { right: -7, top: "50%", marginTop: -9 }]}
         />
       )}
-    </View>
+    </Animated.View>
   );
 }
 
-// one visible node with its status ring: computes the size, outline
-// style and screen position, then renders the drag/press wrapper.
+// one visible node with its status ring: derives the outline style from
+// status, then renders the drag/press wrapper.
 // Memoized — see EdgeGlyph for why a shallow compare is enough
 export const CanvasNode = memo(function CanvasNode(props: {
   n: NodeViewModel;
   // live position: the drag override while dragging, else the domain
   pos: NodeViewModel;
-  camScale: number;
-  cameraX: number;
-  cameraY: number;
+  sv: CameraSv;
+  settledCamScale: number;
   reduceMotion: boolean;
   selected: boolean;
   dimmed: boolean;
@@ -242,51 +285,31 @@ export const CanvasNode = memo(function CanvasNode(props: {
   onConnectEnd: (id: string, pageX: number, pageY: number) => void;
 }) {
   const { n, pos } = props;
-  // pins never grow past natural size; below 1x they shrink with the
-  // camera, so a zoomed-out view keeps its proportions (no overlap)
-  const shrink = Math.min(1, props.camScale);
-  const size = nodeSize(n.kind) * shrink;
-  const borderRadius = n.kind === "task" ? size * 0.2 : size / 2;
   const pulsing = n.status === "in-progress" && !props.reduceMotion;
   // outline style carries status: todo=dashed, in-progress=dotted
   // (breathing ring when motion is allowed), done=solid
   const borderStyle: "dashed" | "dotted" | "solid" =
     n.status === "todo" ? "dashed" : n.status === "in-progress" ? "dotted" : "solid";
-  const screenX = pos.x * props.camScale + props.cameraX;
-  const screenY = pos.y * props.camScale + props.cameraY;
   return (
-    <Fragment>
-      {pulsing && !props.dimmed && (
-        <PulsingRing
-          x={screenX}
-          y={screenY}
-          size={size}
-          borderRadius={borderRadius}
-          color={INK.secondary}
-        />
-      )}
-      <DraggableNode
-        n={n}
-        screenX={screenX}
-        screenY={screenY}
-        size={size}
-        scale={props.camScale}
-        shrink={shrink}
-        selected={props.selected}
-        pulsing={pulsing}
-        dimmed={props.dimmed}
-        armed={props.armed}
-        connectable={props.connectable}
-        borderStyle={borderStyle}
-        onPress={props.onPress}
-        onArm={props.onArm}
-        onDragStart={props.onDragStart}
-        onDragMove={props.onDragMove}
-        onDragEnd={props.onDragEnd}
-        onConnectStart={props.onConnectStart}
-        onConnectMove={props.onConnectMove}
-        onConnectEnd={props.onConnectEnd}
-      />
-    </Fragment>
+    <DraggableNode
+      n={n}
+      pos={pos}
+      sv={props.sv}
+      settledCamScale={props.settledCamScale}
+      pulsing={pulsing}
+      selected={props.selected}
+      dimmed={props.dimmed}
+      armed={props.armed}
+      connectable={props.connectable}
+      borderStyle={borderStyle}
+      onPress={props.onPress}
+      onArm={props.onArm}
+      onDragStart={props.onDragStart}
+      onDragMove={props.onDragMove}
+      onDragEnd={props.onDragEnd}
+      onConnectStart={props.onConnectStart}
+      onConnectMove={props.onConnectMove}
+      onConnectEnd={props.onConnectEnd}
+    />
   );
 });

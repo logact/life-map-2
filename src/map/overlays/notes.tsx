@@ -6,31 +6,37 @@ import { NodeData } from "@/domain/doc";
 import { SheetButton } from "../components/sheets";
 import { styles } from "../styles";
 import { fmtDate } from "../utils";
+import { DatePickerBody } from "./datePicker";
 
 // notes sheet: a node's full notes list (newest first) with add/edit/delete.
 // Opened from the node info card's peek row. The editor is NOT a second
 // modal stacked on top — a Modal presented while another Modal is visible
 // doesn't reliably come to the front on iOS — so this one sheet swaps its
-// content between the list and the editor (draft != null means editing).
+// content between the list, the editor, and the date calendar (the editor's
+// date row backdates the note; pickingDate shows the calendar).
 // Delete confirms in place (tap once to arm, again to fire) — the same
 // pattern as the menus.
 export function NotesSheet(props: {
   node: NodeData;
   run: (recipe: Recipe) => void;
   // the note being added or edited (noteId present = editing an existing
-  // note); null shows the list
-  draft: { noteId?: string; text: string } | null;
+  // note); null shows the list. createdAt is always set by the caller (add:
+  // the open time; edit: the note's own date) — the date row edits it
+  draft: { noteId?: string; text: string; createdAt: number } | null;
   onChangeDraftText: (text: string) => void;
+  onChangeDraftDate: (ms: number) => void;
   onStartAdd: () => void;
-  onStartEdit: (noteId: string, text: string) => void;
+  onStartEdit: (noteId: string, text: string, createdAt: number) => void;
   onSaveDraft: () => void;
   onCloseDraft: () => void;
   onClose: () => void;
 }) {
   const { node, draft } = props;
   const [armedNoteId, setArmedNoteId] = useState<string | null>(null);
-  // while the editor is up, tap-away / back just returns to the list
-  const dismiss = draft ? props.onCloseDraft : props.onClose;
+  const [pickingDate, setPickingDate] = useState(false);
+  // while the editor is up, tap-away / back just returns to the list; the
+  // calendar's tap-away returns to the editor
+  const dismiss = pickingDate ? () => setPickingDate(false) : draft ? props.onCloseDraft : props.onClose;
   return (
     <Modal visible transparent animationType="fade" onRequestClose={dismiss}>
       <KeyboardAvoidingView
@@ -38,7 +44,22 @@ export function NotesSheet(props: {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <Pressable style={StyleSheet.absoluteFill} onPress={dismiss} />
-        {draft ? (
+        {draft && pickingDate ? (
+          <View style={styles.formSheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.formTitle}>Note date</Text>
+            <DatePickerBody
+              value={draft.createdAt}
+              onChange={props.onChangeDraftDate}
+            />
+            <Pressable
+              style={({ pressed }) => [styles.formSave, pressed && { opacity: 0.6 }]}
+              onPress={() => setPickingDate(false)}
+            >
+              <Text style={styles.formSaveText}>Done</Text>
+            </Pressable>
+          </View>
+        ) : draft ? (
           <View style={styles.formSheet}>
             <View style={styles.sheetHandle} />
             <Text style={styles.formTitle}>
@@ -52,6 +73,10 @@ export function NotesSheet(props: {
               multiline
               autoFocus
             />
+            <Pressable style={styles.dateRow} onPress={() => setPickingDate(true)}>
+              <Text style={styles.dateRowLabel}>Date</Text>
+              <Text style={styles.dateRowValue}>{fmtDate(draft.createdAt)}</Text>
+            </Pressable>
             <View style={styles.formButtons}>
               <Pressable
                 style={({ pressed }) => [styles.formCancel, pressed && { opacity: 0.6 }]}
@@ -92,7 +117,7 @@ export function NotesSheet(props: {
                         label="Edit"
                         onPress={() => {
                           setArmedNoteId(null);
-                          props.onStartEdit(note.id, note.text);
+                          props.onStartEdit(note.id, note.text, note.createdAt);
                         }}
                       />
                       <SheetButton

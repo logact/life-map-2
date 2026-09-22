@@ -10,7 +10,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import Svg, { Circle, G, Line, Polygon } from "react-native-svg";
+import Svg, { Circle, Line, Polygon } from "react-native-svg";
 
 import {
   addChildNode,
@@ -39,6 +39,7 @@ import { useDocStore } from "@/state/docStore";
 import { flushPendingSave } from "@/data/mapDb";
 import { INK } from "@/ui/theme";
 import { EdgeGlyph } from "@/map/components/edgeGlyph";
+import { CameraG } from "@/map/components/cameraG";
 import { CanvasNode } from "@/map/components/nodeGlyph";
 import { BottomPanel } from "@/map/components/bottomPanel";
 import { NoteSearchPanel, RoutePanel } from "@/map/components/panels";
@@ -51,7 +52,7 @@ import { useNoteSearch } from "@/map/hooks/useNoteSearch";
 import { useRouteQuery } from "@/map/hooks/useRouteQuery";
 import { useZoomLens } from "@/map/hooks/useZoomLens";
 import { CreateMenu, EdgeMenu, NodeMenu, RoadMenu } from "@/map/overlays/menus";
-import { CreateNodeForm } from "@/map/overlays/forms";
+import { CreateNodeForm, TextDraft } from "@/map/overlays/forms";
 import { MapInfoCard } from "@/map/overlays/mapInfoCard";
 import { NotesSheet } from "@/map/overlays/notes";
 import { RoutesModal } from "@/map/overlays/routesModal";
@@ -88,9 +89,8 @@ export default function MapScreen() {
   const canRedo = useDocStore((s) => s.canRedo);
 
   // camera and lens come first: the view model, the queries and the
-  // gestures below all read their refs
+  // gestures below all read the live camera through getCam/getViewport
   const camera = useMapCamera(width, height);
-  const { fitRef, viewportRef, setViewport } = camera;
   const lens = useZoomLens({ frameNodes: camera.frameNodes });
   const {
     zoomEdgeIds,
@@ -140,13 +140,13 @@ export default function MapScreen() {
   const [roadMenuOpen, setRoadMenuOpen] = useState(false);
   // creation flow: what the form is making
   const [createTarget, setCreateTarget] = useState<CreateTarget | null>(null);
-  const [draft, setDraft] = useState({ title: "", detail: "" });
+  const [draft, setDraft] = useState<TextDraft>({ title: "", detail: "" });
   // notes flow: the info card shows only a peek of the newest note; the
   // notes sheet (notesNodeId) holds the full list, and the note being
   // added or edited sits in the sheet's draft state (noteId present =
   // editing that existing note) — the sheet swaps list/editor in place
   const [notesNodeId, setNotesNodeId] = useState<string | null>(null);
-  const [noteDraft, setNoteDraft] = useState<{ nodeId: string; noteId?: string; text: string } | null>(null);
+  const [noteDraft, setNoteDraft] = useState<{ nodeId: string; noteId?: string; text: string; createdAt: number } | null>(null);
   // pending empty-canvas double tap: the create menu opens for this world
   // point (a Paste row joins when the clipboard is non-empty)
   const [createPicker, setCreatePicker] = useState<{ x: number; y: number } | null>(null);
@@ -220,10 +220,7 @@ export default function MapScreen() {
 
   const noteSearch = useNoteSearch({
     doc,
-    width,
-    height,
-    fitRef,
-    setViewport,
+    centerOnPoint: camera.centerOnPoint,
     zoomedIdsRef,
     setZoomedIds,
     setInfoTarget,
@@ -231,10 +228,7 @@ export default function MapScreen() {
   const routeQuery = useRouteQuery({
     doc,
     visible,
-    cam,
-    width,
-    height,
-    setViewport,
+    centerOnPoint: camera.centerOnPoint,
     setZoomEdgeIds,
   });
   const nodeDrag = useNodeDrag({ run, closeOverlays, setNodeFocusId });
@@ -262,9 +256,11 @@ export default function MapScreen() {
   // (screen position - camera offset) / zoom)
   const openCreatePickerAt = (screenX: number, screenY: number) => {
     closeOverlays();
+    const camNow = camera.getCam();
+    const vp = camera.getViewport();
     setCreatePicker({
-      x: (screenX - viewportRef.current.x - fitRef.current.x) / fitRef.current.scale,
-      y: (screenY - viewportRef.current.y - fitRef.current.y) / fitRef.current.scale,
+      x: (screenX - vp.x - camNow.x) / camNow.scale,
+      y: (screenY - vp.y - camNow.y) / camNow.scale,
     });
   };
 
@@ -288,8 +284,8 @@ export default function MapScreen() {
   // node = connect (drag direction is the edge direction); drop anywhere
   // else cancels. Duplicates are allowed — undo covers regret.
   const hitTestConnectTarget = (pageX: number, pageY: number, excludeId: string) => {
-    const camNow = fitRef.current;
-    const vp = viewportRef.current;
+    const camNow = camera.getCam();
+    const vp = camera.getViewport();
     let best: string | null = null;
     let bestDist = Infinity;
     for (const n of vm.nodes) {
@@ -314,8 +310,8 @@ export default function MapScreen() {
   };
 
   const onConnectMove = (id: string, pageX: number, pageY: number) => {
-    const camNow = fitRef.current;
-    const vp = viewportRef.current;
+    const camNow = camera.getCam();
+    const vp = camera.getViewport();
     setConnectDrag({
       fromId: id,
       x: (pageX - vp.x - camNow.x) / camNow.scale,
@@ -335,9 +331,10 @@ export default function MapScreen() {
   };
 
   const { panResponder } = useCanvasGestures({
-    viewportRef,
-    fitRef,
-    setViewport,
+    getViewport: camera.getViewport,
+    getCam: camera.getCam,
+    panTo: camera.panTo,
+    settleCamera: camera.settleCamera,
     pinchCameraZoom: camera.pinchCameraZoom,
     cancelCameraTween: camera.cancelCameraTween,
     zoomSelectionStep,
@@ -408,8 +405,8 @@ export default function MapScreen() {
     else if (infoTarget?.kind === "edge") world = edgeMid(infoTarget.id);
     else if (createPicker) world = { x: createPicker.x, y: createPicker.y };
     if (!world) return;
-    const camNow = fitRef.current;
-    const screenY = world.y * camNow.scale + camNow.y + viewportRef.current.y;
+    const camNow = camera.getCam();
+    const screenY = world.y * camNow.scale + camNow.y + camera.getViewport().y;
     const limit = height - panelHeight - 40;
     if (screenY > limit) camera.panByAnimated(0, limit - screenY);
     // fires on panel open / height change only; reads the camera via refs
@@ -517,9 +514,9 @@ export default function MapScreen() {
   const saveNote = () => {
     if (!noteDraft) return;
     if (noteDraft.noteId) {
-      run(updateNote(noteDraft.nodeId, noteDraft.noteId, noteDraft.text));
+      run(updateNote(noteDraft.nodeId, noteDraft.noteId, noteDraft.text, noteDraft.createdAt));
     } else {
-      run(addNote(noteDraft.nodeId, noteDraft.text).recipe);
+      run(addNote(noteDraft.nodeId, noteDraft.text, noteDraft.createdAt).recipe);
     }
     closeNoteEditor();
   };
@@ -699,10 +696,11 @@ export default function MapScreen() {
   // ---------- create / connect / remove flows ----------
 
   // "New successor": create a node of the chosen kind, pointed at by the
-  // anchor node (edge anchor -> new)
+  // anchor node (edge anchor -> new). occurredAt seeds the record's date
+  // row (editable in the form; defaults to now)
   const startCreate = (mode: "task" | "record", parentId: string) => {
     closeOverlays();
-    setDraft({ title: "", detail: "" });
+    setDraft({ title: "", detail: "", occurredAt: Date.now() });
     setCreateTarget({ mode, parentId });
   };
 
@@ -732,7 +730,7 @@ export default function MapScreen() {
   // current one (edge new -> current)
   const startCreateReverse = (mode: "goal" | "task" | "record", childId: string) => {
     closeOverlays();
-    setDraft({ title: "", detail: "" });
+    setDraft({ title: "", detail: "", occurredAt: Date.now() });
     setCreateTarget({ mode, childId });
   };
 
@@ -780,12 +778,12 @@ export default function MapScreen() {
       if (!child) return;
       if (!tryInsert(child.id, "predecessor")) {
         const pos = childPosition(child, inDegree(child.id), "predecessor");
-        run(addParentNode(createTarget.childId, createTarget.mode, title, detail, pos).recipe);
+        run(addParentNode(createTarget.childId, createTarget.mode, title, detail, pos, draft.occurredAt).recipe);
       }
     } else if ("x" in createTarget) {
       // free node at the double-tapped position
       run(
-        addFreeNode(createTarget.mode, title, detail, { x: createTarget.x, y: createTarget.y })
+        addFreeNode(createTarget.mode, title, detail, { x: createTarget.x, y: createTarget.y }, draft.occurredAt)
           .recipe,
       );
     } else if ("parentId" in createTarget) {
@@ -793,7 +791,7 @@ export default function MapScreen() {
       if (!parent) return;
       if (!tryInsert(parent.id, "successor")) {
         const pos = childPosition(parent, outDegree(parent.id), "successor");
-        run(addChildNode(createTarget.parentId, createTarget.mode, title, detail, pos).recipe);
+        run(addChildNode(createTarget.parentId, createTarget.mode, title, detail, pos, draft.occurredAt).recipe);
       }
     }
     setCreateTarget(null);
@@ -922,8 +920,10 @@ export default function MapScreen() {
   return (
     <View style={styles.container} {...panResponder.panHandlers}>
       <Svg style={StyleSheet.absoluteFill}>
-        {/* the whole edge layer shifts with the pan and scales with the fit-zoom */}
-        <G transform={`translate(${cameraX}, ${cameraY}) scale(${cam.scale})`}>
+        {/* the whole edge layer follows the live camera on the UI thread
+            (no React render per frame); dots and counter-scale radii use
+            the settled camera, refreshing when each gesture ends */}
+        <CameraG sv={camera.sv}>
           {gridDots.map((p, i) => (
             <Circle key={i} cx={p.x} cy={p.y} r={1.5 / cam.scale} fill={INK.primary} opacity={0.06} />
           ))}
@@ -949,7 +949,7 @@ export default function MapScreen() {
                 related={related}
                 dimmed={dimmed}
                 liveBend={bendDrag && bendDrag.edgeId === e.id ? { x: bendDrag.x, y: bendDrag.y } : null}
-                camScale={cam.scale}
+                sv={camera.sv}
                 reduceMotion={reduceMotion}
                 onPress={glyphHandlers.onEdgePress}
                 onLongPress={glyphHandlers.onEdgeLongPress}
@@ -1005,7 +1005,7 @@ export default function MapScreen() {
                 </>
               );
             })()}
-        </G>
+        </CameraG>
       </Svg>
 
       {vm.nodes.map((n) => {
@@ -1018,9 +1018,8 @@ export default function MapScreen() {
             key={n.id}
             n={n}
             pos={pos}
-            camScale={cam.scale}
-            cameraX={cameraX}
-            cameraY={cameraY}
+            sv={camera.sv}
+            settledCamScale={cam.scale}
             reduceMotion={reduceMotion}
             selected={n.id === highlightedNodeId}
             dimmed={nodeDimmed}
@@ -1166,7 +1165,7 @@ export default function MapScreen() {
             hasClipboard={clipboard !== null}
             onPickKind={(mode) => {
               setCreatePicker(null);
-              setDraft({ title: "", detail: "" });
+              setDraft({ title: "", detail: "", occurredAt: Date.now() });
               setCreateTarget({ mode, x: createPicker.x, y: createPicker.y });
             }}
             onPaste={() => pasteClipboardAt(createPicker.x, createPicker.y)}
@@ -1236,8 +1235,11 @@ export default function MapScreen() {
           run={run}
           draft={noteDraft && noteDraft.nodeId === notesNode.id ? noteDraft : null}
           onChangeDraftText={(t) => setNoteDraft((d) => (d ? { ...d, text: t } : d))}
-          onStartAdd={() => setNoteDraft({ nodeId: notesNode.id, text: "" })}
-          onStartEdit={(noteId, text) => setNoteDraft({ nodeId: notesNode.id, noteId, text })}
+          onChangeDraftDate={(ms) => setNoteDraft((d) => (d ? { ...d, createdAt: ms } : d))}
+          onStartAdd={() => setNoteDraft({ nodeId: notesNode.id, text: "", createdAt: Date.now() })}
+          onStartEdit={(noteId, text, createdAt) =>
+            setNoteDraft({ nodeId: notesNode.id, noteId, text, createdAt })
+          }
           onSaveDraft={saveNote}
           onCloseDraft={closeNoteEditor}
           onClose={() => {

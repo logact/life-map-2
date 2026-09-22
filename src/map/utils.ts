@@ -137,19 +137,24 @@ export function splitPath(
 // anchored to the world and shift with panning. The spacing doubles
 // whenever the zoom would pack dots tighter than 24 px on screen, and
 // the radius counter-scales, so the grid looks identical at any zoom.
+// The window is computed from the SETTLED camera (panning no longer
+// re-renders), so it covers an extra marginScreens of viewport on every
+// side: a finger-dragged pan can't outrun the dots before the next
+// settle recomputes them
 export function computeGridDots(
   cameraX: number,
   cameraY: number,
   scale: number,
   width: number,
   height: number,
+  marginScreens = 0.3,
 ): { x: number; y: number }[] {
   let gridSpacing = GRID_SPACING;
   while (gridSpacing * scale < 24) gridSpacing *= 2;
-  const worldLeft = -cameraX / scale;
-  const worldTop = -cameraY / scale;
-  const worldRight = (width - cameraX) / scale;
-  const worldBottom = (height - cameraY) / scale;
+  const worldLeft = -cameraX / scale - (width / scale) * marginScreens;
+  const worldTop = -cameraY / scale - (height / scale) * marginScreens;
+  const worldRight = (width - cameraX) / scale + (width / scale) * marginScreens;
+  const worldBottom = (height - cameraY) / scale + (height / scale) * marginScreens;
   const gridDots: { x: number; y: number }[] = [];
   const gridStartX = Math.floor(worldLeft / gridSpacing) * gridSpacing;
   const gridStartY = Math.floor(worldTop / gridSpacing) * gridSpacing;

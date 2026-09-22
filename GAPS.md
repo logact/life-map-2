@@ -9,7 +9,7 @@ workaround used — if any.
 
 ## 1. Recurring habits have no home
 
-"Gym 3x/week", "Anki: 20 new words/week", "Weekly journal" are *ongoing* —
+"Gym 3x/week", "Anki: 20 new words/week", "Weekly journal" are _ongoing_ —
 they are never done, yet they aren't a single task either. The model has no
 recurrence, no schedule, no streaks.
 
@@ -20,31 +20,30 @@ attached per session. The title carries the frequency as text.
 
 "Squat 100 kg (currently 90×5)", "1,500 words in Anki" — targets and current
 values are numbers, but the model has no metric fields. A goal has a
-`targetDate` but no target *value*; progress toward 100 kg is invisible.
+`targetDate` but no target _value_; progress toward 100 kg is invisible.
 
 **Workaround:** numbers live in titles, notes, and record text.
 
-## 3. Backdating is impossible in-app
+## 3. Backdating is impossible in-app — fixed
 
-Every command stamps `Date.now()`. A user who logs yesterday's workout
-records it as today; a map with real history (like that seed) cannot be
-produced through the UI at all — the seed patched `startedAt` /
-`completedAt` / `occurredAt` / note times in a raw recipe after building.
+Fixed 2026-09-22: dates are user-settable everywhere a timestamp is
+stamped. The create form's record mode has an "Occurred" date row (a small
+in-sheet calendar, `src/map/overlays/datePicker.tsx`); the node info
+card's date lines (Occurred / Started / Done / Target) are tappable and
+rewrite the stamp through the new `setNodeTimes` command; the note
+editor's date row sets the note's `createdAt`. Commands also accept the
+time explicitly: `addFreeNode` / `addChildNode` / `addParentNode`
+(`occurredAt`), `transitionNodeStatus` / `addNote` / `updateNote` (`at` /
+`createdAt`). Notes are kept newest-first by date, so a backdated note
+slots under newer ones. The status machine still owns WHICH fields exist —
+`setNodeTimes` rewrites `startedAt`/`completedAt` only where set (start/
+complete first, then move the date), while `occurredAt` and the goal's
+`targetDate` (also newly settable/clearable in-app) are always writable.
 
-**Consequence:** that map was not reproducible by in-app use alone, and any
-late logging by hand will silently carry the wrong date.
-
-## 4. Edges carry no meaning
-
-A road can show *that* two nodes connect, never *why*. Edges have no title,
-no notes, no description — so if a real relation ever appears (say, the app
-becomes how gym weeks get scheduled), the reason for the road would live
-only outside the app.
-
-**Workaround:** none. The earlier draft of the seed shipped two cross-area
-roads on invented justifications; they were removed, because unjustified
-edges read as noise — but the underlying gap (no way to annotate a road)
-remains.
+- **Verify:** log a record, tap its "Occurred" line, pick last week → the
+  card shows that date; Start → tap "Started" → backdate; add a note,
+  change its date in the editor → it sorts below newer notes. All edits
+  undo in one step each.
 
 ## 5. Tasks have no description field
 
@@ -53,25 +52,6 @@ bugs from BUGS.md" can't say which bugs without abusing the title.
 
 **Workaround:** task detail goes into notes (e.g. squat form cues), which
 are hidden one tap deeper.
-
-## 6. No time-span nodes
-
-"Weeks 1–6" and "Weeks 7–12" are *spans*, not points. The model's expand
-midpoint is a point on the road, so a span can only be faked by putting the
-date range in a node's title.
-
-**Workaround:** phase midpoints named with their date ranges.
-
-## 7. Goal rollup ignores incoming roads
-
-`goalStatus` only rolls up *outgoing* child tasks. With the roadmap
-topology — every area a chain INTO its main goal — a goal has no outgoing
-tasks at all, so it derives **todo** even when the road into it is nearly
-done. Progress *toward* a goal never reaches the goal node.
-
-**Workaround:** read the road, not the goal glyph — each segment shows the
-status of the step it leads to, and the goal is marked done manually when
-reached.
 
 ## 8. Series are flattened
 
@@ -86,6 +66,6 @@ can be attached. Records are text only.
 
 ---
 
-*Filed alongside the original seed on 2026-09-18 — the day the tutorial map
+_Filed alongside the original seed on 2026-09-18 — the day the tutorial map
 replaced it. Items 1–3 feel like the real product gaps for daily-use
-tracking; 4–9 are acceptable constraints of a map metaphor.*
+tracking; 4–9 are acceptable constraints of a map metaphor._

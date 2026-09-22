@@ -1,7 +1,6 @@
 import { RefObject, useState } from "react";
 import { Keyboard } from "react-native";
 
-import { FitView } from "@/map/fitZoom";
 import { edgeDepth, LifeMapDoc } from "@/domain/doc";
 import { searchNotes } from "@/domain/search";
 import { revealEdge } from "@/domain/visibility";
@@ -13,15 +12,13 @@ import { InfoTarget } from "../types";
 // the other modes (route query, connect, summarize, …)
 export function useNoteSearch(params: {
   doc: LifeMapDoc;
-  width: number;
-  height: number;
-  fitRef: RefObject<FitView>;
-  setViewport: (v: { x: number; y: number }) => void;
+  // center a world point on screen (the camera owns the math)
+  centerOnPoint: (wx: number, wy: number) => void;
   zoomedIdsRef: RefObject<Set<string>>;
   setZoomedIds: (s: Set<string>) => void;
   setInfoTarget: (t: InfoTarget | null) => void;
 }) {
-  const { doc, width, height, fitRef, setViewport, zoomedIdsRef, setZoomedIds, setInfoTarget } = params;
+  const { doc, centerOnPoint, zoomedIdsRef, setZoomedIds, setInfoTarget } = params;
   const [noteSearchMode, setNoteSearchMode] = useState(false);
   const [noteQuery, setNoteQuery] = useState("");
 
@@ -59,13 +56,8 @@ export function useNoteSearch(params: {
     }
     // pan with the CURRENT camera (the reveal changed the visible nodes,
     // but the camera no longer derives from them) so the node lands at
-    // the screen center: userPan = (screenCenter - world * scale) -
-    // camOffset
-    const cam = fitRef.current;
-    setViewport({
-      x: width / 2 - node.x * cam.scale - cam.x,
-      y: height / 2 - node.y * cam.scale - cam.y,
-    });
+    // the screen center
+    centerOnPoint(node.x, node.y);
     Keyboard.dismiss();
     setInfoTarget({ kind: "node", id: node.id });
   };

@@ -1,9 +1,8 @@
 import { useMemo } from "react";
 
-import { edgeDepth, isGoal, isRecord, isTask, LifeMapDoc, NodeData } from "@/domain/doc";
+import { edgeDepth, LifeMapDoc, NodeData } from "@/domain/doc";
 import { edgeStatus, nodeStatus } from "@/domain/status";
 import { visibleEdges, visibleIsolatedNodes } from "@/domain/visibility";
-import { fmtDate } from "./utils";
 import { EdgeViewModel, MapViewModel, NodeViewModel } from "./types";
 
 // domain -> view model: walk the edges visible at the current zoom state,
@@ -53,23 +52,4 @@ export function useMapViewModel(doc: LifeMapDoc, zoomedIds: ReadonlySet<string>)
   const visible = useMemo(() => visibleEdges(doc, zoomedIds), [doc, zoomedIds]);
   const vm = useMemo(() => deriveViewModel(doc, zoomedIds), [doc, zoomedIds]);
   return { visible, vm };
-}
-
-// info card fact lines for a single-tapped node: kind plus the read-only
-// timestamps. Status is not here — the card renders it as its own row
-// with the legal transition buttons. The goal's description / record's
-// note are not here either — the card renders them as its editable row;
-// the notes render as the notes peek
-export function nodeInfoLines(node: NodeData): string[] {
-  const lines: string[] = [node.kind];
-  if (isGoal(node)) {
-    if (node.targetDate) lines.push(`Target ${fmtDate(node.targetDate)}`);
-    if (node.completedAt) lines.push(`Done ${fmtDate(node.completedAt)}`);
-  } else if (isTask(node)) {
-    if (node.startedAt) lines.push(`Started ${fmtDate(node.startedAt)}`);
-    if (node.completedAt) lines.push(`Done ${fmtDate(node.completedAt)}`);
-  } else if (isRecord(node)) {
-    if (node.occurredAt) lines.push(`Occurred ${fmtDate(node.occurredAt)}`);
-  }
-  return lines;
 }

@@ -14,13 +14,19 @@ import { DOUBLE_TAP_MS, PINCH_RATIO } from "../constants";
 // finger distance, and the selection steps one detail level each time
 // the accumulated distance crosses PINCH_RATIO.
 //
+// The camera writes go straight into shared values (panTo /
+// pinchCameraZoom): no React render per frame. The settled mirror syncs
+// once, on release (settleCamera).
+//
 // The pan responder is created ONCE, so every callback it needs arrives
 // through `params` and is mirrored into `latest` on every commit — the
 // responder never closes over stale handlers.
 export function useCanvasGestures(params: {
-  viewportRef: RefObject<{ x: number; y: number }>;
-  fitRef: RefObject<FitView>;
-  setViewport: (v: { x: number; y: number }) => void;
+  getViewport: () => { x: number; y: number };
+  getCam: () => FitView;
+  panTo: (x: number, y: number) => void;
+  // sync the settled camera mirror once the gesture ends
+  settleCamera: () => void;
   pinchCameraZoom: (ratio: number, mx: number, my: number) => void;
   zoomSelectionStep: (deeper: boolean) => void;
   // a user gesture cancels any programmatic camera tween in flight
@@ -34,7 +40,7 @@ export function useCanvasGestures(params: {
   // release of a moved bend drag commits the bend point to the domain
   commitBend: (edgeId: string, bend: { x: number; y: number }) => void;
 }) {
-  const { viewportRef, fitRef, setViewport, bendDragRef, setBendDrag } = params;
+  const { bendDragRef, setBendDrag } = params;
   // the pan responder is created once, so it reaches the latest handlers
   // through a ref instead of closing over stale ones
   const latest = useRef(params);
@@ -69,7 +75,7 @@ export function useCanvasGestures(params: {
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onPanResponderGrant: () => {
-        panStart.current = viewportRef.current;
+        panStart.current = latest.current.getViewport();
         panMoved.current = false;
         pinchStart.current = null;
         pinching.current = false;
@@ -113,9 +119,10 @@ export function useCanvasGestures(params: {
           // doesn't jump when the remaining finger moves
           pinching.current = false;
           pinchStart.current = null;
+          const vpNow = latest.current.getViewport();
           panStart.current = {
-            x: viewportRef.current.x - g.dx,
-            y: viewportRef.current.y - g.dy,
+            x: vpNow.x - g.dx,
+            y: vpNow.y - g.dy,
           };
         }
         const bd = bendDragRef.current;
@@ -123,10 +130,12 @@ export function useCanvasGestures(params: {
           // bend drag: the bend point follows the finger (world coords)
           if (Math.abs(g.dx) > 4 || Math.abs(g.dy) > 4) {
             panMoved.current = true;
+            const vp = latest.current.getViewport();
+            const camNow = latest.current.getCam();
             setBendDrag({
               edgeId: bd.edgeId,
-              x: (g.moveX - viewportRef.current.x - fitRef.current.x) / fitRef.current.scale,
-              y: (g.moveY - viewportRef.current.y - fitRef.current.y) / fitRef.current.scale,
+              x: (g.moveX - vp.x - camNow.x) / camNow.scale,
+              y: (g.moveY - vp.y - camNow.y) / camNow.scale,
             });
           }
           return;
@@ -135,10 +144,7 @@ export function useCanvasGestures(params: {
           panMoved.current = true;
           cancelCanvasTap();
           latest.current.closeOverlays();
-          setViewport({
-            x: panStart.current.x + g.dx,
-            y: panStart.current.y + g.dy,
-          });
+          latest.current.panTo(panStart.current.x + g.dx, panStart.current.y + g.dy);
         }
       },
       // a touch that never moved is a tap on empty canvas: it starts the
@@ -150,6 +156,8 @@ export function useCanvasGestures(params: {
       onPanResponderRelease: (e) => {
         pinchStart.current = null;
         pinching.current = false;
+        // one settled-mirror sync per gesture end (never per frame)
+        if (panMoved.current) latest.current.settleCamera();
         const bd = bendDragRef.current;
         if (bd) {
           if (panMoved.current) {
@@ -180,6 +188,7 @@ export function useCanvasGestures(params: {
         cancelCanvasTap();
         pinchStart.current = null;
         pinching.current = false;
+        if (panMoved.current) latest.current.settleCamera();
         setBendDrag(null);
       },
     }),

@@ -9,10 +9,13 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { ACCENT, INK } from "@/ui/theme";
+import { CameraSv } from "../hooks/useMapCamera";
 import { EdgeViewModel, NodeViewModel } from "../types";
 import { nodeSize, splitPath } from "../utils";
 
 const AnimatedPolyline = Animated.createAnimatedComponent(Polyline);
+const AnimatedPolygon = Animated.createAnimatedComponent(Polygon);
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 // in-progress edge: dotted line whose dashes march toward the target node
 function MarchingPolyline(props: { points: string; color: string; width: number }) {
@@ -40,6 +43,35 @@ function MarchingPolyline(props: { points: string; color: string; width: number 
   );
 }
 
+// a circle whose radius counter-scales with the live camera on the UI
+// thread: fills are not covered by non-scaling-stroke, so the world-space
+// radius must grow as the camera zooms out to keep a constant screen size
+function CounterScaledCircle(props: {
+  sv: CameraSv;
+  cx: number;
+  cy: number;
+  // radius in screen px (the world radius is r / camScale)
+  r: number;
+  fill: string;
+  stroke?: string;
+  strokeWidth?: number;
+}) {
+  const animatedProps = useAnimatedProps(() => ({
+    r: props.r / (props.sv.baseScale.value * props.sv.userScale.value),
+  }));
+  return (
+    <AnimatedCircle
+      cx={props.cx}
+      cy={props.cy}
+      fill={props.fill}
+      stroke={props.stroke}
+      strokeWidth={props.strokeWidth}
+      vectorEffect="non-scaling-stroke"
+      animatedProps={animatedProps}
+    />
+  );
+}
+
 // one visible edge: the (possibly broken) line with per-segment status
 // styling, the arrowhead into the target node, breakpoint markers, the
 // wide invisible hit area, and the bend handle while a bend drag is armed
@@ -59,7 +91,9 @@ export const EdgeGlyph = memo(function EdgeGlyph(props: {
   dimmed: boolean;
   // a bend drag in progress overrides the stored bend point
   liveBend: { x: number; y: number } | null;
-  camScale: number;
+  // the live camera: arrowheads and markers counter-scale on the UI
+  // thread, so camera moves never re-render the glyph
+  sv: CameraSv;
   reduceMotion: boolean;
   onPress: (id: string) => void;
   onLongPress: (id: string) => void;
@@ -101,13 +135,20 @@ export const EdgeGlyph = memo(function EdgeGlyph(props: {
   const uy = len > 0 ? dy / len : 0;
   const tipX = b.x - ux * (nodeSize(b.kind) / 2);
   const tipY = b.y - uy * (nodeSize(b.kind) / 2);
-  // fills are not covered by non-scaling-stroke: counter-scale the
-  // arrowhead so it keeps a constant screen size at any zoom
-  const wing = 5 / props.camScale;
-  const back = 11 / props.camScale;
-  const baseX = tipX - ux * back;
-  const baseY = tipY - uy * back;
-  const arrowPoints = `${tipX},${tipY} ${baseX - uy * wing},${baseY + ux * wing} ${baseX + uy * wing},${baseY - ux * wing}`;
+  // fills are not covered by non-scaling-stroke: the arrowhead
+  // counter-scales with the live camera so it keeps a constant screen
+  // size at any zoom (evaluated on the UI thread; the tip and direction
+  // are render-time constants captured by the worklet)
+  const arrowProps = useAnimatedProps(() => {
+    const camScale = props.sv.baseScale.value * props.sv.userScale.value;
+    const wing = 5 / camScale;
+    const back = 11 / camScale;
+    const baseX = tipX - ux * back;
+    const baseY = tipY - uy * back;
+    return {
+      points: `${tipX},${tipY} ${baseX - uy * wing},${baseY + ux * wing} ${baseX + uy * wing},${baseY - ux * wing}`,
+    };
+  });
   const bentPoints = bend ? `${a.x},${a.y} ${bend.x},${bend.y} ${b.x},${b.y}` : "";
   // a collapsed edge breaks into one equal-length segment per
   // hidden child edge; the gaps between segments are the breakpoints
@@ -157,12 +198,19 @@ export const EdgeGlyph = memo(function EdgeGlyph(props: {
           />
         );
       })}
-      <Polygon points={arrowPoints} fill={lastSeg.color} />
+      <AnimatedPolygon points="" fill={lastSeg.color} animatedProps={arrowProps} />
       {/* solid marker at each breakpoint: the bare gap blends into
           the dash pattern of todo/in-progress edges, so the break
           needs its own mark */}
       {breakpoints.map((p, i) => (
-        <Circle key={i} cx={p.x} cy={p.y} r={(edgeWidth + 1) / props.camScale} fill={(segStyles[i + 1] ?? lastSeg).color} />
+        <CounterScaledCircle
+          key={i}
+          sv={props.sv}
+          cx={p.x}
+          cy={p.y}
+          r={edgeWidth + 1}
+          fill={(segStyles[i + 1] ?? lastSeg).color}
+        />
       ))}
       {/* wide invisible hit area so thin lines stay tappable at
           any zoom (non-scaling-stroke keeps it 24 px on screen) */}
@@ -192,14 +240,14 @@ export const EdgeGlyph = memo(function EdgeGlyph(props: {
       {/* bend handle: visible while a bend drag is armed; the
           radius counter-scales so it stays grabbable when zoomed out */}
       {props.liveBend && (
-        <Circle
+        <CounterScaledCircle
+          sv={props.sv}
           cx={props.liveBend.x}
           cy={props.liveBend.y}
-          r={10 / props.camScale}
+          r={10}
           fill="#ffffff"
           stroke={INK.primary}
           strokeWidth={1.5}
-          vectorEffect="non-scaling-stroke"
         />
       )}
     </G>

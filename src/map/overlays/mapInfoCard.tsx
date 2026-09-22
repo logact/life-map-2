@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 
-import { Recipe, renameNode, setEdgeColor, setNodeDetail, StatusAction, transitionNodeStatus } from "@/domain/commands";
+import { Recipe, renameNode, setEdgeColor, setNodeDetail, setNodeTimes, StatusAction, transitionNodeStatus } from "@/domain/commands";
 import { EdgeData, edgeDepth, isGoal, isRecord, isTask, LifeMapDoc, NodeData } from "@/domain/doc";
 import { edgeStatus, nodeStatus } from "@/domain/status";
 import { PALETTE } from "@/ui/palette";
@@ -9,9 +9,15 @@ import { SheetButton } from "../components/sheets";
 import { styles } from "../styles";
 import { InfoTarget } from "../types";
 import { fmtDate } from "../utils";
-import { nodeInfoLines } from "../viewModel";
+import { DatePickerSheet } from "./datePicker";
 
 type EditField = "title" | "detail";
+
+// the node's editable timestamps (backdating): the record's occurred-at is
+// always offered; startedAt/completedAt only where the status machine has
+// already created them (transition first, then rewrite the date); the
+// goal's target date is always offered and is the one clearable field
+type DateField = "occurredAt" | "startedAt" | "completedAt" | "targetDate";
 
 // single-tap node card: title, fact lines, the status row with its legal
 // transition buttons, an inline-editable detail row (the goal's
@@ -35,6 +41,9 @@ function NodeInfoCard(props: {
   const { node } = props;
   const [editing, setEditing] = useState<EditField | null>(null);
   const [draft, setDraft] = useState("");
+  // the date field open in the picker sheet, with the value it opened on
+  // (captured in the tap handler — Date.now() is impure in render)
+  const [dateField, setDateField] = useState<{ field: DateField; label: string; value: number } | null>(null);
   // tasks carry no detail; the goal's detail is its description, the
   // record's is its note (same mapping the old inspector used)
   const detailValue = isGoal(node)
@@ -121,6 +130,19 @@ function NodeInfoCard(props: {
   };
 
   const newest = node.notes[0];
+
+  // the node's date rows, in display order; tapping one opens the picker
+  const dateRows: { field: DateField; label: string; value?: number; placeholder?: string }[] = [];
+  if (isRecord(node)) {
+    dateRows.push({ field: "occurredAt", label: "Occurred", value: node.occurredAt, placeholder: "Set date…" });
+  } else if (isTask(node)) {
+    if (node.startedAt !== undefined) dateRows.push({ field: "startedAt", label: "Started", value: node.startedAt });
+    if (node.completedAt !== undefined) dateRows.push({ field: "completedAt", label: "Done", value: node.completedAt });
+  } else {
+    dateRows.push({ field: "targetDate", label: "Target", value: node.targetDate, placeholder: "Set target date…" });
+    if (node.completedAt !== undefined) dateRows.push({ field: "completedAt", label: "Done", value: node.completedAt });
+  }
+
   return (
     <View style={styles.infoCard}>
       <View style={styles.infoHeader}>
@@ -148,10 +170,24 @@ function NodeInfoCard(props: {
           </Pressable>
         )}
       </View>
-      {nodeInfoLines(node).map((l, i) => (
-        <Text key={i} style={styles.infoMeta}>
-          {l}
-        </Text>
+      <Text style={styles.infoMeta}>{node.kind}</Text>
+      {dateRows.map((r) => (
+        <Pressable
+          key={r.field}
+          style={styles.dateRow}
+          onPress={() => {
+            // a tap elsewhere on the card commits any active text edit; the
+            // picker's opening value is captured here, in the press handler —
+            // Date.now() is impure and must not run during render
+            endEdit();
+            setDateField({ field: r.field, label: r.label, value: r.value ?? Date.now() });
+          }}
+        >
+          <Text style={styles.dateRowLabel}>{r.label}</Text>
+          <Text style={r.value !== undefined ? styles.dateRowValue : styles.infoDetailPlaceholder}>
+            {r.value !== undefined ? fmtDate(r.value) : r.placeholder}
+          </Text>
+        </Pressable>
       ))}
       {status !== null && (
         <View style={styles.infoStatusRow}>
@@ -221,6 +257,24 @@ function NodeInfoCard(props: {
           <Text style={styles.notePeekLink}>Notes — tap to add</Text>
         )}
       </Pressable>
+      {/* backdating: the tapped date row's picker; Save rewrites the
+          timestamp through one undoable command */}
+      {dateField && (
+        <DatePickerSheet
+          title={dateField.label}
+          value={dateField.value}
+          onDone={(ms) => {
+            props.run(setNodeTimes(node.id, { [dateField.field]: ms }));
+            setDateField(null);
+          }}
+          onClear={
+            dateField.field === "targetDate"
+              ? () => props.run(setNodeTimes(node.id, { targetDate: null }))
+              : undefined
+          }
+          onClose={() => setDateField(null)}
+        />
+      )}
     </View>
   );
 }

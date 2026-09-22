@@ -22,6 +22,7 @@ import {
   setEdgeColor,
   setNodeColor,
   setNodeDetail,
+  setNodeTimes,
   summarizeEdges,
   transitionNodeStatus,
   updateNote,
@@ -376,5 +377,101 @@ describe("setNodeDetail", () => {
     expect(doc.nodes[r.nodeId].note).toBe("it happened");
     const [, patches] = produceWithPatches(doc, setNodeDetail(t1, "nope"));
     expect(patches).toHaveLength(0);
+  });
+});
+
+// GAPS.md #3: every timestamp the UI shows must be settable in-app
+describe("backdating", () => {
+  const YESTERDAY = Date.now() - 24 * 60 * 60 * 1000;
+  const LAST_WEEK = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+  it("creates a record with an explicit occurredAt", () => {
+    const { doc } = fixture();
+    const r = addFreeNode("record", "Gym", "squat day", { x: 0, y: 0 }, YESTERDAY);
+    const next = expectRoundTrip(doc, r.recipe);
+    expect(next.nodes[r.nodeId].occurredAt).toBe(YESTERDAY);
+  });
+
+  it("threads occurredAt through child/parent creation, ignoring other kinds", () => {
+    let { doc, t1 } = fixture();
+    const rec = addChildNode(t1, "record", "R", "", { x: 0, y: 0 }, YESTERDAY);
+    doc = run(doc, rec.recipe);
+    expect(doc.nodes[rec.nodeId].occurredAt).toBe(YESTERDAY);
+    // goals/tasks have no occurred-at; the param must not invent one
+    const g = addParentNode(t1, "goal", "G", "", { x: 0, y: 0 }, YESTERDAY);
+    doc = run(doc, g.recipe);
+    expect(doc.nodes[g.nodeId].occurredAt).toBeUndefined();
+  });
+
+  it("stamps status transitions with the given time", () => {
+    let { doc, t1 } = fixture();
+    doc = run(doc, transitionNodeStatus(t1, "start", LAST_WEEK));
+    expect(doc.nodes[t1].startedAt).toBe(LAST_WEEK);
+    doc = expectRoundTrip(doc, transitionNodeStatus(t1, "complete", YESTERDAY));
+    expect(doc.nodes[t1].completedAt).toBe(YESTERDAY);
+    // the first-start rule still holds under backdating
+    doc = run(doc, transitionNodeStatus(t1, "reopen"));
+    doc = run(doc, transitionNodeStatus(t1, "start"));
+    expect(doc.nodes[t1].startedAt).toBe(LAST_WEEK);
+  });
+
+  it("setNodeTimes rewrites a record's occurredAt", () => {
+    let { doc } = fixture();
+    const r = addFreeNode("record", "R", "", { x: 0, y: 0 });
+    doc = run(doc, r.recipe);
+    const next = expectRoundTrip(doc, setNodeTimes(r.nodeId, { occurredAt: YESTERDAY }));
+    expect(next.nodes[r.nodeId].occurredAt).toBe(YESTERDAY);
+  });
+
+  it("setNodeTimes rewrites existing task/goal stamps but invents none", () => {
+    let { doc, t1, h } = fixture();
+    // untouched fields: startedAt/completedAt don't exist yet — no-op
+    let next = run(doc, setNodeTimes(t1, { startedAt: LAST_WEEK, completedAt: YESTERDAY }));
+    expect(next.nodes[t1].startedAt).toBeUndefined();
+    expect(next.nodes[t1].completedAt).toBeUndefined();
+    // after the status machine created them, they are rewritable
+    doc = run(doc, transitionNodeStatus(t1, "complete"));
+    next = expectRoundTrip(doc, setNodeTimes(t1, { completedAt: YESTERDAY }));
+    expect(next.nodes[t1].completedAt).toBe(YESTERDAY);
+    expect(next.nodes[t1].status).toBe("done"); // status untouched
+    // goal: same for completedAt once set
+    doc = run(doc, transitionNodeStatus(h, "complete"));
+    next = expectRoundTrip(doc, setNodeTimes(h, { completedAt: LAST_WEEK }));
+    expect(next.nodes[h].completedAt).toBe(LAST_WEEK);
+  });
+
+  it("setNodeTimes sets and clears a goal's targetDate, and ignores wrong-kind fields", () => {
+    let { doc, t1, h } = fixture();
+    let next = expectRoundTrip(doc, setNodeTimes(h, { targetDate: YESTERDAY }));
+    expect(next.nodes[h].targetDate).toBe(YESTERDAY);
+    next = expectRoundTrip(next, setNodeTimes(h, { targetDate: null }));
+    expect(next.nodes[h].targetDate).toBeUndefined();
+    // occurredAt on a task: no such field, no write
+    next = run(doc, setNodeTimes(t1, { occurredAt: YESTERDAY }));
+    expect(next.nodes[t1].occurredAt).toBeUndefined();
+  });
+
+  it("addNote stamps the given time and keeps the list newest-first by date", () => {
+    let { doc, t1 } = fixture();
+    const n1 = addNote(t1, "today's");
+    doc = run(doc, n1.recipe);
+    // a backdated note slots UNDER the newer one instead of landing on top
+    const n2 = addNote(t1, "last week's", LAST_WEEK);
+    doc = expectRoundTrip(doc, n2.recipe);
+    expect(doc.nodes[t1].notes.map((n) => n.text)).toEqual(["today's", "last week's"]);
+    expect(doc.nodes[t1].notes[1].createdAt).toBe(LAST_WEEK);
+  });
+
+  it("updateNote rewrites createdAt and re-sorts", () => {
+    let { doc, t1 } = fixture();
+    const n1 = addNote(t1, "older");
+    doc = run(doc, n1.recipe);
+    const n2 = addNote(t1, "newer");
+    doc = run(doc, n2.recipe);
+    // backdate the top note past the other: they swap places
+    doc = expectRoundTrip(doc, updateNote(t1, n2.noteId, "newer", LAST_WEEK));
+    expect(doc.nodes[t1].notes.map((n) => n.text)).toEqual(["older", "newer"]);
+    expect(doc.nodes[t1].notes[1].createdAt).toBe(LAST_WEEK);
+    expect(doc.nodes[t1].notes[1].updatedAt).toBeGreaterThan(LAST_WEEK);
   });
 });

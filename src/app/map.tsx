@@ -51,7 +51,7 @@ import { useZoomLens } from "@/map/hooks/useZoomLens";
 import { CreateMenu, EdgeMenu, NodeMenu, RoadMenu } from "@/map/overlays/menus";
 import { CreateNodeForm } from "@/map/overlays/forms";
 import { MapInfoCard } from "@/map/overlays/mapInfoCard";
-import { NoteEditorSheet, NotesSheet } from "@/map/overlays/notes";
+import { NotesSheet } from "@/map/overlays/notes";
 import { RoutesModal } from "@/map/overlays/routesModal";
 import { styles } from "@/map/styles";
 import { CreateTarget, InfoTarget } from "@/map/types";
@@ -141,8 +141,8 @@ export default function MapScreen() {
   const [draft, setDraft] = useState({ title: "", detail: "" });
   // notes flow: the info card shows only a peek of the newest note; the
   // notes sheet (notesNodeId) holds the full list, and the note being
-  // added or edited sits in the editor sheet (noteId present = editing
-  // that existing note)
+  // added or edited sits in the sheet's draft state (noteId present =
+  // editing that existing note) — the sheet swaps list/editor in place
   const [notesNodeId, setNotesNodeId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState<{ nodeId: string; noteId?: string; text: string } | null>(null);
   // pending empty-canvas double tap: the create menu opens for this world
@@ -470,8 +470,6 @@ export default function MapScreen() {
   const menuEdgeTo = menuEdge ? doc.nodes[menuEdge.toId] : undefined;
   // the node open in the menu (same out-from-under case)
   const menuNode = menuNodeId ? doc.nodes[menuNodeId] : undefined;
-  // the node whose note is being edited (same out-from-under case)
-  const noteDraftNode = noteDraft ? doc.nodes[noteDraft.nodeId] : undefined;
   // the node whose notes sheet is open (same out-from-under case)
   const notesNode = notesNodeId ? doc.nodes[notesNodeId] : undefined;
 
@@ -501,8 +499,8 @@ export default function MapScreen() {
     routeQuery.openWithSelection(selectionEnds);
   };
 
-  // the note editor opens over the notes sheet / info card (they stay
-  // put underneath); closing just returns to them
+  // the note draft lives inside the notes sheet (list <-> editor swap);
+  // closing the draft just returns to the list
   const closeNoteEditor = () => setNoteDraft(null);
 
   const saveNote = () => {
@@ -1181,27 +1179,23 @@ export default function MapScreen() {
 
       {/* notes sheet: the node's full notes list with add/edit/delete,
           opened from the info card's peek row. The info card stays put
-          underneath; text entry stacks the note editor on top */}
+          underneath; the sheet swaps its own content to the note editor
+          for text entry (one Modal — stacked Modals don't reliably come
+          to the front on iOS) */}
       {notesNode && (
         <NotesSheet
           node={notesNode}
           run={run}
-          onAddNote={() => setNoteDraft({ nodeId: notesNode.id, text: "" })}
-          onEditNote={(noteId, text) => setNoteDraft({ nodeId: notesNode.id, noteId, text })}
-          onClose={() => setNotesNodeId(null)}
-        />
-      )}
-
-      {/* note editor: add a new note or edit an existing one, opened from
-          the notes sheet */}
-      {noteDraft && noteDraftNode && (
-        <NoteEditorSheet
-          nodeTitle={noteDraftNode.title}
-          noteId={noteDraft.noteId}
-          text={noteDraft.text}
-          onChangeText={(t) => setNoteDraft((d) => (d ? { ...d, text: t } : d))}
-          onSave={saveNote}
-          onClose={closeNoteEditor}
+          draft={noteDraft && noteDraft.nodeId === notesNode.id ? noteDraft : null}
+          onChangeDraftText={(t) => setNoteDraft((d) => (d ? { ...d, text: t } : d))}
+          onStartAdd={() => setNoteDraft({ nodeId: notesNode.id, text: "" })}
+          onStartEdit={(noteId, text) => setNoteDraft({ nodeId: notesNode.id, noteId, text })}
+          onSaveDraft={saveNote}
+          onCloseDraft={closeNoteEditor}
+          onClose={() => {
+            setNotesNodeId(null);
+            setNoteDraft(null);
+          }}
         />
       )}
 

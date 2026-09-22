@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   Alert,
+  AppState,
   Keyboard,
   Pressable,
   StyleSheet,
@@ -35,6 +36,7 @@ import { EdgeData, NodeData } from "@/domain/doc";
 import { buildSeedDoc } from "@/domain/seedDoc";
 import { visibleEdges } from "@/domain/visibility";
 import { useDocStore } from "@/state/docStore";
+import { flushPendingSave } from "@/data/mapDb";
 import { INK } from "@/ui/theme";
 import { EdgeGlyph } from "@/map/components/edgeGlyph";
 import { CanvasNode } from "@/map/components/nodeGlyph";
@@ -360,6 +362,15 @@ export default function MapScreen() {
   useEffect(() => {
     useDocStore.getState().load({ width, height });
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // saves are debounced: don't lose the pending write when the app goes
+  // to background
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (s) => {
+      if (s !== "active") flushPendingSave();
+    });
+    return () => sub.remove();
   }, []);
 
   // initial placement: the first time content shows up (the doc load is

@@ -378,13 +378,37 @@ export async function setMeta(key: string, value: string): Promise<void> {
 }
 
 // ---------- save queue ----------
-// mutations arrive faster than sqlite writes; chaining keeps saves ordered
-// and a queued save naturally persists the latest in-memory document
+// mutations arrive faster than sqlite writes, and every mutation used to
+// enqueue a full rewrite. Saves are now debounced: rapid edits (a drag
+// storm, a paste burst) coalesce into one write of the latest document,
+// chained through the queue so writes stay ordered
 
 let saveQueue: Promise<void> = Promise.resolve();
+let pendingDoc: LifeMapDoc | null = null;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+const SAVE_DEBOUNCE_MS = 500;
 
 export function scheduleSave(doc: LifeMapDoc): void {
-  saveQueue = saveQueue
-    .then(() => saveDoc(doc))
-    .catch((err) => console.warn("[mapDb] save failed", err));
+  pendingDoc = doc;
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(flushPendingSave, SAVE_DEBOUNCE_MS);
+}
+
+// write the pending document NOW (app going to background, tests); a
+// no-op when the debounce window is empty. Returns the queue so callers
+// can await durability
+export function flushPendingSave(): Promise<void> {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  const doc = pendingDoc;
+  pendingDoc = null;
+  if (doc) {
+    saveQueue = saveQueue
+      .then(() => saveDoc(doc))
+      .catch((err) => console.warn("[mapDb] save failed", err));
+  }
+  return saveQueue;
 }

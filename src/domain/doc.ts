@@ -128,13 +128,27 @@ export function getEdge(doc: LifeMapDoc, id: Id): EdgeData | undefined {
 }
 
 // depth of an edge in the detail tree (top-level edges are 0). Derived from
-// the parent chain — the doc deliberately does not store it.
+// the parent chain — the doc deliberately does not store it. Memoized per
+// doc identity (docs are immutable, so a WeakMap keyed on the doc is an
+// exact cache — see getIndexes): the view-model loop asks for every visible
+// edge's depth on each derivation, and sibling edges share most of the
+// parent walk
+const depthCache = new WeakMap<LifeMapDoc, Map<Id, number>>();
+
 export function edgeDepth(doc: LifeMapDoc, edgeId: Id): number {
+  let map = depthCache.get(doc);
+  if (!map) {
+    map = new Map();
+    depthCache.set(doc, map);
+  }
+  const hit = map.get(edgeId);
+  if (hit !== undefined) return hit;
   let depth = 0;
   let e = doc.edges[edgeId];
   while (e && e.parentEdgeId !== null) {
     depth++;
     e = doc.edges[e.parentEdgeId];
   }
+  map.set(edgeId, depth);
   return depth;
 }

@@ -40,17 +40,34 @@ export function goalStatus(doc: LifeMapDoc, goalId: Id): Status {
 // Records have no status, so edges touching one stay plain (null).
 
 // the chain an edge stands for, in travel order: expand() children form
-// from -> ... -> to; side-branch children follow in insertion order
+// from -> ... -> to; side-branch children follow in insertion order.
+// Memoized per doc identity (docs are immutable): a collapsed edge and
+// each of its visible siblings re-derive the same chains, and the
+// recursion itself hits the cache for child edges
+const chainCache = new WeakMap<LifeMapDoc, Map<Id, Id[]>>();
+
 function flattenChain(doc: LifeMapDoc, edge: EdgeData): Id[] {
-  if (edge.childEdgeIds.length === 0) return [edge.fromId, edge.toId];
-  const seq: Id[] = [];
-  for (const childId of edge.childEdgeIds) {
-    const child = doc.edges[childId];
-    if (!child) continue;
-    const part = flattenChain(doc, child);
-    if (seq.length > 0 && seq[seq.length - 1] === part[0]) part.shift();
-    seq.push(...part);
+  let map = chainCache.get(doc);
+  if (!map) {
+    map = new Map();
+    chainCache.set(doc, map);
   }
+  const hit = map.get(edge.id);
+  if (hit) return hit;
+  let seq: Id[];
+  if (edge.childEdgeIds.length === 0) {
+    seq = [edge.fromId, edge.toId];
+  } else {
+    seq = [];
+    for (const childId of edge.childEdgeIds) {
+      const child = doc.edges[childId];
+      if (!child) continue;
+      const part = flattenChain(doc, child);
+      if (seq.length > 0 && seq[seq.length - 1] === part[0]) part.shift();
+      seq.push(...part);
+    }
+  }
+  map.set(edge.id, seq);
   return seq;
 }
 

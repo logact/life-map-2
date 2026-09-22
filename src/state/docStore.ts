@@ -3,7 +3,7 @@ import { create } from "zustand";
 
 import { Recipe } from "@/domain/commands";
 import { buildSeedDoc } from "@/domain/seedDoc";
-import { emptyDoc, LifeMapDoc } from "@/domain/doc";
+import { emptyDoc, Id, LifeMapDoc } from "@/domain/doc";
 import { getMeta, loadDoc, scheduleSave, setMeta } from "@/data/mapDb";
 
 // records that the real-life seed has been applied: installs that predate
@@ -34,6 +34,11 @@ export interface DocStore {
   loaded: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  // cross-screen handoff: another page (the calendar) asks the map to focus
+  // a node; the map consumes and clears it. Transient — never persisted
+  pendingNodeFocusId: Id | null;
+  requestNodeFocus: (id: Id) => void;
+  clearNodeFocus: () => void;
   run: (recipe: Recipe) => void;
   undo: () => void;
   redo: () => void;
@@ -46,11 +51,23 @@ export function createDocStore() {
   const undoStack: HistoryEntry[] = [];
   const redoStack: HistoryEntry[] = [];
 
-  return create<DocStore>((set, get) => ({
+  return create<DocStore>((set, get) => {
+    // load resolves once per session: every screen calls it on mount, so
+    // concurrent callers (a cold start deep-linked past the map) ride the
+    // same promise, and a later remount never reloads over in-memory edits
+    let loadPromise: Promise<void> | null = null;
+    return {
     doc: emptyDoc(),
     loaded: false,
     canUndo: false,
     canRedo: false,
+    pendingNodeFocusId: null,
+    requestNodeFocus(id) {
+      set({ pendingNodeFocusId: id });
+    },
+    clearNodeFocus() {
+      set({ pendingNodeFocusId: null });
+    },
 
     run(recipe) {
       // invariant violations throw out of the recipe: nothing applies
@@ -83,31 +100,37 @@ export function createDocStore() {
       scheduleSave(next);
     },
 
-    async load(screen) {
+    load(screen) {
       // load NEVER leaves the app on a blank screen: any failure (corrupt
       // rows, open failure, first launch) resolves to a valid seeded document
-      try {
-        const [doc, seedApplied] = await Promise.all([loadDoc(), getMeta(SEED_APPLIED_KEY)]);
-        if (doc && seedApplied !== null) {
+      if (!loadPromise) {
+        loadPromise = (async () => {
+          try {
+            const [doc, seedApplied] = await Promise.all([loadDoc(), getMeta(SEED_APPLIED_KEY)]);
+            if (doc && seedApplied !== null) {
+              set({ doc, loaded: true });
+              return;
+            }
+            console.log(
+              doc
+                ? "[docStore] replacing the pre-seed map with the initial seed (once)"
+                : "[docStore] empty database, seeding the initial map",
+            );
+          } catch (err) {
+            console.warn("[docStore] load failed, seeding initial map", err);
+          }
+          const doc = buildSeedDoc(screen.width / 2, screen.height / 3);
           set({ doc, loaded: true });
-          return;
-        }
-        console.log(
-          doc
-            ? "[docStore] replacing the pre-seed map with the initial seed (once)"
-            : "[docStore] empty database, seeding the initial map",
-        );
-      } catch (err) {
-        console.warn("[docStore] load failed, seeding initial map", err);
+          scheduleSave(doc);
+          setMeta(SEED_APPLIED_KEY, "1").catch((err) =>
+            console.warn("[docStore] seed flag save failed", err),
+          );
+        })();
       }
-      const doc = buildSeedDoc(screen.width / 2, screen.height / 3);
-      set({ doc, loaded: true });
-      scheduleSave(doc);
-      setMeta(SEED_APPLIED_KEY, "1").catch((err) =>
-        console.warn("[docStore] seed flag save failed", err),
-      );
+      return loadPromise;
     },
-  }));
+  };
+  });
 }
 
 export const useDocStore = createDocStore();

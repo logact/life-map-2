@@ -74,6 +74,11 @@ Four months of weekly gym sessions and journal entries would be ~50+
 records; only a representative few are seeded, or the map drowns in dots.
 There is no way to see a series as a series (no grouping, no timeline view).
 
+**Partially eased 2026-09-23:** the calendar page (SPEC §4) shows a series
+day by day — a habit's logs, misses and upcoming schedule alongside records
+and stamps on one month grid. A dedicated per-series timeline (one habit's
+history as its own view) is still open.
+
 ## 9. No attachments
 
 PR photos, the finished book cover, a screenshot of the first render — none

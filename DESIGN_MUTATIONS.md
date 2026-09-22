@@ -89,10 +89,9 @@ disabled-grayed.
 
 | Group | Item | Kinds | Behavior |
 |---|---|---|---|
-| Create | **New successor** | goal, task | Opens kind submenu (Goal / Task / Record) in the same panel → picking a kind opens the create form sheet → on save: if exactly one **visible** road leaves this node and the kind isn't Record, the new node is inserted mid-road (`A → B` becomes `A → N → B` at the layer on screen; N lands on the old midpoint, both halves inherit the road's color and become the selection, a collapsed sub-road rides with the `N → B` half); otherwise (no road, a fork, Record) the new node lands directly above this one (golden-step fan within 45°, radius 120 — roads climb bottom to top) with the edge pointing this → new. |
+| Create | **New successor** | goal, task | Opens kind submenu (Goal / Task / Record) in the same panel → picking a kind opens the create form sheet → on save: if exactly one **visible** road leaves this node and the kind isn't Record, the new node is inserted mid-road (`A → B` becomes `A → N → B` at the layer on screen; N lands on the old midpoint, both halves become the selection, a collapsed sub-road rides with the `N → B` half); otherwise (no road, a fork, Record) the new node lands directly above this one (golden-step fan within 45°, radius 120 — roads climb bottom to top) with the edge pointing this → new. |
 | Create | **New predecessor** | all | Same flow with the edge pointing new → this, inserting into the single visible road that enters this node when there is one; kind submenu offers Goal / Task only (records are leaves: a new record cannot point here). |
 | Edit | **Inline on the info card** | all | Title and the goal's description / record's note edit in place on the single-tap info card (tap the text; commits on submit, blur, or tap-away); the card also carries the status row — current status plus one button per *legal* transition, labeled by its target state (§5.2), acting immediately. There is no inspector sheet. |
-| Edit | **Color** | all | Opens a swatch submenu in the same panel (palette + Default). Pick applies at once. |
 | Clipboard | **Copy** | all | Copies the trimmed snapshot (payload only, never edges). Silent confirmation; clipboard enables Paste in the create menu. |
 | — | **Remove** | all | Separated at the bottom, visually destructive. First tap arms it in place ("tap again to remove"); second tap removes. Arming resets when the menu closes. |
 
@@ -159,7 +158,6 @@ Double-tap an edge → edge menu in the bottom panel:
 | **Summarize with…** | always | Enters summarize mode (banner + tap same-parent edges + confirm) — the one surviving mode, since it is genuinely a multi-target selection. Illegal selections are rejected by the domain, surfaced as a plain message, nothing applied. |
 | **Copy** | always | Deep copy: endpoints and the whole hidden subtree come along (as today). |
 | **Straighten** | edge has a bend | Clears the bend point. |
-| **Color** | always | Swatch submenu in the same panel (palette + Default). |
 | **Remove edge** | always | Two-tap in-place confirm; children rise one level (as today). |
 
 Single-tap edge behavior (info card + zoom selection, Zoom in / Collapse
@@ -227,11 +225,10 @@ info card — the panel rides above the keyboard for it.
 | Edge sheet modal | Edge menu in the bottom panel (§7) |
 | Kind picker sheet | Kind submenu in the same panel (§5.1) |
 | Status picker sheet | Legal transitions as buttons on the info card's status row (§5.2) |
-| Color picker sheet | Swatch submenu in the same panel |
 | Connect to / Be connected to + mode banner | Drag from connect handle (§6) |
 | Remove confirmed via sheet | Two-tap in-place confirm |
 | Info card pinned to bottom of screen | Info card in the bottom panel + camera accommodation |
-| Info card read-only | Node card edits title/description inline; edge card edits color via inline swatches |
+| Info card read-only | Node card edits title/description inline |
 | Inspector reachable via "Edit details" menu item | Inspector removed — editing is inline on the info card |
 | Summarize mode | Kept as the only mode |
 | Undo/redo, zoom lens, route query, notes | Unchanged |

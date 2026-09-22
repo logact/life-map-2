@@ -9,6 +9,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { useRouter } from "expo-router";
 import Svg, { Circle, Line, Polygon } from "react-native-svg";
 
 import {
@@ -76,6 +77,7 @@ import { deriveViewModel, useMapViewModel } from "@/map/viewModel";
  */
 export default function MapScreen() {
   const { width, height } = useWindowDimensions();
+  const router = useRouter();
 
   // The document lives in the store outside React; these subscriptions
   // re-render the screen when it changes. Gesture handlers and timers read
@@ -242,6 +244,17 @@ export default function MapScreen() {
   });
   const nodeDrag = useNodeDrag({ run, closeOverlays, setNodeFocusId });
   const { drag, dragArmedId, setDragArmedId } = nodeDrag;
+
+  // calendar → map handoff: the calendar page queues a node focus in the
+  // store before navigating back; consume it with the same reveal the note
+  // search performs (zoom open the node's layer, center it, open its card)
+  const pendingNodeFocusId = useDocStore((s) => s.pendingNodeFocusId);
+  const { focusNoteNode } = noteSearch;
+  useEffect(() => {
+    if (!loaded || !pendingNodeFocusId) return;
+    useDocStore.getState().clearNodeFocus();
+    focusNoteNode(pendingNodeFocusId);
+  }, [loaded, pendingNodeFocusId, focusNoteNode]);
 
   // tear down every canvas mode that retargets taps/drags; entering the
   // route or note query starts from this clean slate
@@ -1086,6 +1099,18 @@ export default function MapScreen() {
       {!routeQuery.routeMode && !noteSearch.noteSearchMode && (
         <Pressable style={styles.fitButton} onPress={() => camera.fitToContent(vm.nodes)}>
           <Text style={styles.queryButtonText}>{"⛶\uFE0E"}</Text>
+        </Pressable>
+      )}
+
+      {/* calendar page: the doc's dated side (habits, targets, records) as
+          a month calendar; tapping a day item there focuses the node here */}
+      {!routeQuery.routeMode && !noteSearch.noteSearchMode && (
+        <Pressable
+          style={styles.calendarButton}
+          accessibilityLabel="Open calendar"
+          onPress={() => router.push("/calendar")}
+        >
+          <Text style={styles.queryButtonText}>📅</Text>
         </Pressable>
       )}
 

@@ -46,6 +46,30 @@ describe("docStore", () => {
     expect(savedDocs).toHaveLength(1);
   });
 
+  it("load resolves once per session: concurrent callers ride one promise", async () => {
+    const store = createDocStore();
+    mockLoadDoc.mockResolvedValue(null); // empty DB → the seed path
+    const [a, b] = await Promise.all([
+      store.getState().load({ width: 800, height: 600 }),
+      store.getState().load({ width: 800, height: 600 }),
+    ]);
+    expect(a).toBe(b);
+    expect(mockLoadDoc).toHaveBeenCalledTimes(1);
+    expect(store.getState().loaded).toBe(true);
+    // a later remount does not reload over in-memory edits
+    await store.getState().load({ width: 800, height: 600 });
+    expect(mockLoadDoc).toHaveBeenCalledTimes(1);
+  });
+
+  it("the node-focus handoff queues and clears a node id", () => {
+    const store = createDocStore();
+    expect(store.getState().pendingNodeFocusId).toBeNull();
+    store.getState().requestNodeFocus("n1");
+    expect(store.getState().pendingNodeFocusId).toBe("n1");
+    store.getState().clearNodeFocus();
+    expect(store.getState().pendingNodeFocusId).toBeNull();
+  });
+
   it("no-op recipes create no history and no save", () => {
     const store = createDocStore();
     const add = addFreeNode("goal", "G", "", { x: 1, y: 2 });

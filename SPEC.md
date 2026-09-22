@@ -143,6 +143,19 @@ rename or recolor happens in one place, not per node.
   Canvas markers and filtering by tag are future layers on top of this
   model.
 
+### 1.9 The calendar read model (`src/domain/calendar.ts`)
+
+`calendarMonth(doc, year, month0, now)` derives, for one month and keyed by
+day-of-month, everything the document pins to a day: records (`occurredAt`),
+goal target dates, task/goal `startedAt`/`completedAt` stamps, and a
+habit's whole month — every scheduled day classified against `now`
+(**Missed** / **Due today** / **Scheduled**) plus every logged day (a log on
+an unscheduled catch-up day still happened; a logged scheduled day reads as
+done, never missed). Each item carries a **tone** (attention / primary /
+done / neutral / future) that fixes both its dot color and its row order
+inside a day. Pure like the recurrence derivations: `now` is an explicit
+parameter, so the rules test without a clock.
+
 ---
 
 ## 2. Persistence (`src/data/lifeMapStore.ts`)
@@ -329,7 +342,28 @@ in `GAPS.md`.
 
 ---
 
-## 4. App configuration
+## 4. The calendar page (`src/app/calendar.tsx`)
+
+The document's dated side as a separate screen, pushed from the map's 📅
+button (below the fit button; the route is `/calendar`).
+
+- A **month grid** (weeks start Sunday, like the date picker and the
+  recurrence rules): today is outlined, the selected day is filled, and each
+  day carries up to three tone dots from `calendarMonth` (§1.9) with a
+  legend underneath.
+- The **selected day's list** shows every item — tone dot, node title,
+  caption (Due today / Missed / Logged / Scheduled / Target date /
+  Completed / Started / Record). Month nav moves the view (selecting the
+  1st); **Today** jumps back to the current month and day.
+- **Tapping an item hands the node to the map**: the page sets
+  `pendingNodeFocusId` on the doc store (transient, never persisted) and
+  pops back; the map consumes the id with the note search's reveal — zoom
+  open the node's layer, center it, open its info card — so the calendar
+  stays read-only and every edit still happens on the map.
+
+---
+
+## 5. App configuration
 
 `app.json`: scheme `lifemap2`, iOS bundle `com.logact.lifemap`, portrait,
 automatic light/dark UI style, splash `#208AEF`, EAS project

@@ -114,6 +114,20 @@ export const styles = StyleSheet.create({
     justifyContent: "center",
     ...SHADOW.floating,
   },
+  calendarButton: {
+    position: "absolute",
+    right: 20,
+    top: 264, // below the fit button
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: INK.subtle,
+    alignItems: "center",
+    justifyContent: "center",
+    ...SHADOW.floating,
+  },
   historyButtonDisabled: {
     opacity: 0.4,
   },

@@ -112,6 +112,27 @@ still works after the original is edited or deleted, and can repeat.
   centered on the snapshot's bounding-box center; pasted edges become layer-0
   roots with re-layered subtrees; statuses and timestamps copy verbatim.
 
+### 1.8 Tags
+
+Tags are named, colored labels that cut across the node tree (Health,
+English, App …). The doc holds a **registry** (`doc.tags`, id →
+`{ id, name, color }`); nodes reference tags by id (`tagIds?`), so a
+rename or recolor happens in one place, not per node.
+
+- **Names are unique** after trim + case-fold: adding a duplicate name is a
+  no-op (the UI selects the existing tag instead of creating a twin).
+- **Color** is one of the 10-color Okabe-Ito palette (`src/ui/palette.ts`),
+  defaulting to the next palette entry by registry size; `setTagColor`
+  recolors in place.
+- **Commands**: `addTag` / `renameTag` / `setTagColor` / `deleteTag`
+  (removes the registry entry and every reference to it in one undoable
+  edit) / `setNodeTags` (replaces a node's list, dropping unknown ids).
+  Copy/paste carries `tagIds` verbatim; pasted ids missing from the
+  registry are kept but simply never render.
+- Tags are **edited from the node info card** (chip row + picker sheet).
+  Canvas markers and filtering by tag are future layers on top of this
+  model.
+
 ---
 
 ## 2. Persistence (`src/data/lifeMapStore.ts`)
@@ -124,6 +145,8 @@ Local **SQLite** (`lifemap.db`, WAL mode) — no server, no account.
   updated_at, position)`.
 - `edges(id, node1_id, node2_id, parent_edge_id, position, layer, color,
   bend_x, bend_y)` — stores the whole edge tree.
+- `tags(id, name, color)` — the tag registry; a node's `tagIds` live in its
+  `data` blob.
 - `meta(key, value)` — app-level flags that are not map content (currently
   just `seed_applied`).
 - **Save** = full rewrite inside one transaction, debounced through a

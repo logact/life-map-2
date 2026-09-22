@@ -12,8 +12,11 @@ import {
   NodeData,
   NodeKind,
   NoteData,
+  RecurRule,
 } from "./doc";
 import { ClipboardPayload } from "./clipboard";
+import { parseRecurLog, parseRecurRule } from "./recur";
+import { PALETTE } from "@/ui/palette";
 
 // ---------- commands: the ONLY way a doc changes ----------
 // A command factory mints any fresh ids up front and returns a Recipe — a
@@ -86,10 +89,14 @@ function makeNodeOfKind(
   title: string,
   detail?: string,
   occurredAt?: number,
+  targetDate?: number,
 ): NodeData {
   if (kind === "task") return makeTask(x, y, title);
   if (kind === "record") return makeRecordNode(x, y, title, detail ?? "", occurredAt ?? Date.now());
-  return makeGoal(x, y, title, detail ? { description: detail } : undefined);
+  const extra: Partial<NodeData> = {};
+  if (detail) extra.description = detail;
+  if (targetDate !== undefined) extra.targetDate = targetDate;
+  return makeGoal(x, y, title, Object.keys(extra).length > 0 ? extra : undefined);
 }
 
 function mustNode(draft: Draft<LifeMapDoc>, id: Id): NodeData {
@@ -101,15 +108,17 @@ function mustNode(draft: Draft<LifeMapDoc>, id: Id): NodeData {
 // ---------- node creation ----------
 
 // a node with no edges, placed on the canvas (double-tap create).
-// occurredAt backdates a record; ignored for other kinds
+// occurredAt backdates a record, targetDate sets a goal's target; both
+// ignored for other kinds
 export function addFreeNode(
   kind: NodeKind,
   title: string,
   detail: string,
   pos: { x: number; y: number },
   occurredAt?: number,
+  targetDate?: number,
 ) {
-  const node = makeNodeOfKind(kind, pos.x, pos.y, title, detail, occurredAt);
+  const node = makeNodeOfKind(kind, pos.x, pos.y, title, detail, occurredAt, targetDate);
   return {
     nodeId: node.id,
     recipe: (draft: Draft<LifeMapDoc>) => {
@@ -120,7 +129,8 @@ export function addFreeNode(
 }
 
 // "Add to": a new child under an existing node (goal/task/record as child).
-// occurredAt backdates a record; ignored for other kinds
+// occurredAt backdates a record, targetDate sets a goal's target; both
+// ignored for other kinds
 export function addChildNode(
   parentId: Id,
   kind: NodeKind,
@@ -128,8 +138,9 @@ export function addChildNode(
   detail: string,
   pos: { x: number; y: number },
   occurredAt?: number,
+  targetDate?: number,
 ) {
-  const node = makeNodeOfKind(kind, pos.x, pos.y, title, detail, occurredAt);
+  const node = makeNodeOfKind(kind, pos.x, pos.y, title, detail, occurredAt, targetDate);
   const edge = makeEdgeData(parentId, node.id, null);
   return {
     nodeId: node.id,
@@ -144,7 +155,8 @@ export function addChildNode(
 }
 
 // "Be added to": a new node that becomes the PARENT of an existing node.
-// occurredAt backdates a record; ignored for other kinds
+// occurredAt backdates a record, targetDate sets a goal's target; both
+// ignored for other kinds
 export function addParentNode(
   childId: Id,
   kind: NodeKind,
@@ -152,9 +164,10 @@ export function addParentNode(
   detail: string,
   pos: { x: number; y: number },
   occurredAt?: number,
+  targetDate?: number,
 ) {
   if (kind === "record") throw new DomainError("records are leaves");
-  const node = makeNodeOfKind(kind, pos.x, pos.y, title, detail, occurredAt);
+  const node = makeNodeOfKind(kind, pos.x, pos.y, title, detail, occurredAt, targetDate);
   const edge = makeEdgeData(node.id, childId, null);
   return {
     nodeId: node.id,
@@ -240,8 +253,81 @@ export function replaceDoc(next: LifeMapDoc): Recipe {
   return (draft) => {
     draft.nodes = next.nodes;
     draft.edges = next.edges;
+    draft.tags = next.tags;
     draft.rootNodeIds = next.rootNodeIds;
     draft.rootEdgeIds = next.rootEdgeIds;
+  };
+}
+
+// ---------- tags ----------
+// The registry lives on the doc (doc.tags); nodes hold ids into it. Tag
+// names are unique after trim + case-fold: a duplicate add/renames is a
+// no-op rather than a twin.
+
+function tagByFoldedName(draft: Draft<LifeMapDoc>, folded: string) {
+  return Object.values(draft.tags).find((t) => t.name.toLowerCase() === folded);
+}
+
+// mints the id up front; without an explicit color the tag takes the next
+// palette entry by registry size. A name that already exists (trimmed,
+// case-folded) makes the recipe a no-op — callers wanting that tag's id
+// should look it up via findTagByName before adding
+export function addTag(name: string, color?: string): { tagId: Id; recipe: Recipe } {
+  const tagId = newId();
+  const trimmed = name.trim();
+  return {
+    tagId,
+    recipe: (draft) => {
+      if (!trimmed || tagByFoldedName(draft, trimmed.toLowerCase())) return;
+      draft.tags[tagId] = {
+        id: tagId,
+        name: trimmed,
+        color: color ?? PALETTE[Object.keys(draft.tags).length % PALETTE.length].color,
+      };
+    },
+  };
+}
+
+export function renameTag(id: Id, name: string): Recipe {
+  const trimmed = name.trim();
+  return (draft) => {
+    const tag = draft.tags[id];
+    if (!tag || !trimmed) return;
+    const clash = tagByFoldedName(draft, trimmed.toLowerCase());
+    if (clash && clash.id !== id) return;
+    tag.name = trimmed;
+  };
+}
+
+export function setTagColor(id: Id, color: string): Recipe {
+  return (draft) => {
+    const tag = draft.tags[id];
+    if (tag) tag.color = color;
+  };
+}
+
+// one recipe: the registry entry and every reference to it go together
+export function deleteTag(id: Id): Recipe {
+  return (draft) => {
+    if (!draft.tags[id]) return;
+    delete draft.tags[id];
+    for (const node of Object.values(draft.nodes)) {
+      if (node.tagIds?.includes(id)) {
+        node.tagIds = node.tagIds.filter((tagId) => tagId !== id);
+      }
+    }
+  };
+}
+
+// replaces the node's whole tag list, dropping ids the registry doesn't
+// know; an empty result clears the field
+export function setNodeTags(nodeId: Id, tagIds: Id[]): Recipe {
+  return (draft) => {
+    const node = draft.nodes[nodeId];
+    if (!node) return;
+    const known = [...new Set(tagIds)].filter((id) => draft.tags[id]);
+    if (known.length > 0) node.tagIds = known;
+    else delete node.tagIds;
   };
 }
 
@@ -276,9 +362,10 @@ export function insertNodeIntoEdge(
   title: string,
   detail: string,
   pos: { x: number; y: number },
+  targetDate?: number,
 ) {
   if (kind === "record") throw new DomainError("records are leaves");
-  const node = makeNodeOfKind(kind, pos.x, pos.y, title, detail);
+  const node = makeNodeOfKind(kind, pos.x, pos.y, title, detail, undefined, targetDate);
   const e1 = makeEdgeData("", node.id, null);
   const e2 = makeEdgeData(node.id, "", null);
   return {
@@ -428,6 +515,10 @@ export function summarizeEdges(edgeIds: Id[]) {
 // todo --start--> in-progress --complete--> done; in-progress --pause--> todo;
 // todo --complete--> done; done --reopen--> todo. Goals only complete/reopen
 // (manual completion wins over derivation); records have no status.
+// A recurring task steps out of the machine: complete LOGS one occurrence
+// (the stamp lands in `log`, sorted ascending, so a backdated log slots in
+// under newer ones) and the task stays todo — the derived due state takes
+// over; reopen un-logs the latest occurrence; start/pause don't apply.
 
 export type StatusAction = "start" | "pause" | "complete" | "reopen";
 
@@ -442,6 +533,26 @@ export function transitionNodeStatus(id: Id, action: StatusAction, at?: number):
       else if (action === "reopen") delete node.completedAt;
       else throw new DomainError(`cannot ${action} a goal`);
       return;
+    }
+    if (node.recur) {
+      switch (action) {
+        case "complete": {
+          const atMs = stamp();
+          const log = (node.log ??= []);
+          let atIndex = log.length;
+          while (atIndex > 0 && log[atIndex - 1] > atMs) atIndex--;
+          log.splice(atIndex, 0, atMs);
+          return;
+        }
+        case "reopen":
+          if (!node.log || node.log.length === 0) {
+            throw new DomainError("no logged occurrence to undo");
+          }
+          node.log.pop();
+          return;
+        default:
+          throw new DomainError(`cannot ${action} a recurring task`);
+      }
     }
     switch (action) {
       case "start":
@@ -463,6 +574,32 @@ export function transitionNodeStatus(id: Id, action: StatusAction, at?: number):
         node.status = "todo";
         delete node.completedAt;
         break;
+    }
+  };
+}
+
+// ---------- recurrence ----------
+
+// make a task a standing habit (or stop it). Setting a rule resets the
+// stored status: the derived due state takes over, startedAt/completedAt
+// are cleared (the occurrence log owns the history now). Clearing the rule
+// keeps the log — that history stays visible in the info card
+export function setNodeRecurrence(id: Id, rule: RecurRule | null): Recipe {
+  return (draft) => {
+    const node = draft.nodes[id];
+    if (!node || node.kind !== "task") return;
+    if (rule) {
+      node.recur = {
+        freq: rule.freq,
+        interval: Math.max(1, Math.round(rule.interval)),
+        ...(rule.weekdays && rule.weekdays.length > 0 ? { weekdays: [...rule.weekdays] } : {}),
+        anchor: rule.anchor,
+      };
+      node.status = "todo";
+      delete node.startedAt;
+      delete node.completedAt;
+    } else {
+      delete node.recur;
     }
   };
 }
@@ -576,6 +713,11 @@ export function pastePayload(payload: ClipboardPayload, at: { x: number; y: numb
       if (typeof d.status === "string") node.status = d.status as NodeData["status"];
       if (typeof d.startedAt === "number") node.startedAt = d.startedAt;
       if (typeof d.completedAt === "number") node.completedAt = d.completedAt;
+      // rule and occurrence log copy verbatim, like the other stamps
+      const recur = parseRecurRule(d.recur);
+      if (recur) node.recur = recur;
+      const log = parseRecurLog(d.log);
+      if (log) node.log = log;
     } else if (n.kind === "record") {
       if (typeof d.note === "string") node.note = d.note;
       // occurredAt renamed from the legacy occuredAt — accept both
@@ -586,6 +728,11 @@ export function pastePayload(payload: ClipboardPayload, at: { x: number; y: numb
       if (typeof d.description === "string") node.description = d.description;
       if (typeof d.targetDate === "number") node.targetDate = d.targetDate;
       if (typeof d.completedAt === "number") node.completedAt = d.completedAt;
+    }
+    // tag assignments ride along; ids missing from the registry are kept
+    // (they simply never render)
+    if (Array.isArray(d.tagIds)) {
+      node.tagIds = d.tagIds.filter((id): id is Id => typeof id === "string");
     }
     nodeIdByKey.set(n.key, node.id);
     preparedNodes.push(node);

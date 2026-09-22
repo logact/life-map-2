@@ -16,11 +16,36 @@ export type NodeKind = "goal" | "task" | "record";
 
 export type Status = "todo" | "in-progress" | "done";
 
+// recurrence rule for a standing habit task ("gym every 2 days", "journal
+// every week on Sun"). The task is never permanently done: each completion
+// appends to its occurrence log and the rule derives what is asked of you
+// now (see src/domain/recur.ts)
+export type RecurFreq = "daily" | "weekly" | "monthly";
+
+export interface RecurRule {
+  freq: RecurFreq;
+  // every N freq units (every 2 days, every 3 weeks), >= 1
+  interval: number;
+  // weekly only: scheduled weekdays, 0 = Sunday .. 6 = Saturday; omitted
+  // means "the anchor's weekday"
+  weekdays?: number[];
+  // the first scheduled day (epoch millis); time-of-day is ignored
+  anchor: number;
+}
+
 export interface NoteData {
   id: Id;
   text: string;
   createdAt: number;
   updatedAt: number;
+}
+
+// a named, colored label in the doc-level registry; nodes reference tags
+// by id, so a rename/recolor happens in one place
+export interface TagData {
+  id: Id;
+  name: string;
+  color: string;
 }
 
 export interface NodeData {
@@ -31,10 +56,17 @@ export interface NodeData {
   title: string;
   color?: string;
   notes: NoteData[];
+  // ids into the doc's tag registry
+  tagIds?: Id[];
   // task fields (goal shares completedAt)
   status?: Status;
   startedAt?: number;
   completedAt?: number;
+  // recurring task fields: the rule and its occurrence log (ascending
+  // timestamps). While recur is set the stored status stays "todo" and the
+  // DERIVED state (due/overdue/…) takes over — see src/domain/recur.ts
+  recur?: RecurRule;
+  log?: number[];
   // goal fields
   description?: string;
   targetDate?: number;
@@ -62,9 +94,11 @@ export interface EdgeData {
 }
 
 export interface LifeMapDoc {
-  schemaVersion: 2;
+  schemaVersion: 3;
   nodes: Record<Id, NodeData>;
   edges: Record<Id, EdgeData>;
+  // the tag registry, keyed by tag id
+  tags: Record<Id, TagData>;
   // nodes no edge touches ("isolated"), in layout order
   rootNodeIds: Id[];
   // top-level edges, in layout order
@@ -76,7 +110,14 @@ export function newId(): Id {
 }
 
 export function emptyDoc(): LifeMapDoc {
-  return { schemaVersion: 2, nodes: {}, edges: {}, rootNodeIds: [], rootEdgeIds: [] };
+  return {
+    schemaVersion: 3,
+    nodes: {},
+    edges: {},
+    tags: {},
+    rootNodeIds: [],
+    rootEdgeIds: [],
+  };
 }
 
 // ---------- factories ----------
@@ -125,6 +166,13 @@ export function getNode(doc: LifeMapDoc, id: Id): NodeData | undefined {
 
 export function getEdge(doc: LifeMapDoc, id: Id): EdgeData | undefined {
   return doc.edges[id];
+}
+
+// tag names are unique after trim + case-fold; this is how a caller finds
+// the existing tag for a name instead of creating a twin
+export function findTagByName(doc: LifeMapDoc, name: string): TagData | undefined {
+  const folded = name.trim().toLowerCase();
+  return Object.values(doc.tags).find((t) => t.name.toLowerCase() === folded);
 }
 
 // depth of an edge in the detail tree (top-level edges are 0). Derived from

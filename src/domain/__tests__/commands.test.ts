@@ -7,7 +7,9 @@ import {
   addFreeNode,
   addParentNode,
   addNote,
+  addTag,
   connectNodes,
+  deleteTag,
   DomainError,
   expandEdge,
   insertNodeIntoEdge,
@@ -18,17 +20,24 @@ import {
   removeNode,
   removeNote,
   renameNode,
+  renameTag,
+  replaceDoc,
   setEdgeBend,
   setEdgeColor,
   setNodeColor,
   setNodeDetail,
+  setNodeRecurrence,
+  setNodeTags,
   setNodeTimes,
+  setTagColor,
   summarizeEdges,
   transitionNodeStatus,
   updateNote,
 } from "../commands";
-import { emptyDoc, LifeMapDoc } from "../doc";
-import { snapshotEdge } from "../clipboard";
+import { emptyDoc, LifeMapDoc, RecurRule } from "../doc";
+import { snapshotEdge, snapshotNode } from "../clipboard";
+import { edgeStatus, nodeStatus } from "../status";
+import { PALETTE } from "@/ui/palette";
 
 enablePatches();
 
@@ -473,5 +482,195 @@ describe("backdating", () => {
     expect(doc.nodes[t1].notes.map((n) => n.text)).toEqual(["older", "newer"]);
     expect(doc.nodes[t1].notes[1].createdAt).toBe(LAST_WEEK);
     expect(doc.nodes[t1].notes[1].updatedAt).toBeGreaterThan(LAST_WEEK);
+  });
+});
+
+describe("tags", () => {
+  it("addTag registers a trimmed tag, defaulting to the next palette color", () => {
+    const { doc } = fixture();
+    const a = addTag("  Health ");
+    const next = expectRoundTrip(doc, a.recipe);
+    expect(next.tags[a.tagId]).toEqual({ id: a.tagId, name: "Health", color: PALETTE[0].color });
+    const b = addTag("English");
+    const after = expectRoundTrip(next, b.recipe);
+    expect(after.tags[b.tagId].color).toBe(PALETTE[1].color);
+    // an explicit color wins over the palette default
+    const c = addTag("App", "#123456");
+    expect(run(after, c.recipe).tags[c.tagId].color).toBe("#123456");
+  });
+
+  it("addTag no-ops on a blank name or a case-folded duplicate", () => {
+    let { doc } = fixture();
+    const a = addTag("Health");
+    doc = run(doc, a.recipe);
+    const dup = addTag(" health  ");
+    const [, patches] = produceWithPatches(doc, dup.recipe);
+    expect(patches).toHaveLength(0);
+    expect(Object.keys(doc.tags)).toEqual([a.tagId]);
+    const blank = addTag("   ");
+    const [, blankPatches] = produceWithPatches(doc, blank.recipe);
+    expect(blankPatches).toHaveLength(0);
+  });
+
+  it("renameTag renames; no-ops on a missing tag, blank name, or folded clash", () => {
+    let { doc } = fixture();
+    const a = addTag("Health");
+    const b = addTag("English");
+    doc = run(doc, a.recipe);
+    doc = run(doc, b.recipe);
+    doc = expectRoundTrip(doc, renameTag(a.tagId, "Wellness"));
+    expect(doc.tags[a.tagId].name).toBe("Wellness");
+    // recasing itself is fine; clashing with ANOTHER tag is not
+    doc = expectRoundTrip(doc, renameTag(a.tagId, "wellness"));
+    expect(doc.tags[a.tagId].name).toBe("wellness");
+    let [, patches] = produceWithPatches(doc, renameTag(a.tagId, " english "));
+    expect(patches).toHaveLength(0);
+    [, patches] = produceWithPatches(doc, renameTag("nope", "X"));
+    expect(patches).toHaveLength(0);
+    [, patches] = produceWithPatches(doc, renameTag(a.tagId, "   "));
+    expect(patches).toHaveLength(0);
+  });
+
+  it("setTagColor recolors; no-ops on a missing tag", () => {
+    let { doc } = fixture();
+    const a = addTag("Health");
+    doc = run(doc, a.recipe);
+    doc = expectRoundTrip(doc, setTagColor(a.tagId, "#654321"));
+    expect(doc.tags[a.tagId].color).toBe("#654321");
+    const [, patches] = produceWithPatches(doc, setTagColor("nope", "#000000"));
+    expect(patches).toHaveLength(0);
+  });
+
+  it("setNodeTags replaces the list, dropping ids the registry doesn't know", () => {
+    let { doc, t1 } = fixture();
+    const a = addTag("Health");
+    const b = addTag("English");
+    doc = run(doc, a.recipe);
+    doc = run(doc, b.recipe);
+    doc = expectRoundTrip(doc, setNodeTags(t1, [a.tagId, "ghost", b.tagId, a.tagId]));
+    expect(doc.nodes[t1].tagIds).toEqual([a.tagId, b.tagId]);
+    // an empty result clears the field; a missing node no-ops
+    doc = expectRoundTrip(doc, setNodeTags(t1, []));
+    expect(doc.nodes[t1].tagIds).toBeUndefined();
+    const [, patches] = produceWithPatches(doc, setNodeTags("nope", [a.tagId]));
+    expect(patches).toHaveLength(0);
+  });
+
+  it("deleteTag removes the registry entry and every reference in one undoable edit", () => {
+    let { doc, h, t1 } = fixture();
+    const a = addTag("Health");
+    const b = addTag("English");
+    doc = run(doc, a.recipe);
+    doc = run(doc, b.recipe);
+    doc = run(doc, setNodeTags(t1, [a.tagId, b.tagId]));
+    doc = run(doc, setNodeTags(h, [a.tagId]));
+    const next = expectRoundTrip(doc, deleteTag(a.tagId));
+    expect(next.tags[a.tagId]).toBeUndefined();
+    expect(next.tags[b.tagId]).toBeDefined();
+    expect(next.nodes[t1].tagIds).toEqual([b.tagId]);
+    expect(next.nodes[h].tagIds).toEqual([]);
+    // deleting an unknown tag no-ops
+    const [, patches] = produceWithPatches(next, deleteTag(a.tagId));
+    expect(patches).toHaveLength(0);
+  });
+
+  it("replaceDoc carries the tag registry", () => {
+    let { doc } = fixture();
+    const a = addTag("Health");
+    doc = run(doc, a.recipe);
+    const swapped = expectRoundTrip(emptyDoc(), replaceDoc(doc));
+    expect(swapped.tags).toEqual(doc.tags);
+  });
+
+  it("copy/paste keeps tag assignments", () => {
+    let { doc, t1 } = fixture();
+    const a = addTag("Health");
+    doc = run(doc, a.recipe);
+    doc = run(doc, setNodeTags(t1, [a.tagId]));
+    const paste = pastePayload(snapshotNode(doc, t1), { x: 500, y: 500 });
+    const next = run(doc, paste.recipe);
+    expect(next.nodes[paste.nodeIds[0]].tagIds).toEqual([a.tagId]);
+  });
+});
+
+describe("recurring tasks", () => {
+  const DAY = 86400000;
+  const rule: RecurRule = { freq: "daily", interval: 1, anchor: Date.now() - 3 * DAY };
+
+  it("complete logs an occurrence; the task never leaves todo", () => {
+    let { doc, t1 } = fixture();
+    doc = run(doc, setNodeRecurrence(t1, rule));
+    doc = expectRoundTrip(doc, transitionNodeStatus(t1, "complete"));
+    const node = doc.nodes[t1];
+    expect(node.log).toHaveLength(1);
+    expect(node.status).toBe("todo");
+    expect(node.completedAt).toBeUndefined();
+  });
+
+  it("a backdated log slots in ascending", () => {
+    let { doc, t1 } = fixture();
+    doc = run(doc, setNodeRecurrence(t1, rule));
+    doc = run(doc, transitionNodeStatus(t1, "complete", Date.now()));
+    doc = run(doc, transitionNodeStatus(t1, "complete", Date.now() - 2 * DAY));
+    const log = doc.nodes[t1].log!;
+    expect(log).toHaveLength(2);
+    expect(log[0]).toBeLessThan(log[1]);
+  });
+
+  it("reopen un-logs the latest occurrence and throws when empty", () => {
+    let { doc, t1 } = fixture();
+    doc = run(doc, setNodeRecurrence(t1, rule));
+    doc = run(doc, transitionNodeStatus(t1, "complete"));
+    doc = run(doc, transitionNodeStatus(t1, "complete"));
+    doc = expectRoundTrip(doc, transitionNodeStatus(t1, "reopen"));
+    expect(doc.nodes[t1].log).toHaveLength(1);
+    doc = run(doc, transitionNodeStatus(t1, "reopen"));
+    expect(() => run(doc, transitionNodeStatus(t1, "reopen"))).toThrow(DomainError);
+  });
+
+  it("start and pause don't apply to a recurring task", () => {
+    let { doc, t1 } = fixture();
+    doc = run(doc, setNodeRecurrence(t1, rule));
+    expect(() => run(doc, transitionNodeStatus(t1, "start"))).toThrow(DomainError);
+    expect(() => run(doc, transitionNodeStatus(t1, "pause"))).toThrow(DomainError);
+  });
+
+  it("setNodeRecurrence resets the stored status; clearing keeps the log", () => {
+    let { doc, t1 } = fixture();
+    doc = run(doc, transitionNodeStatus(t1, "start"));
+    doc = run(doc, transitionNodeStatus(t1, "complete"));
+    expect(doc.nodes[t1].status).toBe("done");
+    doc = expectRoundTrip(doc, setNodeRecurrence(t1, rule));
+    expect(doc.nodes[t1].status).toBe("todo");
+    expect(doc.nodes[t1].startedAt).toBeUndefined();
+    expect(doc.nodes[t1].completedAt).toBeUndefined();
+    doc = run(doc, transitionNodeStatus(t1, "complete"));
+    doc = expectRoundTrip(doc, setNodeRecurrence(t1, null));
+    expect(doc.nodes[t1].recur).toBeUndefined();
+    expect(doc.nodes[t1].log).toHaveLength(1);
+  });
+
+  it("a habit never blocks its goal's rollup, but its road asks when due", () => {
+    let { doc, h, t1, t2, e2 } = fixture();
+    const now = Date.now();
+    doc = run(doc, transitionNodeStatus(t1, "complete"));
+    doc = run(doc, setNodeRecurrence(t2, { freq: "daily", interval: 1, anchor: now }));
+    // t2 is recurring (skipped) and t1 is done -> the goal rolls up done
+    expect(nodeStatus(doc, h)).toBe("done");
+    // the road to the habit asks for attention while today's log is open
+    expect(edgeStatus(doc, e2, now)).toBe("todo");
+    doc = run(doc, transitionNodeStatus(t2, "complete", now));
+    expect(edgeStatus(doc, e2, now)).toBe("done");
+  });
+
+  it("copy/paste keeps the rule and the log", () => {
+    let { doc, t1 } = fixture();
+    doc = run(doc, setNodeRecurrence(t1, rule));
+    doc = run(doc, transitionNodeStatus(t1, "complete"));
+    const paste = pastePayload(snapshotNode(doc, t1), { x: 500, y: 500 });
+    const next = run(doc, paste.recipe);
+    const pasted = next.nodes[paste.nodeIds[0]];
+    expect(pasted.recur).toEqual(rule);
+    expect(pasted.log).toHaveLength(1);
   });
 });

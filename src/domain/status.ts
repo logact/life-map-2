@@ -1,17 +1,24 @@
 import { EdgeData, Id, isRecord, isTask, LifeMapDoc, Status } from "./doc";
 import { getIndexes } from "./indexes";
+import { recurStatus } from "./recur";
 
 // ---------- status as pure derivation over the doc ----------
 //
 // Goal status is DERIVED, never stored: manual completion (completedAt set)
 // wins; otherwise roll up child tasks. Synthetic expand-midpoints are
 // structure, not real child tasks, so they are skipped — expanding an edge
-// under a goal must never flip the goal's status (B13).
+// under a goal must never flip the goal's status (B13). Recurring tasks are
+// skipped too: an ongoing habit must never block its goal's "done".
+//
+// A recurring task's status is derived from its rule + log (due/overdue ask
+// for attention, a current habit reads as done) — the stored status field is
+// ignored while recur is set. `now` feeds that derivation; callers in render
+// scope must pass it explicitly (Date.now() is impure in render).
 
-export function nodeStatus(doc: LifeMapDoc, id: Id): Status | null {
+export function nodeStatus(doc: LifeMapDoc, id: Id, now?: number): Status | null {
   const n = doc.nodes[id];
   if (!n) return null;
-  if (isTask(n)) return n.status ?? "todo";
+  if (isTask(n)) return n.recur ? recurStatus(n, now ?? Date.now()) : (n.status ?? "todo");
   if (n.kind === "goal") return goalStatus(doc, id);
   return null;
 }
@@ -24,7 +31,7 @@ export function goalStatus(doc: LifeMapDoc, goalId: Id): Status {
   const tasks = (idx.outEdgeIds.get(goalId) ?? [])
     .map((eid) => doc.edges[eid]?.toId)
     .map((nid) => (nid ? doc.nodes[nid] : undefined))
-    .filter((n): n is NonNullable<typeof n> => !!n && isTask(n) && !n.synthetic);
+    .filter((n): n is NonNullable<typeof n> => !!n && isTask(n) && !n.synthetic && !n.recur);
   if (tasks.length === 0) return "todo";
   if (tasks.every((t) => (t.status ?? "todo") === "done")) return "done";
   if (tasks.some((t) => (t.status ?? "todo") !== "todo")) return "in-progress";
@@ -71,14 +78,14 @@ function flattenChain(doc: LifeMapDoc, edge: EdgeData): Id[] {
   return seq;
 }
 
-export function edgeStatus(doc: LifeMapDoc, edgeId: Id): Status | null {
+export function edgeStatus(doc: LifeMapDoc, edgeId: Id, now?: number): Status | null {
   const edge = doc.edges[edgeId];
   if (!edge) return null;
   const from = doc.nodes[edge.fromId];
   const to = doc.nodes[edge.toId];
   if (!from || !to || isRecord(from) || isRecord(to)) return null;
   for (const nodeId of flattenChain(doc, edge).slice(1)) {
-    const s = nodeStatus(doc, nodeId);
+    const s = nodeStatus(doc, nodeId, now);
     if (s !== null && s !== "done") return s;
   }
   return "done";

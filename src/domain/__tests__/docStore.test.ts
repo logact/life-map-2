@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 
 import { enablePatches, produce, produceWithPatches } from "immer";
 
-import { addChildNode, addFreeNode, expandEdge, moveNode, renameNode, replaceDoc } from "../commands";
+import { addChildNode, addFreeNode, expandEdge, moveNode, renameNode, replaceDoc, setNodeRecurrence, transitionNodeStatus } from "../commands";
 import { emptyDoc, LifeMapDoc } from "../doc";
 import { buildSeedDoc } from "../seedDoc";
 import { docToRows, getMeta, loadDoc, rowsToDoc, setMeta } from "@/data/mapDb";
@@ -205,6 +205,22 @@ describe("docToRows/rowsToDoc", () => {
       expect(e.fromId).not.toBe(corruptNodeId);
       expect(e.toId).not.toBe(corruptNodeId);
     }
+  });
+
+  it("round-trips the recurrence rule and log", () => {
+    let doc = emptyDoc();
+    const t = addFreeNode("task", "T", "", { x: 0, y: 0 });
+    doc = produceWithPatches(doc, t.recipe)[0];
+    doc = produceWithPatches(
+      doc,
+      setNodeRecurrence(t.nodeId, { freq: "weekly", interval: 2, weekdays: [1, 3], anchor: 123 }),
+    )[0];
+    doc = produceWithPatches(doc, transitionNodeStatus(t.nodeId, "complete", 1000))[0];
+    doc = produceWithPatches(doc, transitionNodeStatus(t.nodeId, "complete", 2000))[0];
+    const rows = docToRows(doc);
+    const loaded = rowsToDoc(rows.nodes, rows.notes, rows.edges);
+    expect(loaded.nodes[t.nodeId].recur).toEqual({ freq: "weekly", interval: 2, weekdays: [1, 3], anchor: 123 });
+    expect(loaded.nodes[t.nodeId].log).toEqual([1000, 2000]);
   });
 
   it("reads the legacy occuredAt key (pre-migration data)", () => {

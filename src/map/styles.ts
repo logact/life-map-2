@@ -717,4 +717,82 @@ export const styles = StyleSheet.create({
     color: INK.secondary,
     textAlign: "center",
   },
+  // tag chips on the node info card: one chip per assigned tag (colored
+  // dot + name) plus a trailing "+" chip, all opening the tag picker
+  tagRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 2,
+  },
+  tagChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderWidth: 1,
+    borderColor: INK.subtle,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  tagChipDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  tagChipText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: INK.primary,
+  },
+  tagChipAddText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: INK.secondary,
+  },
+  // tag picker sheet: one row per registry tag (dot, name, assignment
+  // check, edit affordance); the edited row swaps for an inline editor
+  tagPickList: {
+    flexGrow: 0,
+    maxHeight: 300,
+  },
+  tagPickRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  tagPickRowPressed: {
+    backgroundColor: "#f4f4f6",
+  },
+  tagPickName: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "500",
+    color: INK.primary,
+  },
+  tagPickCheck: {
+    width: 20,
+    fontSize: 14,
+    fontWeight: "600",
+    color: INK.primary,
+    textAlign: "center",
+  },
+  tagPickEditText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: INK.secondary,
+    padding: 4,
+  },
+  tagEditBox: {
+    gap: 10,
+    paddingVertical: 6,
+  },
+  tagNewLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: INK.tertiary,
+  },
 });

@@ -1,6 +1,7 @@
 import * as SQLite from "expo-sqlite";
 
 import { EdgeData, Id, LifeMapDoc, NodeData } from "@/domain/doc";
+import { parseRecurLog, parseRecurRule } from "@/domain/recur";
 
 // ---------- schema ----------
 // nodes carry their kind-specific fields as a JSON blob in `data`; edges
@@ -67,7 +68,19 @@ async function migrate0to1(db: SQLite.SQLiteDatabase): Promise<void> {
   await db.execAsync("PRAGMA user_version = 1");
 }
 
-const MIGRATIONS: ((db: SQLite.SQLiteDatabase) => Promise<void>)[] = [migrate0to1];
+async function migrate1to2(db: SQLite.SQLiteDatabase): Promise<void> {
+  // the tag registry: nodes reference tags by id inside their data blob
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS tags (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      color TEXT
+    );
+    PRAGMA user_version = 2;
+  `);
+}
+
+const MIGRATIONS: ((db: SQLite.SQLiteDatabase) => Promise<void>)[] = [migrate0to1, migrate1to2];
 
 async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   const row = await db.getFirstAsync<{ user_version: number }>("PRAGMA user_version");
@@ -130,42 +143,59 @@ export interface EdgeRow {
   bend_y: number | null;
 }
 
+export interface TagRow {
+  id: string;
+  name: string;
+  color: string | null;
+}
+
 // ---------- doc <-> rows (pure; unit-tested without sqlite) ----------
 
-function serializeKindData(node: NodeData): string {
+function serializeKindData(node: NodeData): Record<string, unknown> {
   if (node.kind === "goal") {
-    return JSON.stringify({
+    return {
       description: node.description ?? null,
       targetDate: node.targetDate ?? null,
       completedAt: node.completedAt ?? null,
-    });
+    };
   }
   if (node.kind === "task") {
-    return JSON.stringify({
+    return {
       status: node.status ?? "todo",
       startedAt: node.startedAt ?? null,
       completedAt: node.completedAt ?? null,
       synthetic: node.synthetic ?? null,
-    });
+      recur: node.recur ?? null,
+      log: node.log ?? null,
+    };
   }
   if (node.kind === "record") {
-    return JSON.stringify({
+    return {
       note: node.note ?? "",
       createdAt: node.createdAt ?? null,
       occurredAt: node.occurredAt ?? null,
-    });
+    };
   }
-  return "{}";
+  return {};
 }
 
 function millis(value: unknown): number | undefined {
   return typeof value === "number" ? value : undefined;
 }
 
-export function docToRows(doc: LifeMapDoc): { nodes: NodeRow[]; notes: NoteRow[]; edges: EdgeRow[] } {
+export function docToRows(doc: LifeMapDoc): {
+  nodes: NodeRow[];
+  notes: NoteRow[];
+  edges: EdgeRow[];
+  tags: TagRow[];
+} {
   const nodes: NodeRow[] = [];
   const notes: NoteRow[] = [];
   for (const node of Object.values(doc.nodes)) {
+    // tagIds are kind-independent, so they ride at the blob level rather
+    // than inside any per-kind branch
+    const data = serializeKindData(node);
+    if (node.tagIds && node.tagIds.length > 0) data.tagIds = node.tagIds;
     nodes.push({
       id: node.id,
       kind: node.kind,
@@ -173,7 +203,7 @@ export function docToRows(doc: LifeMapDoc): { nodes: NodeRow[]; notes: NoteRow[]
       x: node.x,
       y: node.y,
       color: node.color ?? null,
-      data: serializeKindData(node),
+      data: JSON.stringify(data),
     });
     node.notes.forEach((note, i) => {
       notes.push({
@@ -206,7 +236,8 @@ export function docToRows(doc: LifeMapDoc): { nodes: NodeRow[]; notes: NoteRow[]
     e.childEdgeIds.forEach((childId, i) => collect(childId, i, layer + 1, e.id));
   };
   doc.rootEdgeIds.forEach((id, i) => collect(id, i, 0, null));
-  return { nodes, notes, edges };
+  const tags: TagRow[] = Object.values(doc.tags).map((t) => ({ id: t.id, name: t.name, color: t.color }));
+  return { nodes, notes, edges, tags };
 }
 
 function parseNodeRow(row: NodeRow): NodeData | null {
@@ -233,6 +264,10 @@ function parseNodeRow(row: NodeRow): NodeData | null {
     if (startedAt !== undefined) node.startedAt = startedAt;
     if (completedAt !== undefined) node.completedAt = completedAt;
     if (data.synthetic === true) node.synthetic = true;
+    const recur = parseRecurRule(data.recur);
+    if (recur) node.recur = recur;
+    const log = parseRecurLog(data.log);
+    if (log) node.log = log;
   } else if (node.kind === "record") {
     node.note = typeof data.note === "string" ? data.note : "";
     // occurredAt renamed from the legacy occuredAt (migration 1 rewrites the
@@ -246,11 +281,31 @@ function parseNodeRow(row: NodeRow): NodeData | null {
     if (targetDate !== undefined) node.targetDate = targetDate;
     if (completedAt !== undefined) node.completedAt = completedAt;
   }
+  // rows saved before tags existed have no key — tagIds stays undefined
+  if (Array.isArray(data.tagIds)) {
+    node.tagIds = data.tagIds.filter((id): id is string => typeof id === "string");
+  }
   return node;
 }
 
-export function rowsToDoc(nodeRows: NodeRow[], noteRows: NoteRow[], edgeRows: EdgeRow[]): LifeMapDoc {
-  const doc: LifeMapDoc = { schemaVersion: 2, nodes: {}, edges: {}, rootNodeIds: [], rootEdgeIds: [] };
+export function rowsToDoc(
+  nodeRows: NodeRow[],
+  noteRows: NoteRow[],
+  edgeRows: EdgeRow[],
+  tagRows: TagRow[] = [],
+): LifeMapDoc {
+  const doc: LifeMapDoc = {
+    schemaVersion: 3,
+    nodes: {},
+    edges: {},
+    tags: {},
+    rootNodeIds: [],
+    rootEdgeIds: [],
+  };
+
+  for (const row of tagRows) {
+    doc.tags[row.id] = { id: row.id, name: row.name, color: row.color ?? "" };
+  }
 
   for (const row of nodeRows) {
     const node = parseNodeRow(row);
@@ -308,7 +363,7 @@ export async function saveDoc(doc: LifeMapDoc): Promise<void> {
   const db = await getDb();
   const rows = docToRows(doc);
   await db.withExclusiveTransactionAsync(async (txn) => {
-    await txn.execAsync("DELETE FROM notes; DELETE FROM edges; DELETE FROM nodes;");
+    await txn.execAsync("DELETE FROM notes; DELETE FROM edges; DELETE FROM nodes; DELETE FROM tags;");
     for (const row of rows.nodes) {
       await txn.runAsync("INSERT INTO nodes (id, kind, title, x, y, color, data) VALUES (?, ?, ?, ?, ?, ?, ?)", [
         row.id,
@@ -342,6 +397,13 @@ export async function saveDoc(doc: LifeMapDoc): Promise<void> {
         ],
       );
     }
+    for (const row of rows.tags) {
+      await txn.runAsync("INSERT INTO tags (id, name, color) VALUES (?, ?, ?)", [
+        row.id,
+        row.name,
+        row.color,
+      ]);
+    }
   });
 }
 
@@ -358,7 +420,8 @@ export async function loadDoc(): Promise<LifeMapDoc | null> {
   // notes are read in position order; edge ordering happens inside rowsToDoc
   const noteRows = await db.getAllAsync<NoteRow>("SELECT * FROM notes ORDER BY position ASC");
   const edgeRows = await db.getAllAsync<EdgeRow>("SELECT * FROM edges");
-  return rowsToDoc(nodeRows, noteRows, edgeRows);
+  const tagRows = await db.getAllAsync<TagRow>("SELECT * FROM tags");
+  return rowsToDoc(nodeRows, noteRows, edgeRows, tagRows);
 }
 
 // ---------- meta: app-level flags that are not map content ----------

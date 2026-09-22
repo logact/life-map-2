@@ -69,6 +69,8 @@ function captureKindData(node: NodeData): Record<string, unknown> {
       status: node.status ?? "todo",
       startedAt: node.startedAt ?? null,
       completedAt: node.completedAt ?? null,
+      recur: node.recur ?? null,
+      log: node.log ?? null,
     };
   }
   if (node.kind === "record") {
@@ -88,12 +90,14 @@ function captureNode(cap: Capture, nodeId: Id): string {
   if (!node) return "";
   const key = `n${++cap.nextKey}`;
   cap.nodeKeyById.set(nodeId, key);
+  const data = captureKindData(node);
+  if (node.tagIds && node.tagIds.length > 0) data.tagIds = [...node.tagIds];
   cap.nodes.push({
     key,
     kind: node.kind,
     title: node.title,
     color: node.color,
-    data: captureKindData(node),
+    data,
     notes: node.notes.map((n) => ({ text: n.text, createdAt: n.createdAt, updatedAt: n.updatedAt })),
     rx: node.x,
     ry: node.y,

@@ -10,6 +10,7 @@ import { styles } from "../styles";
 import { InfoTarget } from "../types";
 import { fmtDate } from "../utils";
 import { DatePickerSheet } from "./datePicker";
+import { TagPickerSheet } from "./tagPicker";
 
 type EditField = "title" | "detail";
 
@@ -44,6 +45,7 @@ function NodeInfoCard(props: {
   // the date field open in the picker sheet, with the value it opened on
   // (captured in the tap handler — Date.now() is impure in render)
   const [dateField, setDateField] = useState<{ field: DateField; label: string; value: number } | null>(null);
+  const [tagPickerOpen, setTagPickerOpen] = useState(false);
   // tasks carry no detail; the goal's detail is its description, the
   // record's is its note (same mapping the old inspector used)
   const detailValue = isGoal(node)
@@ -131,6 +133,11 @@ function NodeInfoCard(props: {
 
   const newest = node.notes[0];
 
+  // the node's tags in registry order, resolved from the registry;
+  // dangling ids (clipboard carry-over from another doc) never render
+  const nodeTagIds = node.tagIds ?? [];
+  const assignedTags = Object.values(props.doc.tags).filter((t) => nodeTagIds.includes(t.id));
+
   // the node's date rows, in display order; tapping one opens the picker
   const dateRows: { field: DateField; label: string; value?: number; placeholder?: string }[] = [];
   if (isRecord(node)) {
@@ -171,6 +178,36 @@ function NodeInfoCard(props: {
         )}
       </View>
       <Text style={styles.infoMeta}>{node.kind}</Text>
+      {/* tag row: one chip per assigned tag plus a "+" opener, all
+          opening the picker sheet; synthetic midpoint nodes carry no
+          tags, so they get no row */}
+      {!node.synthetic && (
+        <View style={styles.tagRow}>
+          {assignedTags.map((t) => (
+            <Pressable
+              key={t.id}
+              style={({ pressed }) => [styles.tagChip, pressed && { opacity: 0.6 }]}
+              onPress={() => {
+                endEdit();
+                setTagPickerOpen(true);
+              }}
+            >
+              <View style={[styles.tagChipDot, { backgroundColor: t.color }]} />
+              <Text style={styles.tagChipText}>{t.name}</Text>
+            </Pressable>
+          ))}
+          <Pressable
+            accessibilityLabel="Edit tags"
+            style={({ pressed }) => [styles.tagChip, pressed && { opacity: 0.6 }]}
+            onPress={() => {
+              endEdit();
+              setTagPickerOpen(true);
+            }}
+          >
+            <Text style={styles.tagChipAddText}>+ Tag</Text>
+          </Pressable>
+        </View>
+      )}
       {dateRows.map((r) => (
         <Pressable
           key={r.field}
@@ -273,6 +310,14 @@ function NodeInfoCard(props: {
               : undefined
           }
           onClose={() => setDateField(null)}
+        />
+      )}
+      {tagPickerOpen && (
+        <TagPickerSheet
+          node={node}
+          doc={props.doc}
+          run={props.run}
+          onClose={() => setTagPickerOpen(false)}
         />
       )}
     </View>

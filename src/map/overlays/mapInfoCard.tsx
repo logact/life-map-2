@@ -17,11 +17,15 @@ type EditField = "title" | "detail";
 // transition buttons, an inline-editable detail row (the goal's
 // description / record's note; tasks have none), and a compact notes
 // peek. The title and detail edit in place — tap the text, type, and the
-// edit commits on submit, on blur, or when the card unmounts mid-edit
-// (a tap elsewhere dismisses and retargets in one motion, and that still
-// saves). Status buttons act immediately; the card stays open so the new
-// status is visible in place. The full notes list lives in the modal
-// notes sheet; the card itself never shows more than this peek.
+// edit commits on submit, on the ✓ button, on blur, or when the card
+// unmounts mid-edit (a tap elsewhere dismisses and retargets in one
+// motion, and that still saves); the ✕ button discards the draft. RN
+// never blurs a TextInput for taps on sibling Pressables, so every other
+// control on the card ends the active edit first — the press commits the
+// draft and acts in one motion. Status buttons act immediately; the card
+// stays open so the new status is visible in place. The full notes list
+// lives in the modal notes sheet; the card itself never shows more than
+// this peek.
 function NodeInfoCard(props: {
   node: NodeData;
   doc: LifeMapDoc;
@@ -91,10 +95,29 @@ function NodeInfoCard(props: {
     setDraft(initial);
     setEditing(field);
   };
+  // every edit-end path funnels through these (submit, blur, ✓/✕, a press
+  // on another control). They clear the ref first, so a late native onBlur
+  // or the unmount cleanup can't re-commit an already-ended (or discarded)
+  // draft.
   const endEdit = () => {
-    if (!editing) return;
-    commit(editing, draft);
+    const { editing: field, draft: text } = latestRef.current;
+    if (!field) return;
+    commit(field, text);
+    latestRef.current = { editing: null, draft: "" };
     setEditing(null);
+  };
+  const cancelEdit = () => {
+    latestRef.current = { editing: null, draft: "" };
+    setEditing(null);
+  };
+  // a blur only ends the edit if it belongs to the field that is still
+  // active — a late blur from an input that was just swapped out (field
+  // switch, ✓/✕, card close) must not kill the new session
+  const onTitleBlur = () => {
+    if (latestRef.current.editing === "title") endEdit();
+  };
+  const onDetailBlur = () => {
+    if (latestRef.current.editing === "detail") endEdit();
   };
 
   const newest = node.notes[0];
@@ -102,15 +125,23 @@ function NodeInfoCard(props: {
     <View style={styles.infoCard}>
       <View style={styles.infoHeader}>
         {editing === "title" ? (
-          <TextInput
-            style={[styles.infoTitleInput, { flex: 1 }]}
-            value={draft}
-            onChangeText={setDraft}
-            autoFocus
-            returnKeyType="done"
-            onSubmitEditing={endEdit}
-            onBlur={endEdit}
-          />
+          <>
+            <TextInput
+              style={[styles.infoTitleInput, { flex: 1 }]}
+              value={draft}
+              onChangeText={setDraft}
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={endEdit}
+              onBlur={onTitleBlur}
+            />
+            <Pressable accessibilityLabel="Save title" onPress={endEdit} hitSlop={8}>
+              <Text style={styles.infoClose}>✓</Text>
+            </Pressable>
+            <Pressable accessibilityLabel="Cancel title edit" onPress={cancelEdit} hitSlop={8}>
+              <Text style={styles.infoClose}>✕</Text>
+            </Pressable>
+          </>
         ) : (
           <Pressable style={{ flex: 1 }} onPress={() => startEdit("title", node.title)}>
             <Text style={styles.infoTitle}>{node.title}</Text>
@@ -132,21 +163,34 @@ function NodeInfoCard(props: {
             <SheetButton
               key={t.action}
               label={t.label}
-              onPress={() => props.run(transitionNodeStatus(node.id, t.action))}
+              onPress={() => {
+                endEdit();
+                props.run(transitionNodeStatus(node.id, t.action));
+              }}
             />
           ))}
         </View>
       )}
       {detailValue !== null &&
         (editing === "detail" ? (
-          <TextInput
-            style={styles.infoDetailInput}
-            value={draft}
-            onChangeText={setDraft}
-            multiline
-            autoFocus
-            onBlur={endEdit}
-          />
+          <View>
+            <TextInput
+              style={styles.infoDetailInput}
+              value={draft}
+              onChangeText={setDraft}
+              multiline
+              autoFocus
+              onBlur={onDetailBlur}
+            />
+            <View style={styles.infoEditActions}>
+              <Pressable accessibilityLabel="Save" onPress={endEdit} hitSlop={8}>
+                <Text style={styles.infoClose}>✓</Text>
+              </Pressable>
+              <Pressable accessibilityLabel="Cancel edit" onPress={cancelEdit} hitSlop={8}>
+                <Text style={styles.infoClose}>✕</Text>
+              </Pressable>
+            </View>
+          </View>
         ) : (
           <Pressable onPress={() => startEdit("detail", detailValue)}>
             <Text style={detailValue ? styles.infoMeta : styles.infoDetailPlaceholder}>
@@ -155,7 +199,13 @@ function NodeInfoCard(props: {
           </Pressable>
         ))}
       <View style={styles.infoNotesSep} />
-      <Pressable onPress={props.onOpenNotes} style={({ pressed }) => pressed && { opacity: 0.6 }}>
+      <Pressable
+        onPress={() => {
+          endEdit();
+          props.onOpenNotes();
+        }}
+        style={({ pressed }) => pressed && { opacity: 0.6 }}
+      >
         {newest ? (
           <>
             <Text style={styles.notePeekText} numberOfLines={2}>

@@ -429,6 +429,14 @@ export const styles = StyleSheet.create({
     minHeight: 44,
     textAlignVertical: "top",
   },
+  // commit/discard affordances shown while an inline field edits (title
+  // puts them inline in the header; the detail field docks them below)
+  infoEditActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 12,
+    marginTop: 4,
+  },
   // inline color editing on the edge info card: palette swatches plus a
   // default (∅) entry; the active color carries a dark ring
   swatchRow: {

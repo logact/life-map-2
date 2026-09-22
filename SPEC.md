@@ -188,7 +188,7 @@ Reduce-motion OS setting replaces pulse/march with static outlines.
 
 | Gesture | Target | Action |
 |---|---|---|
-| Single tap | node | Focus: info card in the bottom panel (kind · dates, a status row with the legal transition buttons, plus a peek of the newest note — the full list opens in a notes sheet). The title and the goal's description / record's note edit in place (tap the text; saves on submit, blur, or tap-away) + spotlight (connected edges light up, rest dims) + connect handle on the node |
+| Single tap | node | Focus: info card in the bottom panel (kind · dates, a status row with the legal transition buttons, plus a peek of the newest note — the full list opens in a notes sheet). The title and the goal's description / record's note edit in place (tap the text; saves on submit, blur, or tap-away) + the node itself highlights (no edge spotlight) + connect handle on the node |
 | Single tap | edge | Info card in the bottom panel (layer, status, hidden sub-edges, Zoom in/Collapse buttons, inline color swatches) + edge becomes the zoom **selection** |
 | Single tap | empty canvas | Dismiss the panel; clear selection (unless locked) |
 | Double tap (300ms) | node | Node menu in the bottom panel |

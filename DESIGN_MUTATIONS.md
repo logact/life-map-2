@@ -45,8 +45,8 @@ on. Two costs follow:
 | State | Meaning |
 |---|---|
 | idle | Default. No selection, no focus. |
-| focused | The tapped object: spotlight on (its edges/endpoints lit, rest dimmed), info card in the bottom panel, connect handle visible. |
-| menu-open | The object's action menu is showing in the bottom panel. Focus/spotlight persist. |
+| focused | The tapped object: info card in the bottom panel. A node highlights itself and shows its connect handle (no edge spotlight); an edge becomes the zoom selection. |
+| menu-open | The object's action menu is showing in the bottom panel. A menu node's spotlight (its edges/endpoints lit, rest dimmed) turns on while the menu is open. |
 | dragging | Node is being repositioned (long-press arm). |
 | connecting | A connect-drag is in flight from a focused node. |
 
@@ -63,7 +63,7 @@ on. Two costs follow:
 
 | Gesture | Target | Result |
 |---|---|---|
-| Single tap | node | **Focus**: info card in the bottom panel + spotlight + connect handle appears |
+| Single tap | node | **Focus**: info card in the bottom panel + the node itself highlights + connect handle appears (no edge spotlight) |
 | Single tap | focused node's menu item | Run the item |
 | Single tap | edge | Info card in the bottom panel (layer, status, hidden sub-edges, zoom controls) + edge becomes zoom selection |
 | Single tap | empty canvas | Dismiss any panel; clear selection (unless locked); unfocus |
@@ -198,8 +198,8 @@ info card — the panel rides above the keyboard for it.
    closes the menu *and* focuses that object — never a dead "close-only" tap.
 3. **The object stays visible.** The panel never covers the graph: the camera
    eases the map up so the panel's object sits clear of the panel area (and
-   an already-visible object never moves). Focus (spotlight) persists while
-   the menu is open.
+   an already-visible object never moves). A menu node's spotlight turns on
+   while its menu is open.
 4. **No mode lock-in** except summarize. Every other flow is a gesture or a
    menu pick that completes in place.
 5. **Confirmation is in place and two-step** (destructive items arm, then

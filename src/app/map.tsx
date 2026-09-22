@@ -107,7 +107,7 @@ export default function MapScreen() {
   // single tap -> read-only info card in the bottom panel; double tap ->
   // action menu in the bottom panel (see DESIGN_MUTATIONS.md)
   const [infoTarget, setInfoTarget] = useState<InfoTarget | null>(null);
-  // node spotlight: a tapped or dragged node's directly-connected edges
+  // node spotlight: an open-menu or dragged node's directly-connected edges
   // (and their endpoints) light up while everything else dims. Purely
   // visual — the zoom selection is untouched
   const [nodeFocusId, setNodeFocusId] = useState<string | null>(null);
@@ -433,9 +433,13 @@ export default function MapScreen() {
       drag && drag.id === n.id ? { ...n, x: drag.x, y: drag.y } : n,
     ]),
   );
-  // node highlight: the connect-drag candidate (drop target), else the
-  // focused node (info card / open menu / spotlight)
-  const highlightedNodeId = connectCandidateId ?? nodeFocusId;
+  // the node the canvas holds visually: the spotlight node (open menu /
+  // drag), else the node whose info card is open — a single tap highlights
+  // just the node itself and shows its connect handle, with no edge
+  // spotlight
+  const heldNodeId = nodeFocusId ?? (infoTarget?.kind === "node" ? infoTarget.id : null);
+  // node highlight: the connect-drag candidate (drop target), else the held node
+  const highlightedNodeId = connectCandidateId ?? heldNodeId;
 
   // the selection bar's "From → To": the boundary nodes of the selected
   // visible edges — a road's two ends, or a single edge's own endpoints.
@@ -524,8 +528,6 @@ export default function MapScreen() {
     setMenuNodeId(null);
     setMenuEdgeId(null);
     setInfoTarget({ kind: "node", id });
-    // spotlight the node's directly-connected edges (visual only)
-    setNodeFocusId(id);
     // nodes aren't zoomable; the edge lens clears unless it is locked
     if (!selectionLocked) setZoomEdgeIds([]);
   };
@@ -975,7 +977,7 @@ export default function MapScreen() {
             armed={dragArmedId === n.id}
             // the handle yields to the node's own menu and to bend mode
             connectable={
-              nodeFocusId === n.id && dragArmedId !== n.id && !menuNodeId && !bendDrag
+              heldNodeId === n.id && dragArmedId !== n.id && !menuNodeId && !bendDrag
             }
             onPress={onNodePress}
             onArm={onNodeLongPress}

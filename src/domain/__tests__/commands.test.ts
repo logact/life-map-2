@@ -23,8 +23,6 @@ import {
   renameTag,
   replaceDoc,
   setEdgeBend,
-  setEdgeColor,
-  setNodeColor,
   setNodeDetail,
   setNodeRecurrence,
   setNodeTags,
@@ -170,7 +168,6 @@ describe("insertNodeIntoEdge", () => {
 
   it("keeps the old sub-road on the half that still reaches the destination", () => {
     let { doc, e1 } = fixture();
-    doc = run(doc, setEdgeColor(e1, "#f00"));
     const ex = expandEdge(e1);
     doc = run(doc, ex.recipe);
     const ins = insertNodeIntoEdge(e1, "goal", "N", "", { x: 5, y: 5 });
@@ -179,9 +176,6 @@ describe("insertNodeIntoEdge", () => {
     expect(h2.childEdgeIds).toEqual(ex.childEdgeIds);
     expect(next.edges[ex.childEdgeIds[0]].parentEdgeId).toBe(h2.id);
     expect(h1.childEdgeIds).toEqual([]);
-    // both halves inherit the old road's color
-    expect(h1.color).toBe("#f00");
-    expect(h2.color).toBe("#f00");
   });
 
   it("splices the halves into the parent edge's child list at the same slot", () => {
@@ -310,14 +304,12 @@ describe("removeNode", () => {
 });
 
 describe("small edits", () => {
-  it("moveNode / renameNode / colors / bend round-trip through inverse patches", () => {
+  it("moveNode / renameNode / bend round-trip through inverse patches", () => {
     const { doc, t1, e1 } = fixture();
     let next = expectRoundTrip(doc, moveNode(t1, 42, 43));
     expect(next.nodes[t1].x).toBe(42);
     next = expectRoundTrip(doc, renameNode(t1, "Renamed"));
     expect(next.nodes[t1].title).toBe("Renamed");
-    next = expectRoundTrip(doc, setNodeColor(t1, "red"));
-    expect(next.nodes[t1].color).toBe("red");
     next = expectRoundTrip(doc, setEdgeBend(e1, { x: 1, y: 2 }));
     expect(next.edges[e1].bend).toEqual({ x: 1, y: 2 });
     next = expectRoundTrip(next, setEdgeBend(e1, null));

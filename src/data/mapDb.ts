@@ -118,7 +118,6 @@ export interface NodeRow {
   title: string;
   x: number;
   y: number;
-  color: string | null;
   data: string;
 }
 
@@ -138,7 +137,6 @@ export interface EdgeRow {
   parent_edge_id: string | null;
   position: number;
   layer: number;
-  color: string | null;
   bend_x: number | null;
   bend_y: number | null;
 }
@@ -202,7 +200,6 @@ export function docToRows(doc: LifeMapDoc): {
       title: node.title,
       x: node.x,
       y: node.y,
-      color: node.color ?? null,
       data: JSON.stringify(data),
     });
     node.notes.forEach((note, i) => {
@@ -229,7 +226,6 @@ export function docToRows(doc: LifeMapDoc): {
       parent_edge_id: parentEdgeId,
       position,
       layer,
-      color: e.color ?? null,
       bend_x: e.bend?.x ?? null,
       bend_y: e.bend?.y ?? null,
     });
@@ -256,7 +252,6 @@ function parseNodeRow(row: NodeRow): NodeData | null {
     title: row.title,
     notes: [],
   };
-  if (row.color !== null) node.color = row.color;
   if (node.kind === "task") {
     node.status = (data.status as NodeData["status"]) ?? "todo";
     const startedAt = millis(data.startedAt);
@@ -335,7 +330,6 @@ export function rowsToDoc(
       parentEdgeId: row.parent_edge_id,
       childEdgeIds: [],
     };
-    if (row.color !== null) edge.color = row.color;
     if (row.bend_x !== null && row.bend_y !== null) {
       edge.bend = { x: row.bend_x, y: row.bend_y };
     }
@@ -365,13 +359,12 @@ export async function saveDoc(doc: LifeMapDoc): Promise<void> {
   await db.withExclusiveTransactionAsync(async (txn) => {
     await txn.execAsync("DELETE FROM notes; DELETE FROM edges; DELETE FROM nodes; DELETE FROM tags;");
     for (const row of rows.nodes) {
-      await txn.runAsync("INSERT INTO nodes (id, kind, title, x, y, color, data) VALUES (?, ?, ?, ?, ?, ?, ?)", [
+      await txn.runAsync("INSERT INTO nodes (id, kind, title, x, y, data) VALUES (?, ?, ?, ?, ?, ?)", [
         row.id,
         row.kind,
         row.title,
         row.x,
         row.y,
-        row.color,
         row.data,
       ]);
     }
@@ -383,7 +376,7 @@ export async function saveDoc(doc: LifeMapDoc): Promise<void> {
     }
     for (const row of rows.edges) {
       await txn.runAsync(
-        "INSERT INTO edges (id, node1_id, node2_id, parent_edge_id, position, layer, color, bend_x, bend_y) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO edges (id, node1_id, node2_id, parent_edge_id, position, layer, bend_x, bend_y) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         [
           row.id,
           row.node1_id,
@@ -391,7 +384,6 @@ export async function saveDoc(doc: LifeMapDoc): Promise<void> {
           row.parent_edge_id,
           row.position,
           row.layer,
-          row.color,
           row.bend_x,
           row.bend_y,
         ],

@@ -68,6 +68,21 @@ export function fmtDate(ms: number): string {
   return new Date(ms).toDateString().slice(4); // drop the weekday prefix
 }
 
+// a target date's distance from now in whole days: "today", "in 3 days",
+// "2 days overdue" — shown next to a goal's target date
+export function fmtRelative(targetMs: number, nowMs: number): string {
+  const day = (ms: number) => {
+    const d = new Date(ms);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  };
+  const diff = Math.round((day(targetMs) - day(nowMs)) / 86400000);
+  if (diff === 0) return "today";
+  if (diff === 1) return "in 1 day";
+  if (diff > 1) return `in ${diff} days`;
+  if (diff === -1) return "1 day overdue";
+  return `${-diff} days overdue`;
+}
+
 // interpolate a point along a polyline, t = fraction of its total length
 export function pointAlongPath(path: { x: number; y: number }[], t: number): { x: number; y: number } {
   const lengths: number[] = [];
@@ -94,8 +109,8 @@ export function pointAlongPath(path: { x: number; y: number }[], t: number): { x
 // split a path into n equal-length segments, leaving a gap at each
 // breakpoint; bend corners falling inside a segment are kept as
 // intermediate points so bent edges keep their shape. Also returns the
-// breakpoint positions so the renderer can mark them (needed on dashed
-// or dotted edges, where a bare gap blends into the dash pattern)
+// breakpoint positions so the renderer can mark them with a solid dot
+// (without it the bare gap would read as an accidental break)
 export function splitPath(
   path: { x: number; y: number }[],
   n: number,

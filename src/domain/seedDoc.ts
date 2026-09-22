@@ -8,8 +8,6 @@ import {
   expandEdge,
   Recipe,
   renameNode,
-  setEdgeColor,
-  setNodeColor,
   transitionNodeStatus,
 } from "./commands";
 import { emptyDoc, Id, LifeMapDoc, NodeKind } from "./doc";
@@ -20,13 +18,10 @@ import { emptyDoc, Id, LifeMapDoc, NodeKind } from "./doc";
 // the tour with a life of their own. Built entirely through the same
 // commands the UI drives, so the document obeys every invariant a
 // user-built one does. The first lessons are pre-marked done and one is
-// in-progress, so the three status styles are visible on first launch.
+// in-progress, so the three status colors are visible on first launch.
 //
 // A tutorial has no history, so no backdating: every timestamp is stamped
-// honestly at build time. Colors are picks from the Okabe-Ito palette
-// (src/ui/palette.ts).
-
-const BLUE = "#0072B2";
+// honestly at build time.
 
 export function buildSeedDoc(cx: number, cy: number): LifeMapDoc {
   const steps: Recipe[] = [];
@@ -36,17 +31,14 @@ export function buildSeedDoc(cx: number, cy: number): LifeMapDoc {
     steps.push(c.recipe);
     return c.nodeId;
   };
-  const goal = (title: string, detail: string, x: number, y: number, color: string): Id => {
-    const id = free("goal", title, detail, x, y);
-    steps.push(setNodeColor(id, color));
-    return id;
-  };
+  const goal = (title: string, detail: string, x: number, y: number): Id =>
+    free("goal", title, detail, x, y);
   // a lesson on the tour: a free-standing task the road passes through
   const lesson = (title: string, x: number, y: number): Id => free("task", title, "", x, y);
-  // a road segment from -> to, in the tour's color
+  // a road segment from -> to
   const road = (fromId: Id, toId: Id): Id => {
     const c = connectNodes(fromId, toId);
-    steps.push(c.recipe, setEdgeColor(c.edgeId, BLUE));
+    steps.push(c.recipe);
     return c.edgeId;
   };
   // a record dots the roadside of the lesson it belongs to
@@ -98,14 +90,13 @@ export function buildSeedDoc(cx: number, cy: number): LifeMapDoc {
     "Tap a node to focus it — the ring is its connect handle. Drag direction = road direction; drop anywhere else to cancel.",
   );
 
-  // the mid-road milestone shows what a reached goal looks like: solid,
+  // the mid-road milestone shows what a reached goal looks like: green,
   // struck through, marked done by hand
   const gMilestone = goal(
     "Goals are the destinations",
     "Every road ends at a goal. Reach one, tap it, Mark done — Reopen undoes it.",
     cx,
     ry(4),
-    BLUE,
   );
   steps.push(transitionNodeStatus(gMilestone, "complete"));
 
@@ -123,7 +114,6 @@ export function buildSeedDoc(cx: number, cy: number): LifeMapDoc {
     "Rename me, drag me, delete me — then double-tap the canvas and start your own road. Undo is top-right, always.",
     cx,
     ry(7),
-    BLUE,
   );
 
   road(sTap, sNotes);
@@ -141,7 +131,7 @@ export function buildSeedDoc(cx: number, cy: number): LifeMapDoc {
   road(sLayers, gYours);
 
   // stray thoughts park off the road until they earn one — isolated on purpose
-  goal("Ideas", "Park stray thoughts here — no road until one is earned.", cx + 110, cy + 270, "#999933");
+  goal("Ideas", "Park stray thoughts here — no road until one is earned.", cx + 110, cy + 270);
 
   let doc = emptyDoc();
   for (const recipe of steps) {

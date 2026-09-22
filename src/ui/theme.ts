@@ -13,6 +13,16 @@ export const CANVAS_BG = "#f7f7f5"; // warm off-white
 export const CARD_BG = "#ffffff";
 export const ACCENT = "#1a73e8"; // route highlight only
 
+// status rides on color: todo gray, in-progress orange, done green. The
+// hues are Okabe-Ito picks (colorblind-safe) and deliberately avoid blue,
+// which stays reserved for the route highlight. Objects with no status
+// (records, record-touching edges) use neutral grays instead.
+export const STATUS_COLOR = {
+  todo: "#8e8e94", // = INK.tertiary
+  "in-progress": "#E69F00",
+  done: "#009E73",
+} as const;
+
 export const RADIUS = {
   sm: 10,
   md: 16,

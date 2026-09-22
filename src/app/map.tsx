@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  AccessibilityInfo,
   Alert,
   AppState,
   Keyboard,
@@ -26,8 +25,6 @@ import {
   removeNode,
   replaceDoc,
   setEdgeBend,
-  setEdgeColor,
-  setNodeColor,
   summarizeEdges,
   updateNote,
 } from "@/domain/commands";
@@ -153,6 +150,15 @@ export default function MapScreen() {
   // measured height of the bottom-docked panel — the camera accommodation
   // below needs to know how much room to make
   const [panelHeight, setPanelHeight] = useState(0);
+  // the screen's clock: Date.now() is impure in render, so it is captured
+  // outside render — after mount (deferred: a synchronous setState inside
+  // an effect body is a lint error) and after every edit (run) — and fed
+  // to the time-based derivations (recurring due states, target countdowns)
+  const [nowTs, setNowTs] = useState(0);
+  useEffect(() => {
+    const id = setTimeout(() => setNowTs(Date.now()), 0);
+    return () => clearTimeout(id);
+  }, []);
 
   const closeOverlays = () => {
     setInfoTarget(null);
@@ -175,6 +181,9 @@ export default function MapScreen() {
     const next = useDocStore.getState().doc;
     const visibleNow = new Set(visibleEdges(next, zoomedIdsRef.current).map((e) => e.id));
     setZoomEdgeIds((prev) => prev.filter((id) => visibleNow.has(id)));
+    // every edit re-derives the view model; refresh the clock with it so
+    // due states and countdowns never go stale while the app is open
+    setNowTs(Date.now());
   };
 
   // Undo/redo: patch-based history in the store. After a history jump,
@@ -208,8 +217,8 @@ export default function MapScreen() {
   };
 
   // domain -> UI: the visible frontier at the current lens, then plain
-  // view models derived from it (memoized on [doc, zoomedIds])
-  const { visible, vm } = useMapViewModel(doc, zoomedIds);
+  // view models derived from it (memoized on [doc, zoomedIds, nowTs])
+  const { visible, vm } = useMapViewModel(doc, zoomedIds, nowTs);
 
   // camera: base (identity by default, a computed fit after the fit
   // button) × pinch zoom, composed in useMapCamera; fitRef inside it
@@ -345,14 +354,6 @@ export default function MapScreen() {
     onCanvasSingleTap,
     commitBend,
   });
-
-  // respect the OS reduce-motion setting: pulse/march fall back to static outlines
-  const [reduceMotion, setReduceMotion] = useState(false);
-  useEffect(() => {
-    AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
-    const sub = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
-    return () => sub.remove();
-  }, []);
 
   // load the persisted map once on mount; the store seeds (and persists)
   // the initial map itself when the database is empty or unreadable
@@ -765,7 +766,7 @@ export default function MapScreen() {
       const b = doc.nodes[road.toId];
       if (!a || !b) return false;
       const pos = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      const ins = insertNodeIntoEdge(road.id, createTarget.mode, title, detail, pos);
+      const ins = insertNodeIntoEdge(road.id, createTarget.mode, title, detail, pos, draft.targetDate);
       run(ins.recipe);
       // the two halves light up as the selection, like an expand
       setZoomEdgeIds(ins.edgeIds);
@@ -778,12 +779,12 @@ export default function MapScreen() {
       if (!child) return;
       if (!tryInsert(child.id, "predecessor")) {
         const pos = childPosition(child, inDegree(child.id), "predecessor");
-        run(addParentNode(createTarget.childId, createTarget.mode, title, detail, pos, draft.occurredAt).recipe);
+        run(addParentNode(createTarget.childId, createTarget.mode, title, detail, pos, draft.occurredAt, draft.targetDate).recipe);
       }
     } else if ("x" in createTarget) {
       // free node at the double-tapped position
       run(
-        addFreeNode(createTarget.mode, title, detail, { x: createTarget.x, y: createTarget.y }, draft.occurredAt)
+        addFreeNode(createTarget.mode, title, detail, { x: createTarget.x, y: createTarget.y }, draft.occurredAt, draft.targetDate)
           .recipe,
       );
     } else if ("parentId" in createTarget) {
@@ -791,7 +792,7 @@ export default function MapScreen() {
       if (!parent) return;
       if (!tryInsert(parent.id, "successor")) {
         const pos = childPosition(parent, outDegree(parent.id), "successor");
-        run(addChildNode(createTarget.parentId, createTarget.mode, title, detail, pos, draft.occurredAt).recipe);
+        run(addChildNode(createTarget.parentId, createTarget.mode, title, detail, pos, draft.occurredAt, draft.targetDate).recipe);
       }
     }
     setCreateTarget(null);
@@ -820,7 +821,7 @@ export default function MapScreen() {
     setZoomedIds(folded);
     setZoomEdgeIds([]);
     const newDoc = useDocStore.getState().doc;
-    camera.centerOnContent(deriveViewModel(newDoc, folded).nodes);
+    camera.centerOnContent(deriveViewModel(newDoc, folded, Date.now()).nodes);
     closeOverlays();
   };
 
@@ -950,7 +951,6 @@ export default function MapScreen() {
                 dimmed={dimmed}
                 liveBend={bendDrag && bendDrag.edgeId === e.id ? { x: bendDrag.x, y: bendDrag.y } : null}
                 sv={camera.sv}
-                reduceMotion={reduceMotion}
                 onPress={glyphHandlers.onEdgePress}
                 onLongPress={glyphHandlers.onEdgeLongPress}
               />
@@ -1020,7 +1020,6 @@ export default function MapScreen() {
             pos={pos}
             sv={camera.sv}
             settledCamScale={cam.scale}
-            reduceMotion={reduceMotion}
             selected={n.id === highlightedNodeId}
             dimmed={nodeDimmed}
             armed={dragArmedId === n.id}
@@ -1124,6 +1123,7 @@ export default function MapScreen() {
               setInfoTarget(null);
               setZoomEdgeIds([]);
             }}
+            now={nowTs}
           />
         </BottomPanel>
       )}
@@ -1144,10 +1144,6 @@ export default function MapScreen() {
             }}
             onCopy={() => {
               setClipboard(snapshotNode(doc, menuNode.id));
-              setMenuNodeId(null);
-            }}
-            onColor={(color) => {
-              run(setNodeColor(menuNode.id, color));
               setMenuNodeId(null);
             }}
             onRemove={() => removeNodeNow(menuNode)}
@@ -1199,7 +1195,7 @@ export default function MapScreen() {
       )}
 
       {/* double-tap edge menu: expand / summarize / copy / straighten /
-          color / remove */}
+          remove */}
       {menuEdge && menuEdgeFrom && menuEdgeTo && (
         <BottomPanel onHeight={setPanelHeight}>
           <EdgeMenu
@@ -1213,10 +1209,6 @@ export default function MapScreen() {
             }}
             onStraighten={() => {
               run(setEdgeBend(menuEdge.id, null));
-              setMenuEdgeId(null);
-            }}
-            onColor={(color) => {
-              run(setEdgeColor(menuEdge.id, color));
               setMenuEdgeId(null);
             }}
             onRemove={() => removeEdgeNow(menuEdge)}

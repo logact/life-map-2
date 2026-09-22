@@ -1,6 +1,6 @@
-// user-assignable colors for nodes and edges (Okabe-Ito colorblind-safe
-// palette); "#1a73e8" (route highlight) and near-black grays (selection)
-// are reserved and deliberately excluded
+// tag colors (Okabe-Ito colorblind-safe palette); "#1a73e8" (route
+// highlight) and near-black grays (selection) are reserved and deliberately
+// excluded
 export const PALETTE: { label: string; color: string }[] = [
   { label: "Orange", color: "#E69F00" },
   { label: "Sky blue", color: "#56B4E9" },

@@ -54,7 +54,6 @@ export interface NodeData {
   x: number;
   y: number;
   title: string;
-  color?: string;
   notes: NoteData[];
   // ids into the doc's tag registry
   tagIds?: Id[];
@@ -87,7 +86,6 @@ export interface EdgeData {
   // sub-structure. Array order is the sibling position (persisted).
   parentEdgeId: Id | null;
   childEdgeIds: Id[];
-  color?: string;
   // optional bend point in world coordinates; when set the edge renders as
   // two segments from -> bend -> to instead of a straight line
   bend?: { x: number; y: number };

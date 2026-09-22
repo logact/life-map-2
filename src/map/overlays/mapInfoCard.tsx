@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 
-import { Recipe, renameNode, setEdgeColor, setNodeDetail, setNodeTimes, StatusAction, transitionNodeStatus } from "@/domain/commands";
+import { Recipe, renameNode, setNodeDetail, setNodeRecurrence, setNodeTimes, StatusAction, transitionNodeStatus } from "@/domain/commands";
 import { EdgeData, edgeDepth, isGoal, isRecord, isTask, LifeMapDoc, NodeData } from "@/domain/doc";
+import { describeRecur, dueState, nextDue, prevDue, recurStats } from "@/domain/recur";
 import { edgeStatus, nodeStatus } from "@/domain/status";
-import { PALETTE } from "@/ui/palette";
 import { SheetButton } from "../components/sheets";
 import { styles } from "../styles";
 import { InfoTarget } from "../types";
-import { fmtDate } from "../utils";
+import { fmtDate, fmtRelative } from "../utils";
 import { DatePickerSheet } from "./datePicker";
+import { RecurSheet } from "./recurSheet";
 import { TagPickerSheet } from "./tagPicker";
 
 type EditField = "title" | "detail";
@@ -38,6 +39,9 @@ function NodeInfoCard(props: {
   doc: LifeMapDoc;
   run: (recipe: Recipe) => void;
   onOpenNotes: () => void;
+  // the screen's clock, captured outside render: feeds the recurring
+  // task's due-state text and the goal target's countdown
+  now: number;
 }) {
   const { node } = props;
   const [editing, setEditing] = useState<EditField | null>(null);
@@ -46,6 +50,7 @@ function NodeInfoCard(props: {
   // (captured in the tap handler — Date.now() is impure in render)
   const [dateField, setDateField] = useState<{ field: DateField; label: string; value: number } | null>(null);
   const [tagPickerOpen, setTagPickerOpen] = useState(false);
+  const [recurOpen, setRecurOpen] = useState(false);
   // tasks carry no detail; the goal's detail is its description, the
   // record's is its note (same mapping the old inspector used)
   const detailValue = isGoal(node)
@@ -55,17 +60,23 @@ function NodeInfoCard(props: {
       : null;
   // one button per legal transition, labeled by its target state (records
   // carry no status, so they get no row); a goal's status stays derived —
-  // its button toggles only the manual completion flag
-  const status = nodeStatus(props.doc, node.id);
+  // its button toggles only the manual completion flag. A recurring task
+  // logs occurrences instead of completing: Log done / Undo last log
+  const status = nodeStatus(props.doc, node.id, props.now);
   const transitions: { label: string; action: StatusAction }[] = [];
   if (isTask(node)) {
-    const s = node.status ?? "todo";
-    if (s === "todo") {
-      transitions.push({ label: "Start", action: "start" }, { label: "Mark done", action: "complete" });
-    } else if (s === "in-progress") {
-      transitions.push({ label: "Pause", action: "pause" }, { label: "Mark done", action: "complete" });
+    if (node.recur) {
+      transitions.push({ label: "Log done", action: "complete" });
+      if ((node.log ?? []).length > 0) transitions.push({ label: "Undo last log", action: "reopen" });
     } else {
-      transitions.push({ label: "Reopen", action: "reopen" });
+      const s = node.status ?? "todo";
+      if (s === "todo") {
+        transitions.push({ label: "Start", action: "start" }, { label: "Mark done", action: "complete" });
+      } else if (s === "in-progress") {
+        transitions.push({ label: "Pause", action: "pause" }, { label: "Mark done", action: "complete" });
+      } else {
+        transitions.push({ label: "Reopen", action: "reopen" });
+      }
     }
   } else if (isGoal(node)) {
     transitions.push(
@@ -74,6 +85,26 @@ function NodeInfoCard(props: {
         : { label: "Mark done", action: "complete" },
     );
   }
+
+  // a recurring habit replaces the bare status word with its due state,
+  // and adds a running count underneath
+  const due = isTask(node) && node.recur ? dueState(node, props.now) : null;
+  const recurText = (() => {
+    if (!node.recur || !due) return "";
+    switch (due) {
+      case "done-today":
+        return "Done today ✓";
+      case "due":
+        return "Due today";
+      case "overdue": {
+        const missed = prevDue(node.recur, props.now);
+        return missed ? `Overdue since ${fmtDate(missed)}` : "Overdue";
+      }
+      default:
+        return `Next ${fmtDate(nextDue(node.recur, props.now))}`;
+    }
+  })();
+  const stats = node.recur ? recurStats(node.recur, node.log ?? [], props.now) : null;
 
   const commit = (field: EditField, text: string) => {
     if (field === "title") {
@@ -222,15 +253,34 @@ function NodeInfoCard(props: {
         >
           <Text style={styles.dateRowLabel}>{r.label}</Text>
           <Text style={r.value !== undefined ? styles.dateRowValue : styles.infoDetailPlaceholder}>
-            {r.value !== undefined ? fmtDate(r.value) : r.placeholder}
+            {r.value !== undefined
+              ? r.field === "targetDate"
+                ? `${fmtDate(r.value)} · ${fmtRelative(r.value, props.now)}`
+                : fmtDate(r.value)
+              : r.placeholder}
           </Text>
         </Pressable>
       ))}
+      {/* recurrence: every task carries a Repeat row (synthetic midpoints
+          excepted — they are structure, not real tasks) */}
+      {isTask(node) && !node.synthetic && (
+        <Pressable
+          style={styles.dateRow}
+          onPress={() => {
+            endEdit();
+            setRecurOpen(true);
+          }}
+        >
+          <Text style={styles.dateRowLabel}>Repeat</Text>
+          <Text style={node.recur ? styles.dateRowValue : styles.infoDetailPlaceholder}>
+            {node.recur ? describeRecur(node.recur) : "Not repeating"}
+          </Text>
+        </Pressable>
+      )}
       {status !== null && (
         <View style={styles.infoStatusRow}>
           <Text style={styles.infoStatusText}>
-            Status: {status}
-            {isGoal(node) && node.completedAt ? " (manual)" : ""}
+            {due ? recurText : `Status: ${status}${isGoal(node) && node.completedAt ? " (manual)" : ""}`}
           </Text>
           {transitions.map((t) => (
             <SheetButton
@@ -243,6 +293,11 @@ function NodeInfoCard(props: {
             />
           ))}
         </View>
+      )}
+      {stats && stats.total > 0 && (
+        <Text style={styles.infoMeta}>
+          {stats.total} logged{stats.streak > 0 ? ` · streak ${stats.streak}` : ""}
+        </Text>
       )}
       {detailValue !== null &&
         (editing === "detail" ? (
@@ -320,27 +375,39 @@ function NodeInfoCard(props: {
           onClose={() => setTagPickerOpen(false)}
         />
       )}
+      {/* recurrence rule editor; Save/Clear go through one undoable
+          command each */}
+      {recurOpen && (
+        <RecurSheet
+          rule={node.recur ?? null}
+          now={props.now}
+          onSave={(rule) => {
+            props.run(setNodeRecurrence(node.id, rule));
+            setRecurOpen(false);
+          }}
+          onClear={() => props.run(setNodeRecurrence(node.id, null))}
+          onClose={() => setRecurOpen(false)}
+        />
+      )}
     </View>
   );
 }
 
-// single-tap edge card: layer/status facts, non-gesture zoom controls
-// (one level per tap, the same operations as the pinch steps), and an
-// inline color row — a swatch tap recolors the edge immediately
-// (undoable, no confirm — the same semantics as the edge menu)
+// single-tap edge card: layer/status facts plus non-gesture zoom controls
+// (one level per tap, the same operations as the pinch steps)
 function EdgeInfoCard(props: {
   edge: EdgeData;
   doc: LifeMapDoc;
   zoomedIds: ReadonlySet<string>;
-  run: (recipe: Recipe) => void;
   onZoomStep: (deeper: boolean) => void;
   onClose: () => void;
+  now: number;
 }) {
   const { edge, doc } = props;
   const from = doc.nodes[edge.fromId];
   const to = doc.nodes[edge.toId];
   if (!from || !to) return null;
-  const s = edgeStatus(doc, edge.id);
+  const s = edgeStatus(doc, edge.id, props.now);
   const layer = edgeDepth(doc, edge.id);
   const lines = [s ? `Layer ${layer} · ${s}` : `Layer ${layer}`];
   if (edge.childEdgeIds.length > 0) {
@@ -377,33 +444,12 @@ function EdgeInfoCard(props: {
           ))}
         </View>
       )}
-      <View style={styles.swatchRow}>
-        <Pressable
-          accessibilityLabel="Default color"
-          onPress={() => props.run(setEdgeColor(edge.id, undefined))}
-          style={[styles.swatchDefault, !edge.color && styles.swatchSelected]}
-        >
-          <Text style={styles.swatchDefaultText}>∅</Text>
-        </Pressable>
-        {PALETTE.map((c) => (
-          <Pressable
-            key={c.color}
-            accessibilityLabel={c.label}
-            onPress={() => props.run(setEdgeColor(edge.id, c.color))}
-            style={[
-              styles.swatch,
-              { backgroundColor: c.color },
-              edge.color === c.color && styles.swatchSelected,
-            ]}
-          />
-        ))}
-      </View>
     </View>
   );
 }
 
 // single-tap info card: the node card (inline title/detail editing plus
-// the notes peek) or the edge card (zoom controls + inline color)
+// the notes peek) or the edge card (facts + zoom controls)
 export function MapInfoCard(props: {
   infoTarget: InfoTarget;
   doc: LifeMapDoc;
@@ -413,6 +459,7 @@ export function MapInfoCard(props: {
   onOpenNotes: (nodeId: string) => void;
   onZoomStep: (deeper: boolean) => void;
   onCloseEdge: () => void;
+  now: number;
 }) {
   const { infoTarget, doc } = props;
   if (infoTarget.kind === "node") {
@@ -427,6 +474,7 @@ export function MapInfoCard(props: {
         doc={doc}
         run={props.run}
         onOpenNotes={() => props.onOpenNotes(node.id)}
+        now={props.now}
       />
     );
   }
@@ -437,9 +485,9 @@ export function MapInfoCard(props: {
       edge={edge}
       doc={doc}
       zoomedIds={props.zoomedIds}
-      run={props.run}
       onZoomStep={props.onZoomStep}
       onClose={props.onCloseEdge}
+      now={props.now}
     />
   );
 }

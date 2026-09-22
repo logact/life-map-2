@@ -1,46 +1,21 @@
-import { memo, useEffect } from "react";
+import { memo } from "react";
 import { Circle, G, Line, Polygon, Polyline } from "react-native-svg";
-import Animated, {
-  Easing,
-  useAnimatedProps,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from "react-native-reanimated";
+import Animated, { useAnimatedProps } from "react-native-reanimated";
 
-import { ACCENT, INK } from "@/ui/theme";
+import { ACCENT, INK, STATUS_COLOR } from "@/ui/theme";
 import { CameraSv } from "../hooks/useMapCamera";
 import { EdgeViewModel, NodeViewModel } from "../types";
 import { nodeSize, splitPath } from "../utils";
 
-const AnimatedPolyline = Animated.createAnimatedComponent(Polyline);
 const AnimatedPolygon = Animated.createAnimatedComponent(Polygon);
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
-// in-progress edge: dotted line whose dashes march toward the target node
-function MarchingPolyline(props: { points: string; color: string; width: number }) {
-  const offset = useSharedValue(0);
-  useEffect(() => {
-    // dash period of "2 8" is 10, so -10 loops seamlessly; negative moves
-    // the pattern toward the target end of the path
-    offset.value = withRepeat(withTiming(-10, { duration: 800, easing: Easing.linear }), -1, false);
-  }, [offset]);
-  const animatedProps = useAnimatedProps(() => ({ strokeDashoffset: offset.value }));
-  return (
-    <AnimatedPolyline
-      points={props.points}
-      fill="none"
-      stroke={props.color}
-      strokeWidth={props.width}
-      strokeDasharray="2 8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      // the edge layer scales with the fit-zoom; keep the stroke and its
-      // dash pattern at a constant screen size
-      vectorEffect="non-scaling-stroke"
-      animatedProps={animatedProps}
-    />
-  );
+// the neutral road color: edges with no status (they touch a record)
+const EDGE_NEUTRAL = "#aeaeb4";
+
+// status rides on the stroke color; record-touching roads stay neutral
+function statusStroke(status: EdgeViewModel["status"]): string {
+  return status ? STATUS_COLOR[status] : EDGE_NEUTRAL;
 }
 
 // a circle whose radius counter-scales with the live camera on the UI
@@ -96,7 +71,6 @@ export const EdgeGlyph = memo(function EdgeGlyph(props: {
   // the live camera: arrowheads and markers counter-scale on the UI
   // thread, so camera moves never re-render the glyph
   sv: CameraSv;
-  reduceMotion: boolean;
   onPress: (id: string) => void;
   onLongPress: (id: string) => void;
 }) {
@@ -163,47 +137,37 @@ export const EdgeGlyph = memo(function EdgeGlyph(props: {
   const { segments, breakpoints } = lineVisible
     ? splitPath(trimmedPath, Math.max(1, e.hiddenCount))
     : { segments: [], breakpoints: [] };
-  // each segment of a collapsed edge takes its child edge's own
-  // color and status; a leaf edge takes its own color
-  const segStyles = segments.map((_, i) => {
-    if (overridden) return { color, status: e.status };
-    if (e.hiddenCount > 0) {
-      const s = e.segments?.[i];
-      return { color: s?.color ?? "#aeaeb4", status: s?.status ?? null };
-    }
-    return { color: e.color ?? "#aeaeb4", status: e.status };
+  // each segment of a collapsed edge takes its child edge's status color;
+  // a leaf edge takes its own
+  const segColors = segments.map((_, i) => {
+    if (overridden) return color;
+    if (e.hiddenCount > 0) return statusStroke(e.segments?.[i]?.status ?? null);
+    return statusStroke(e.status);
   });
-  const lastSeg = segStyles[segStyles.length - 1] ?? { color: e.color ?? "#aeaeb4", status: e.status };
+  const lastColor = segColors[segColors.length - 1] ?? statusStroke(e.status);
   return (
     <G opacity={props.dimmed ? 0.15 : 1}>
-      {/* line style carries the edge's frontier status:
-          todo=dashed, in-progress=dotted marching toward the
-          target, done/records=solid */}
+      {/* the stroke color carries the edge's frontier status:
+          todo gray, in-progress orange, done green; record-touching
+          roads stay neutral */}
       {segments.map((pts, i) => {
         const points = pts.map((p) => `${p.x},${p.y}`).join(" ");
-        const seg = segStyles[i] ?? lastSeg;
-        const segDash =
-          seg.status === "todo" ? "6 6" : seg.status === "in-progress" ? "2 8" : undefined;
-        return seg.status === "in-progress" && !props.reduceMotion ? (
-          <MarchingPolyline key={i} points={points} color={seg.color} width={edgeWidth} />
-        ) : (
+        return (
           <Polyline
             key={i}
             points={points}
             fill="none"
-            stroke={seg.color}
+            stroke={segColors[i] ?? lastColor}
             strokeWidth={edgeWidth}
-            strokeDasharray={segDash}
             strokeLinecap="round"
             strokeLinejoin="round"
             vectorEffect="non-scaling-stroke"
           />
         );
       })}
-      <AnimatedPolygon points="" fill={lastSeg.color} animatedProps={arrowProps} />
-      {/* solid marker at each breakpoint: the bare gap blends into
-          the dash pattern of todo/in-progress edges, so the break
-          needs its own mark */}
+      <AnimatedPolygon points="" fill={lastColor} animatedProps={arrowProps} />
+      {/* solid marker at each breakpoint: without it the bare gap would
+          read as an accidental break in the road */}
       {breakpoints.map((p, i) => (
         <CounterScaledCircle
           key={i}
@@ -211,7 +175,7 @@ export const EdgeGlyph = memo(function EdgeGlyph(props: {
           cx={p.x}
           cy={p.y}
           r={edgeWidth + 1}
-          fill={(segStyles[i + 1] ?? lastSeg).color}
+          fill={segColors[i + 1] ?? lastColor}
         />
       ))}
       {/* wide invisible hit area so thin lines stay tappable at

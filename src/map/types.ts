@@ -10,7 +10,8 @@ export interface NodeViewModel {
   title: string;
   kind: NodeKind;
   status?: Status;
-  color?: string;
+  // a recurring task shows the habit badge on its pin
+  recurring?: boolean;
 }
 
 export interface EdgeViewModel {
@@ -20,12 +21,11 @@ export interface EdgeViewModel {
   layer: number;
   status: Status | null;
   bend?: { x: number; y: number };
-  color?: string;
   // hidden sub-edges of a collapsed edge; the line is broken into this
   // many equal-length segments
   hiddenCount: number;
-  // one entry per direct child edge, in order: its own color and status
-  segments?: { color?: string; status: Status | null }[];
+  // one entry per direct child edge, in order: its status
+  segments?: { status: Status | null }[];
 }
 
 export interface MapViewModel {

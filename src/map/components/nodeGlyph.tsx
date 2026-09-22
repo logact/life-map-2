@@ -1,15 +1,9 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useLayoutEffect, useRef, useState } from "react";
 import { PanResponder, Pressable, Text, View } from "react-native";
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from "react-native-reanimated";
+import Animated, { useAnimatedStyle } from "react-native-reanimated";
 
 import { NodeKind } from "@/domain/doc";
-import { INK } from "@/ui/theme";
+import { STATUS_COLOR } from "@/ui/theme";
 import { LONG_PRESS_MS } from "../constants";
 import { CameraSv } from "../hooks/useMapCamera";
 import { styles } from "../styles";
@@ -45,41 +39,6 @@ function useNodeRadiusStyle(sv: CameraSv, kind: NodeKind) {
   });
 }
 
-// in-progress node outline: a dotted ring breathing between 0.4 and 1.0
-// opacity, drawn inside the node wrapper (behind the pin) so it follows
-// the camera on the UI thread like everything else
-function PulsingRing(props: { sv: CameraSv; kind: NodeKind; color: string }) {
-  const breath = useSharedValue(1);
-  useEffect(() => {
-    breath.value = withRepeat(
-      withTiming(0.4, { duration: 900, easing: Easing.inOut(Easing.ease) }),
-      -1,
-      true,
-    );
-  }, [breath]);
-  const radiusStyle = useNodeRadiusStyle(props.sv, props.kind);
-  const animated = useAnimatedStyle(() => ({ opacity: breath.value }));
-  return (
-    <Animated.View
-      pointerEvents="none"
-      style={[
-        {
-          position: "absolute",
-          left: 0,
-          top: 0,
-          right: 0,
-          bottom: 0,
-          borderWidth: 2,
-          borderStyle: "dotted",
-          borderColor: props.color,
-        },
-        radiusStyle,
-        animated,
-      ]}
-    />
-  );
-}
-
 // one node on the canvas: tap shows info / double-tap opens its menu
 // (handled by the parent), long-press arms it so a following movement
 // becomes a drag that repositions it in the domain. While focused it also
@@ -95,12 +54,10 @@ function DraggableNode(props: {
   // for hitSlop only (touch targets don't need 60fps): the settled mirror
   settledCamScale: number;
   selected: boolean;
-  pulsing: boolean;
   dimmed: boolean;
   armed: boolean;
   // focused and not armed for moving: the connect handle is showing
   connectable: boolean;
-  borderStyle: "dashed" | "dotted" | "solid";
   onPress: (id: string) => void;
   onArm: (id: string) => void;
   onDragStart: (id: string, x: number, y: number) => void;
@@ -215,9 +172,6 @@ function DraggableNode(props: {
         camStyle,
       ]}
     >
-      {props.pulsing && !props.dimmed && (
-        <PulsingRing sv={props.sv} kind={props.n.kind} color={INK.secondary} />
-      )}
       <AnimatedPressable
         onPress={() => props.onPress(props.n.id)}
         onLongPress={() => props.onArm(props.n.id)}
@@ -225,16 +179,12 @@ function DraggableNode(props: {
         hitSlop={hitSlop}
         style={[
           styles.node,
-          { width: "100%", height: "100%", borderStyle: props.borderStyle },
+          { width: "100%", height: "100%" },
           radiusStyle,
           props.n.kind === "record" && styles.nodeRecord,
-          // todo: dashed tertiary outline and title (grayscale status)
-          props.n.status === "todo" && styles.nodeTodo,
-          // user color: colored border over a faint fill; selection,
-          // pulsing and armed styles below still win over it
-          props.n.color && { borderColor: props.n.color, backgroundColor: props.n.color + "33" },
-          // the pulsing ring draws the border; keep the base invisible
-          props.pulsing && styles.nodePulsingBase,
+          // status rides on the outline color; the selection and armed
+          // styles below still win over it
+          props.n.status && { borderColor: STATUS_COLOR[props.n.status] },
           props.selected && styles.nodeSelected,
           props.armed && styles.nodeArmed,
         ]}
@@ -244,7 +194,6 @@ function DraggableNode(props: {
             style={[
               styles.nodeTitle,
               props.n.kind === "record" && styles.nodeTitleRecord,
-              props.n.status === "todo" && styles.nodeTitleTodo,
               props.n.status === "done" && styles.nodeTitleDone,
             ]}
           >
@@ -252,6 +201,17 @@ function DraggableNode(props: {
           </Text>
         </Animated.View>
       </AnimatedPressable>
+      {/* recurring habit badge: rides the pin's corner like the connect
+          handle and fades out with the title; full ink while the habit
+          asks for attention (due/overdue reads as todo) */}
+      {props.n.recurring && (
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.recurBadge, props.n.status === "todo" && styles.recurBadgeDue, titleStyle]}
+        >
+          <Text style={[styles.recurBadgeText, props.n.status === "todo" && styles.recurBadgeTextDue]}>↻</Text>
+        </Animated.View>
+      )}
       {/* connect handle: rides the node's right edge; a sibling of the
           Pressable so its responder never fights the tap/long-press */}
       {props.connectable && (
@@ -265,8 +225,8 @@ function DraggableNode(props: {
   );
 }
 
-// one visible node with its status ring: derives the outline style from
-// status, then renders the drag/press wrapper.
+// one visible node: the drag/press wrapper. Status rides on the outline
+// color, derived inline in DraggableNode.
 // Memoized — see EdgeGlyph for why a shallow compare is enough
 export const CanvasNode = memo(function CanvasNode(props: {
   n: NodeViewModel;
@@ -274,7 +234,6 @@ export const CanvasNode = memo(function CanvasNode(props: {
   pos: NodeViewModel;
   sv: CameraSv;
   settledCamScale: number;
-  reduceMotion: boolean;
   selected: boolean;
   dimmed: boolean;
   armed: boolean;
@@ -289,23 +248,16 @@ export const CanvasNode = memo(function CanvasNode(props: {
   onConnectEnd: (id: string, pageX: number, pageY: number) => void;
 }) {
   const { n, pos } = props;
-  const pulsing = n.status === "in-progress" && !props.reduceMotion;
-  // outline style carries status: todo=dashed, in-progress=dotted
-  // (breathing ring when motion is allowed), done=solid
-  const borderStyle: "dashed" | "dotted" | "solid" =
-    n.status === "todo" ? "dashed" : n.status === "in-progress" ? "dotted" : "solid";
   return (
     <DraggableNode
       n={n}
       pos={pos}
       sv={props.sv}
       settledCamScale={props.settledCamScale}
-      pulsing={pulsing}
       selected={props.selected}
       dimmed={props.dimmed}
       armed={props.armed}
       connectable={props.connectable}
-      borderStyle={borderStyle}
       onPress={props.onPress}
       onArm={props.onArm}
       onDragStart={props.onDragStart}

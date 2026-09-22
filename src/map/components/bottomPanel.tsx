@@ -36,9 +36,8 @@ export function BottomPanel(props: {
 export interface MenuItem {
   key: string;
   label: string;
-  // small leading glyph (the create pair's direction icons) or a color dot
+  // small leading glyph (the create pair's direction icons)
   glyph?: string;
-  dot?: string;
   // destructive items confirm in place: the first tap arms the row ("tap
   // again"), the second fires onPress; any other press disarms it
   destructive?: boolean;
@@ -73,11 +72,7 @@ export function MenuCard(props: { title?: string; entries: MenuEntry[] }) {
               entry.onPress();
             }}
           >
-            {entry.dot ? (
-              <View style={[styles.menuDot, { backgroundColor: entry.dot }]} />
-            ) : entry.glyph ? (
-              <Text style={styles.menuGlyph}>{entry.glyph}</Text>
-            ) : null}
+            {entry.glyph ? <Text style={styles.menuGlyph}>{entry.glyph}</Text> : null}
             <Text
               style={[
                 styles.menuRowText,

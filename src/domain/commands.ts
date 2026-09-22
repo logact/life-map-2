@@ -223,20 +223,6 @@ export function setNodeDetail(id: Id, detail: string): Recipe {
   };
 }
 
-export function setNodeColor(id: Id, color?: string): Recipe {
-  return (draft) => {
-    const node = draft.nodes[id];
-    if (node) node.color = color;
-  };
-}
-
-export function setEdgeColor(id: Id, color?: string): Recipe {
-  return (draft) => {
-    const edge = draft.edges[id];
-    if (edge) edge.color = color;
-  };
-}
-
 // null clears the bend ("straighten")
 export function setEdgeBend(id: Id, bend: { x: number; y: number } | null): Recipe {
   return (draft) => {
@@ -352,10 +338,10 @@ export function removeEdge(id: Id): Recipe {
 // ---------- structure ----------
 
 // insert a REAL node mid-road: A -> B becomes A -> N -> B. The two halves
-// take over the old edge's slot and parent (same layer), inherit its color,
-// and the old edge's sub-road (if any) rides with the half that still
-// travels to the original destination. Records can't be inserted: they are
-// leaves, and a mid-road record would have to point onward.
+// take over the old edge's slot and parent (same layer), and the old
+// edge's sub-road (if any) rides with the half that still travels to the
+// original destination. Records can't be inserted: they are leaves, and a
+// mid-road record would have to point onward.
 export function insertNodeIntoEdge(
   edgeId: Id,
   kind: NodeKind,
@@ -380,10 +366,8 @@ export function insertNodeIntoEdge(
       if (from.x === node.x && from.y === node.y) node.y -= 60;
       e1.fromId = edge.fromId;
       e1.parentEdgeId = edge.parentEdgeId;
-      e1.color = edge.color;
       e2.toId = edge.toId;
       e2.parentEdgeId = edge.parentEdgeId;
-      e2.color = edge.color;
       e2.childEdgeIds = edge.childEdgeIds;
       for (const childId of edge.childEdgeIds) {
         const child = draft.edges[childId];
@@ -701,7 +685,6 @@ export function pastePayload(payload: ClipboardPayload, at: { x: number; y: numb
   for (const n of payload.nodes) {
     const node = makeNodeOfKind(n.kind, at.x + n.rx, at.y + n.ry, n.title);
     node.id = newId();
-    node.color = n.color;
     node.notes = n.notes.map((note) => ({
       id: newId(),
       text: note.text,
@@ -745,7 +728,6 @@ export function pastePayload(payload: ClipboardPayload, at: { x: number; y: numb
     const toId = nodeIdByKey.get(e.toKey);
     if (!fromId || !toId) return;
     const edge = makeEdgeData(fromId, toId, parentId);
-    edge.color = e.color;
     if (e.bend) edge.bend = { x: at.x + e.bend.rx, y: at.y + e.bend.ry };
     preparedEdges.push(edge);
     if (!parentId) rootEdgeIds.push(edge.id);

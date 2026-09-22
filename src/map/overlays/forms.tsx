@@ -10,10 +10,16 @@ export interface TextDraft {
   detail: string;
   // a record's occurred-at (backdating); ignored by other kinds
   occurredAt?: number;
+  // a goal's target date (optional); ignored by other kinds
+  targetDate?: number;
 }
 
-// create form: goal (title + description), task (title),
-// record (title + note + occurred date). The record's date row swaps the
+// the date a form row is editing: the record's occurred-at or the goal's
+// target date
+type PickingField = "occurredAt" | "targetDate";
+
+// create form: goal (title + description + optional target date), task
+// (title), record (title + note + occurred date). A date row swaps the
 // sheet's content to the calendar in place — a stacked Modal would not
 // reliably come to the front on iOS
 export function CreateNodeForm(props: {
@@ -24,10 +30,11 @@ export function CreateNodeForm(props: {
   onClose: () => void;
 }) {
   const { mode, draft } = props;
-  const [pickingDate, setPickingDate] = useState(false);
+  const [picking, setPicking] = useState<PickingField | null>(null);
   // while the calendar is up, tap-away / back returns to the form instead
   // of discarding the draft
-  const dismiss = pickingDate ? () => setPickingDate(false) : props.onClose;
+  const dismiss = picking ? () => setPicking(null) : props.onClose;
+  const pickingValue = picking ? (draft[picking] ?? null) : null;
   return (
     <Modal visible transparent animationType="fade" onRequestClose={dismiss}>
       <KeyboardAvoidingView
@@ -38,26 +45,42 @@ export function CreateNodeForm(props: {
         <View style={styles.formSheet}>
           <View style={styles.sheetHandle} />
           <Text style={styles.formTitle}>
-            {pickingDate && draft.occurredAt !== undefined
+            {picking === "occurredAt"
               ? "Occurred"
-              : mode === "goal"
-                ? "New goal"
-                : mode === "task"
-                  ? "New task"
-                  : "New record"}
+              : picking === "targetDate"
+                ? "Target"
+                : mode === "goal"
+                  ? "New goal"
+                  : mode === "task"
+                    ? "New task"
+                    : "New record"}
           </Text>
-          {pickingDate && draft.occurredAt !== undefined ? (
+          {picking && pickingValue !== null ? (
             <>
               <DatePickerBody
-                value={draft.occurredAt}
-                onChange={(ms) => props.onDraftChange({ ...draft, occurredAt: ms })}
+                value={pickingValue}
+                onChange={(ms) => props.onDraftChange({ ...draft, [picking]: ms })}
               />
-              <Pressable
-                style={({ pressed }) => [styles.formSave, pressed && { opacity: 0.6 }]}
-                onPress={() => setPickingDate(false)}
-              >
-                <Text style={styles.formSaveText}>Done</Text>
-              </Pressable>
+              <View style={styles.formButtons}>
+                {picking === "targetDate" && (
+                  <Pressable
+                    style={({ pressed }) => [styles.formCancel, pressed && { opacity: 0.6 }]}
+                    onPress={() => {
+                      props.onDraftChange({ ...draft, targetDate: undefined });
+                      setPicking(null);
+                    }}
+                  >
+                    <Text style={styles.formCancelText}>Clear</Text>
+                  </Pressable>
+                )}
+                <View style={{ flex: 1 }} />
+                <Pressable
+                  style={({ pressed }) => [styles.formSave, pressed && { opacity: 0.6 }]}
+                  onPress={() => setPicking(null)}
+                >
+                  <Text style={styles.formSaveText}>Done</Text>
+                </Pressable>
+              </View>
             </>
           ) : (
             <>
@@ -82,11 +105,30 @@ export function CreateNodeForm(props: {
                 />
               )}
               {/* the caller seeds occurredAt when the form opens for a
-                  record; the row is the date's edit affordance */}
+                  record; the goal's target date stays unset until picked —
+                  each row is the date's edit affordance */}
               {mode === "record" && draft.occurredAt !== undefined && (
-                <Pressable style={styles.dateRow} onPress={() => setPickingDate(true)}>
+                <Pressable style={styles.dateRow} onPress={() => setPicking("occurredAt")}>
                   <Text style={styles.dateRowLabel}>Occurred</Text>
                   <Text style={styles.dateRowValue}>{fmtDate(draft.occurredAt)}</Text>
+                </Pressable>
+              )}
+              {mode === "goal" && (
+                <Pressable
+                  style={styles.dateRow}
+                  onPress={() => {
+                    // the calendar needs a starting value; capture it in the
+                    // press handler (Date.now() is impure in render)
+                    if (draft.targetDate === undefined) {
+                      props.onDraftChange({ ...draft, targetDate: Date.now() });
+                    }
+                    setPicking("targetDate");
+                  }}
+                >
+                  <Text style={styles.dateRowLabel}>Target</Text>
+                  <Text style={draft.targetDate !== undefined ? styles.dateRowValue : styles.infoDetailPlaceholder}>
+                    {draft.targetDate !== undefined ? fmtDate(draft.targetDate) : "Set target date…"}
+                  </Text>
                 </Pressable>
               )}
               <View style={styles.formButtons}>

@@ -4,7 +4,7 @@ import { ACCENT, BACKDROP, CANVAS_BG, INK, SHADOW } from "@/ui/theme";
 import { NODE_SIZE } from "./constants";
 
 export const styles = StyleSheet.create({
-  // refined grayscale: kind rides on shape, status on outline style,
+  // refined grayscale: kind rides on shape, status on outline color,
   // selection on border weight; tokens come from src/ui/theme.ts
   container: {
     flex: 1,
@@ -37,15 +37,6 @@ export const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
-  },
-  nodePulsingBase: {
-    borderColor: "transparent",
-  },
-  nodeTodo: {
-    borderColor: INK.tertiary,
-  },
-  nodeTitleTodo: {
-    color: INK.tertiary,
   },
   nodeTitleDone: {
     textDecorationLine: "line-through",
@@ -437,8 +428,8 @@ export const styles = StyleSheet.create({
     gap: 12,
     marginTop: 4,
   },
-  // inline color editing on the edge info card: palette swatches plus a
-  // default (∅) entry; the active color carries a dark ring
+  // tag color editing in the tag picker: palette swatches; the active
+  // color carries a dark ring
   swatchRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -455,19 +446,6 @@ export const styles = StyleSheet.create({
   },
   swatchSelected: {
     borderColor: INK.primary,
-  },
-  swatchDefault: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: INK.subtle,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  swatchDefaultText: {
-    fontSize: 12,
-    color: INK.secondary,
   },
   // status row on the node info card: current status plus one button per
   // legal transition
@@ -637,6 +615,33 @@ export const styles = StyleSheet.create({
     borderColor: "#ffffff",
     ...SHADOW.card,
   },
+  // recurring habit badge on a task pin: a small ↻ medallion at the
+  // corner; full ink while the habit asks for attention (due/overdue)
+  recurBadge: {
+    position: "absolute",
+    right: -5,
+    top: -5,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: INK.subtle,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  recurBadgeDue: {
+    borderColor: INK.primary,
+  },
+  recurBadgeText: {
+    fontSize: 9,
+    lineHeight: 10,
+    color: INK.tertiary,
+  },
+  recurBadgeTextDue: {
+    color: INK.primary,
+    fontWeight: "700",
+  },
   // tappable date row on the info card / forms: a muted label and the
   // value in ink, reading like the meta lines but inviting a tap
   dateRow: {
@@ -750,6 +755,47 @@ export const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
     color: INK.secondary,
+  },
+  // recurrence editor: selectable chips (freq, weekdays) — same idiom as
+  // the tag chips, with the selected one filled — and the interval stepper
+  recurChipRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+    marginVertical: 6,
+  },
+  recurChip: {
+    borderWidth: 1,
+    borderColor: INK.subtle,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  recurChipSelected: {
+    backgroundColor: INK.primary,
+    borderColor: INK.primary,
+  },
+  recurChipText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: INK.primary,
+  },
+  recurChipTextSelected: {
+    color: "#ffffff",
+  },
+  recurStepperRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginVertical: 4,
+  },
+  recurStepperValue: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: INK.primary,
+    minWidth: 24,
+    textAlign: "center",
   },
   // tag picker sheet: one row per registry tag (dot, name, assignment
   // check, edit affordance); the edited row swaps for an inline editor

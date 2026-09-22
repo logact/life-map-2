@@ -8,7 +8,7 @@ import { EdgeData, Id, LifeMapDoc, NodeData, NodeKind } from "./doc";
 // tree — so there is exactly one paste path (commands.pastePayload).
 //
 // Copy rules:
-// - node: payload only (title/kind/color/notes/kind data), no adjacency
+// - node: payload only (title/kind/notes/kind data), no adjacency
 // - edge/road: deep copy — endpoints and the whole child-edge subtree come
 //   along; endpoint copies are trimmed (their outside edges are not)
 // - shared nodes/edges are captured once via an id -> key memo, so a diamond
@@ -19,7 +19,6 @@ export interface ClipboardNodeData {
   key: string;
   kind: NodeKind;
   title: string;
-  color?: string;
   // kind-specific fields, same shape as the store's node `data` blob
   data: Record<string, unknown>;
   notes: { text: string; createdAt: number; updatedAt: number }[];
@@ -31,7 +30,6 @@ export interface ClipboardNodeData {
 export interface ClipboardEdgeData {
   fromKey: string;
   toKey: string;
-  color?: string;
   bend?: { rx: number; ry: number };
   children: ClipboardEdgeData[];
 }
@@ -96,7 +94,6 @@ function captureNode(cap: Capture, nodeId: Id): string {
     key,
     kind: node.kind,
     title: node.title,
-    color: node.color,
     data,
     notes: node.notes.map((n) => ({ text: n.text, createdAt: n.createdAt, updatedAt: n.updatedAt })),
     rx: node.x,
@@ -109,7 +106,6 @@ function captureEdge(cap: Capture, edge: EdgeData): ClipboardEdgeData {
   return {
     fromKey: captureNode(cap, edge.fromId),
     toKey: captureNode(cap, edge.toId),
-    color: edge.color,
     bend: edge.bend ? { rx: edge.bend.x, ry: edge.bend.y } : undefined,
     children: edge.childEdgeIds
       .map((id) => cap.doc.edges[id])

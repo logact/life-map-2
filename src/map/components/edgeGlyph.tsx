@@ -56,8 +56,10 @@ function CounterScaledCircle(props: {
   stroke?: string;
   strokeWidth?: number;
 }) {
+  // capture only shareable values in the worklet (see CameraG)
+  const { sv, r } = props;
   const animatedProps = useAnimatedProps(() => ({
-    r: props.r / (props.sv.baseScale.value * props.sv.userScale.value),
+    r: r / (sv.baseScale.value * sv.userScale.value),
   }));
   return (
     <AnimatedCircle
@@ -98,7 +100,7 @@ export const EdgeGlyph = memo(function EdgeGlyph(props: {
   onPress: (id: string) => void;
   onLongPress: (id: string) => void;
 }) {
-  const { e, a, b } = props;
+  const { e, a, b, sv } = props;
   // selection, spotlight and route preview override everything: the
   // whole edge draws in the single override color, no per-segment colors
   const overridden = props.onRoute || props.selected || props.related;
@@ -140,7 +142,7 @@ export const EdgeGlyph = memo(function EdgeGlyph(props: {
   // size at any zoom (evaluated on the UI thread; the tip and direction
   // are render-time constants captured by the worklet)
   const arrowProps = useAnimatedProps(() => {
-    const camScale = props.sv.baseScale.value * props.sv.userScale.value;
+    const camScale = sv.baseScale.value * sv.userScale.value;
     const wing = 5 / camScale;
     const back = 11 / camScale;
     const baseX = tipX - ux * back;

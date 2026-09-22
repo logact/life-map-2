@@ -192,11 +192,15 @@ function DraggableNode(props: {
   const radiusStyle = useNodeRadiusStyle(props.sv, props.n.kind);
   // the title tracks the pin: scaled down with the camera (floored at 6px
   // worth of shrink) and fading out when the node becomes a dot. A
-  // transform (not a fontSize animation) keeps it on the UI thread
+  // transform (not a fontSize animation) keeps it on the UI thread.
+  // Destructure first: the worklet must capture only shareable values
+  // (see CameraG)
+  const sv = props.sv;
+  const kind = props.n.kind;
   const titleStyle = useAnimatedStyle(() => {
-    const camScale = props.sv.baseScale.value * props.sv.userScale.value;
+    const camScale = sv.baseScale.value * sv.userScale.value;
     const shrink = Math.min(1, camScale);
-    const size = nodeSize(props.n.kind) * shrink;
+    const size = nodeSize(kind) * shrink;
     return {
       opacity: size >= 18 ? 1 : 0,
       transform: [{ scale: Math.max(6 / baseFont, shrink) }],

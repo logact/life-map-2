@@ -11,18 +11,18 @@ const AnimatedG = Animated.createAnimatedComponent(G);
 // follows pan/pinch without a single React render. The formula mirrors
 // composedCam (base × pinch zoom, pan on top)
 export function CameraG(props: { sv: CameraSv; children: ReactNode }) {
+  // the worklet must capture ONLY the shareable sv bundle: closing over
+  // `props` would pull children (FiberNodes) onto the UI thread, which
+  // the worklet runtime cannot copy
+  const { sv, children } = props;
   const animatedProps = useAnimatedProps(() => {
-    const us = props.sv.userScale.value;
-    const scale = props.sv.baseScale.value * us;
+    const us = sv.userScale.value;
+    const scale = sv.baseScale.value * us;
     const cx =
-      (props.sv.screenW.value / 2) * (1 - us) +
-      us * props.sv.baseX.value +
-      props.sv.panX.value;
+      (sv.screenW.value / 2) * (1 - us) + us * sv.baseX.value + sv.panX.value;
     const cy =
-      (props.sv.screenH.value / 2) * (1 - us) +
-      us * props.sv.baseY.value +
-      props.sv.panY.value;
+      (sv.screenH.value / 2) * (1 - us) + us * sv.baseY.value + sv.panY.value;
     return { transform: `translate(${cx}, ${cy}) scale(${scale})` };
   });
-  return <AnimatedG animatedProps={animatedProps}>{props.children}</AnimatedG>;
+  return <AnimatedG animatedProps={animatedProps}>{children}</AnimatedG>;
 }

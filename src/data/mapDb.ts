@@ -162,6 +162,7 @@ function serializeKindData(node: NodeData): Record<string, unknown> {
       status: node.status ?? "todo",
       startedAt: node.startedAt ?? null,
       completedAt: node.completedAt ?? null,
+      dueDate: node.dueDate ?? null,
       synthetic: node.synthetic ?? null,
       recur: node.recur ?? null,
       log: node.log ?? null,
@@ -256,8 +257,10 @@ function parseNodeRow(row: NodeRow): NodeData | null {
     node.status = (data.status as NodeData["status"]) ?? "todo";
     const startedAt = millis(data.startedAt);
     const completedAt = millis(data.completedAt);
+    const dueDate = millis(data.dueDate);
     if (startedAt !== undefined) node.startedAt = startedAt;
     if (completedAt !== undefined) node.completedAt = completedAt;
+    if (dueDate !== undefined) node.dueDate = dueDate;
     if (data.synthetic === true) node.synthetic = true;
     const recur = parseRecurRule(data.recur);
     if (recur) node.recur = recur;

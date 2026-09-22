@@ -582,6 +582,7 @@ export function setNodeRecurrence(id: Id, rule: RecurRule | null): Recipe {
       node.status = "todo";
       delete node.startedAt;
       delete node.completedAt;
+      delete node.dueDate; // the rule owns the schedule now
     } else {
       delete node.recur;
     }
@@ -593,11 +594,19 @@ export function setNodeRecurrence(id: Id, rule: RecurRule | null): Recipe {
 // backdating: rewrite timestamps the creation/status commands stamped. The
 // status machine keeps owning WHICH fields exist — startedAt/completedAt
 // are only rewritten where already set (to start/complete, use
-// transitionNodeStatus) — while a record's occurredAt and a goal's
-// targetDate are always writable; targetDate: null clears it
+// transitionNodeStatus) — while a record's occurredAt, a goal's
+// targetDate and a plain task's dueDate are always writable;
+// targetDate/dueDate: null clears. A recurring task's schedule is its
+// rule, so dueDate writes skip it
 export function setNodeTimes(
   id: Id,
-  times: { occurredAt?: number; startedAt?: number; completedAt?: number; targetDate?: number | null },
+  times: {
+    occurredAt?: number;
+    startedAt?: number;
+    completedAt?: number;
+    targetDate?: number | null;
+    dueDate?: number | null;
+  },
 ): Recipe {
   return (draft) => {
     const node = draft.nodes[id];
@@ -611,6 +620,10 @@ export function setNodeTimes(
       }
       if (typeof times.completedAt === "number" && node.completedAt !== undefined) {
         node.completedAt = times.completedAt;
+      }
+      if (!node.recur) {
+        if (typeof times.dueDate === "number") node.dueDate = times.dueDate;
+        else if (times.dueDate === null) delete node.dueDate;
       }
     }
     if (node.kind === "goal") {

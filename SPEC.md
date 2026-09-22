@@ -24,7 +24,7 @@ All nodes share: `id` (uuid), `x/y` (world coordinates), `title`, `kind`,
 | Kind   | Class    | Shape on map            | Extra fields |
 |--------|----------|-------------------------|--------------|
 | Goal   | `Goal`   | Large circle (52)       | `description?`, `targetDate?`, `completedAt?` |
-| Task   | `Task`   | Rounded square (40)     | `status` (stored), `startedAt?`, `completedAt?`, `recur?` + occurrence `log?` (§1.3) |
+| Task   | `Task`   | Rounded square (40)     | `status` (stored), `startedAt?`, `completedAt?`, `dueDate?`, `recur?` + occurrence `log?` (§1.3) |
 | Record | `Record` | Small dot (20)          | `note`, `createdAt`, `occuredAt` — a leaf; nothing attaches under it |
 
 ### 1.2 Edges — directed roads with layers
@@ -147,14 +147,17 @@ rename or recolor happens in one place, not per node.
 
 `calendarMonth(doc, year, month0, now)` derives, for one month and keyed by
 day-of-month, everything the document pins to a day: records (`occurredAt`),
-goal target dates, task/goal `startedAt`/`completedAt` stamps, and a
-habit's whole month — every scheduled day classified against `now`
-(**Missed** / **Due today** / **Scheduled**) plus every logged day (a log on
-an unscheduled catch-up day still happened; a logged scheduled day reads as
-done, never missed). Each item carries a **tone** (attention / primary /
-done / neutral / future) that fixes both its dot color and its row order
-inside a day. Pure like the recurrence derivations: `now` is an explicit
-parameter, so the rules test without a clock.
+goal target dates, task/goal `startedAt`/`completedAt` stamps, task due
+dates, and a habit's whole month — every scheduled day classified against
+`now` (**Missed** / **Due today** / **Scheduled**) plus every logged day (a
+log on an unscheduled catch-up day still happened; a logged scheduled day
+reads as done, never missed). A task's due date classifies too:
+**Overdue** / **Due today** ask for attention, a future pin is a plain
+deadline, a finished task's pin is history. Each item carries a **tone**
+(attention / primary / done / neutral / future) that fixes both its dot
+color and its row order inside a day. Pure like the recurrence
+derivations: `now` is an explicit parameter, so the rules test without a
+clock.
 
 ---
 
@@ -295,11 +298,14 @@ form, notes, route query, note search).
   Undo last log, and the row shows its due state with a "N logged ·
   streak K" line underneath; goals only Mark done / Reopen, toggling the
   manual completion flag; records none), acting immediately. Tappable
-  date rows (a record's Occurred, a task's Started/Done, a goal's Target
-  with a live countdown) open a small calendar and rewrite the stamp in
+  date rows (a record's Occurred, a task's Due/Started/Done, a goal's
+  Target — the two planned dates with a live countdown) open a small
+  calendar and rewrite the stamp in
   one undoable command; a task's Repeat row opens the recurrence rule
   editor (frequency, interval, weekdays, Starts day; Clear stops it), and
-  a goal's target date can also be set right in the create form.
+  a goal's target date can also be set right in the create form. A task's
+  due date is a one-off planning pin — display only, never a status — and
+  setting a recurrence rule clears it (the rule owns the schedule).
 - **Notes**: the node's single-tap info card shows only a peek of the
   newest note; tapping it opens the modal notes sheet — full list
   (newest first), add, edit, delete (in-place two-tap). Text entry opens
@@ -352,14 +358,21 @@ button (below the fit button; the route is `/calendar`).
   day carries up to three tone dots from `calendarMonth` (§1.9) with a
   legend underneath.
 - The **selected day's list** shows every item — tone dot, node title,
-  caption (Due today / Missed / Logged / Scheduled / Target date /
-  Completed / Started / Record). Month nav moves the view (selecting the
-  1st); **Today** jumps back to the current month and day.
+  caption (Due today / Missed / Overdue / Due date / Logged / Scheduled /
+  Target date / Completed / Started / Record). Month nav moves the view
+  (selecting the 1st); **Today** jumps back to the current month and day.
 - **Tapping an item hands the node to the map**: the page sets
   `pendingNodeFocusId` on the doc store (transient, never persisted) and
   pops back; the map consumes the id with the note search's reveal — zoom
-  open the node's layer, center it, open its info card — so the calendar
-  stays read-only and every edit still happens on the map.
+  open the node's layer, center it, open its info card.
+- **+ Schedule** (the day card's header) opens the schedule sheet
+  (`src/calendar/scheduleSheet.tsx`): every schedulable node — goals and
+  plain tasks (habits schedule themselves by rule; synthetic midpoints are
+  structure) — with the day it's pinned to, if any. Tapping a row pins the
+  node to the selected day (the goal's `targetDate`, the task's
+  `dueDate`); tapping a row already on the day unpins it. Each toggle is
+  one undoable `setNodeTimes` command, and the grid behind the sheet
+  updates live.
 
 ---
 

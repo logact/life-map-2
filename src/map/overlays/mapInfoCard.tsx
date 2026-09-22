@@ -18,8 +18,9 @@ type EditField = "title" | "detail";
 // the node's editable timestamps (backdating): the record's occurred-at is
 // always offered; startedAt/completedAt only where the status machine has
 // already created them (transition first, then rewrite the date); the
-// goal's target date is always offered and is the one clearable field
-type DateField = "occurredAt" | "startedAt" | "completedAt" | "targetDate";
+// goal's target date and a plain task's due date are always offered and
+// are the clearable fields
+type DateField = "occurredAt" | "startedAt" | "completedAt" | "targetDate" | "dueDate";
 
 // single-tap node card: title, fact lines, the status row with its legal
 // transition buttons, an inline-editable detail row (the goal's
@@ -174,6 +175,11 @@ function NodeInfoCard(props: {
   if (isRecord(node)) {
     dateRows.push({ field: "occurredAt", label: "Occurred", value: node.occurredAt, placeholder: "Set date…" });
   } else if (isTask(node)) {
+    // a habit's schedule is its rule (the Repeat row below); a plain task
+    // carries a one-off due date instead
+    if (!node.recur) {
+      dateRows.push({ field: "dueDate", label: "Due", value: node.dueDate, placeholder: "Set due date…" });
+    }
     if (node.startedAt !== undefined) dateRows.push({ field: "startedAt", label: "Started", value: node.startedAt });
     if (node.completedAt !== undefined) dateRows.push({ field: "completedAt", label: "Done", value: node.completedAt });
   } else {
@@ -254,7 +260,7 @@ function NodeInfoCard(props: {
           <Text style={styles.dateRowLabel}>{r.label}</Text>
           <Text style={r.value !== undefined ? styles.dateRowValue : styles.infoDetailPlaceholder}>
             {r.value !== undefined
-              ? r.field === "targetDate"
+              ? r.field === "targetDate" || r.field === "dueDate"
                 ? `${fmtDate(r.value)} · ${fmtRelative(r.value, props.now)}`
                 : fmtDate(r.value)
               : r.placeholder}
@@ -360,8 +366,14 @@ function NodeInfoCard(props: {
             setDateField(null);
           }}
           onClear={
-            dateField.field === "targetDate"
-              ? () => props.run(setNodeTimes(node.id, { targetDate: null }))
+            dateField.field === "targetDate" || dateField.field === "dueDate"
+              ? () =>
+                  props.run(
+                    setNodeTimes(
+                      node.id,
+                      dateField.field === "targetDate" ? { targetDate: null } : { dueDate: null },
+                    ),
+                  )
               : undefined
           }
           onClose={() => setDateField(null)}

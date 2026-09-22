@@ -61,6 +61,10 @@ export interface NodeData {
   status?: Status;
   startedAt?: number;
   completedAt?: number;
+  // a one-off planned day for a plain task — the calendar's scheduling
+  // pin. Display only: it never drives the status machine. Habits take a
+  // recur rule instead, so setting a rule clears this
+  dueDate?: number;
   // recurring task fields: the rule and its occurrence log (ascending
   // timestamps). While recur is set the stored status stays "todo" and the
   // DERIVED state (due/overdue/…) takes over — see src/domain/recur.ts

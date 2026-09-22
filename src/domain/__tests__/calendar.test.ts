@@ -115,4 +115,40 @@ describe("calendarMonth", () => {
     const month = calendarMonth(docWith(goal, rec), Y, M, NOW);
     expect(month.size).toBe(0);
   });
+
+  it("classifies a task's due date against today", () => {
+    const overdue = makeTask(0, 0, "Old", { dueDate: at("2026-09-20") });
+    const dueToday = makeTask(0, 0, "Now", { dueDate: at("2026-09-23") });
+    const future = makeTask(0, 0, "Soon", { dueDate: at("2026-09-28") });
+    const done = makeTask(0, 0, "Finished", {
+      dueDate: at("2026-09-25"),
+      completedAt: at("2026-09-22"),
+    });
+    const month = calendarMonth(docWith(overdue, dueToday, future, done), Y, M, NOW);
+    expect(month.get(20)).toEqual([
+      { nodeId: overdue.id, title: "Old", label: "Overdue", tone: "attention" },
+    ]);
+    expect(month.get(23)).toEqual([
+      { nodeId: dueToday.id, title: "Now", label: "Due today", tone: "attention" },
+    ]);
+    expect(month.get(28)).toEqual([
+      { nodeId: future.id, title: "Soon", label: "Due date", tone: "primary" },
+    ]);
+    // a finished task's due date is plain history; the completion stamp
+    // still shows on its own day
+    expect(month.get(25)).toEqual([
+      { nodeId: done.id, title: "Finished", label: "Due date", tone: "neutral" },
+    ]);
+    expect(month.get(22)?.some((it) => it.nodeId === done.id && it.label === "Completed")).toBe(true);
+  });
+
+  it("a habit shows its rule, never a stale due date", () => {
+    const habit = makeTask(0, 0, "Gym", {
+      recur: { freq: "daily", interval: 1, anchor: at("2026-09-23") },
+      dueDate: at("2026-09-28"), // setNodeRecurrence clears these; belt and braces
+    });
+    const month = calendarMonth(docWith(habit), Y, M, NOW);
+    expect(month.get(28)?.some((it) => it.label === "Due date")).toBe(false);
+    expect(month.get(28)?.[0].label).toBe("Scheduled");
+  });
 });

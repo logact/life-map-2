@@ -12,8 +12,9 @@ export type CalTone = "attention" | "primary" | "done" | "neutral" | "future";
 export interface CalItem {
   nodeId: Id;
   title: string;
-  // short caption for the row: "Due today" | "Missed" | "Logged" |
-  // "Scheduled" | "Target date" | "Completed" | "Started" | "Record"
+  // short caption for the row: "Due today" | "Missed" | "Overdue" |
+  // "Due date" | "Logged" | "Scheduled" | "Target date" | "Completed" |
+  // "Started" | "Record"
   label: string;
   tone: CalTone;
 }
@@ -94,6 +95,18 @@ export function calendarMonth(
       push(node, node.startedAt, "Started", "neutral");
       push(node, node.completedAt, "Completed", "done");
     } else if (isTask(node)) {
+      // a one-off due date is a deadline pin: it asks for attention on the
+      // day and while overdue; a finished task's due date is plain history
+      if (node.dueDate !== undefined) {
+        if (node.completedAt !== undefined) {
+          push(node, node.dueDate, "Due date", "neutral");
+        } else {
+          const d = dayStart(node.dueDate);
+          if (d < today) push(node, node.dueDate, "Overdue", "attention");
+          else if (d === today) push(node, node.dueDate, "Due today", "attention");
+          else push(node, node.dueDate, "Due date", "primary");
+        }
+      }
       push(node, node.startedAt, "Started", "neutral");
       push(node, node.completedAt, "Completed", "done");
     }

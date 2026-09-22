@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useRouter } from "expo-router";
 
+import { ScheduleSheet } from "@/calendar/scheduleSheet";
 import { CalItem, calendarMonth, CalTone } from "@/domain/calendar";
+import { Recipe } from "@/domain/commands";
 import { fmtDate } from "@/map/utils";
 import { useDocStore } from "@/state/docStore";
 import { CANVAS_BG, INK, RADIUS, SHADOW, STATUS_COLOR } from "@/ui/theme";
@@ -54,6 +56,9 @@ export default function CalendarScreen() {
   const [now, setNow] = useState(0);
   const [view, setView] = useState<{ y: number; m: number } | null>(null);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
+  // the scheduling sheet for the selected day (goals' target dates and
+  // plain tasks' due dates are pinned from here)
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   useEffect(() => {
     const id = setTimeout(() => {
       const ms = Date.now();
@@ -100,6 +105,10 @@ export default function CalendarScreen() {
     ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
   ];
   const dayItems = monthItems.get(selectedDay) ?? [];
+  const selectedDayMs = new Date(view.y, view.m, selectedDay).getTime();
+  // scheduling goes through the store directly: the map's post-run pruning
+  // is canvas state, nothing the calendar holds
+  const run = (recipe: Recipe) => useDocStore.getState().run(recipe);
 
   return (
     <View style={cs.container}>
@@ -171,7 +180,16 @@ export default function CalendarScreen() {
       </View>
 
       <View style={[cs.card, cs.dayCard]}>
-        <Text style={cs.dayTitle}>{fmtDate(new Date(view.y, view.m, selectedDay).getTime())}</Text>
+        <View style={cs.dayHeader}>
+          <Text style={cs.dayTitle}>{fmtDate(selectedDayMs)}</Text>
+          <Pressable
+            accessibilityLabel="Schedule a goal or task on this day"
+            onPress={() => setScheduleOpen(true)}
+            hitSlop={8}
+          >
+            <Text style={cs.scheduleAction}>+ Schedule</Text>
+          </Pressable>
+        </View>
         <ScrollView contentContainerStyle={{ gap: 2 }}>
           {dayItems.length === 0 ? (
             <Text style={cs.empty}>Nothing on this day</Text>
@@ -192,6 +210,18 @@ export default function CalendarScreen() {
           )}
         </ScrollView>
       </View>
+
+      {/* schedule picker: pin a goal's target date or a plain task's due
+          date to the selected day; toggling an already-pinned row unpins
+          it. Each toggle is one undoable command */}
+      {scheduleOpen && (
+        <ScheduleSheet
+          doc={doc}
+          dayMs={selectedDayMs}
+          run={run}
+          onClose={() => setScheduleOpen(false)}
+        />
+      )}
     </View>
   );
 }
@@ -319,7 +349,17 @@ const cs = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
     color: INK.secondary,
+  },
+  dayHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: 8,
+  },
+  scheduleAction: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: INK.primary,
   },
   empty: {
     fontSize: 13,

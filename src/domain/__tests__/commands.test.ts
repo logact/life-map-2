@@ -452,6 +452,20 @@ describe("backdating", () => {
     expect(next.nodes[t1].occurredAt).toBeUndefined();
   });
 
+  it("setNodeTimes sets and clears a task's dueDate; a habit's rule owns the schedule", () => {
+    let { doc, t1 } = fixture();
+    let next = expectRoundTrip(doc, setNodeTimes(t1, { dueDate: YESTERDAY }));
+    expect(next.nodes[t1].dueDate).toBe(YESTERDAY);
+    next = expectRoundTrip(next, setNodeTimes(t1, { dueDate: null }));
+    expect(next.nodes[t1].dueDate).toBeUndefined();
+    // setting a recurrence rule clears the pin, and dueDate writes then skip
+    doc = run(doc, setNodeTimes(t1, { dueDate: YESTERDAY }));
+    doc = run(doc, setNodeRecurrence(t1, { freq: "daily", interval: 1, anchor: LAST_WEEK }));
+    expect(doc.nodes[t1].dueDate).toBeUndefined();
+    next = run(doc, setNodeTimes(t1, { dueDate: YESTERDAY }));
+    expect(next.nodes[t1].dueDate).toBeUndefined();
+  });
+
   it("addNote stamps the given time and keeps the list newest-first by date", () => {
     let { doc, t1 } = fixture();
     const n1 = addNote(t1, "today's");

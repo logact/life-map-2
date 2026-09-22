@@ -23,7 +23,11 @@ export function composedCam(
   };
 }
 
+// 'worklet': called from nodeGlyph's UI-thread animated styles — without the
+// directive the UI runtime sees a remote function and throws on first render.
+// Only touches imported numeric constants, which serialize fine.
 export function nodeSize(kind: NodeKind): number {
+  "worklet";
   if (kind === "task") return TASK_SIZE;
   if (kind === "record") return RECORD_SIZE;
   return NODE_SIZE;

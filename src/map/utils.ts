@@ -33,6 +33,16 @@ export function nodeSize(kind: NodeKind): number {
   return NODE_SIZE;
 }
 
+// the node's rim in WORLD units at a camera scale: pins cap at natural
+// size on screen at >= 1x zoom (nodeGlyph's Math.min(1, camScale)), so the
+// world-space radius that lands exactly on the rendered rim shrinks with
+// the camera. Edge trimming must use this — a flat nodeSize/2 pulls the
+// line s times too far back once zoomed in past 1x, eating the line and
+// leaving the arrowhead floating mid-air
+export function rimOffset(kind: NodeKind, camScale: number): number {
+  return nodeSize(kind) / (2 * Math.max(1, camScale));
+}
+
 // roads read as climbing straight from bottom to top: a successor lands
 // directly above its anchor, a predecessor directly below (screen y points
 // down, so "above" is a negative angle). Repeated adds fan out within

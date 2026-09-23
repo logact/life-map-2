@@ -56,7 +56,7 @@ import { NotesSheet } from "@/map/overlays/notes";
 import { RoutesModal } from "@/map/overlays/routesModal";
 import { styles } from "@/map/styles";
 import { CreateTarget, InfoTarget } from "@/map/types";
-import { childPosition, computeGridDots, edgeEndpointNodes, nodeSize } from "@/map/utils";
+import { childPosition, computeGridDots, edgeEndpointNodes, nodeSize, rimOffset } from "@/map/utils";
 import { deriveViewModel, useMapViewModel } from "@/map/viewModel";
 
 /**
@@ -964,6 +964,7 @@ export default function MapScreen() {
                 dimmed={dimmed}
                 liveBend={bendDrag && bendDrag.edgeId === e.id ? { x: bendDrag.x, y: bendDrag.y } : null}
                 sv={camera.sv}
+                settledCamScale={cam.scale}
                 onPress={glyphHandlers.onEdgePress}
                 onLongPress={glyphHandlers.onEdgeLongPress}
               />
@@ -985,11 +986,11 @@ export default function MapScreen() {
               if (len === 0) return null;
               const ux = dx / len;
               const uy = dy / len;
-              const rim = target ? nodeSize(target.kind) / 2 : 0;
+              const rim = target ? rimOffset(target.kind, cam.scale) : 0;
               const tipX = tx - ux * rim;
               const tipY = ty - uy * rim;
               // start on the source rim so the preview never crosses it
-              const rim0 = nodeSize(from.kind) / 2;
+              const rim0 = rimOffset(from.kind, cam.scale);
               const x1 = from.x + ux * rim0;
               const y1 = from.y + uy * rim0;
               const wing = 5 / cam.scale;

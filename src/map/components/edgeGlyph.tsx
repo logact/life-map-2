@@ -5,7 +5,7 @@ import Animated, { useAnimatedProps } from "react-native-reanimated";
 import { ACCENT, INK, STATUS_COLOR } from "@/ui/theme";
 import { CameraSv } from "../hooks/useMapCamera";
 import { EdgeViewModel, NodeViewModel } from "../types";
-import { nodeSize, splitPath } from "../utils";
+import { rimOffset, splitPath } from "../utils";
 
 const AnimatedPolygon = Animated.createAnimatedComponent(Polygon);
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -71,10 +71,15 @@ export const EdgeGlyph = memo(function EdgeGlyph(props: {
   // the live camera: arrowheads and markers counter-scale on the UI
   // thread, so camera moves never re-render the glyph
   sv: CameraSv;
+  // the settled camera scale, for the rim trim: pins cap at natural size
+  // on screen past 1x zoom, so the world-space trim must shrink with the
+  // camera (rimOffset) — synced on gesture end, like every render-time
+  // geometry here
+  settledCamScale: number;
   onPress: (id: string) => void;
   onLongPress: (id: string) => void;
 }) {
-  const { e, a, b, sv } = props;
+  const { e, a, b, sv, settledCamScale } = props;
   // selection, spotlight and route preview override everything: the
   // whole edge draws in the single override color, no per-segment colors
   const overridden = props.onRoute || props.selected || props.related;
@@ -89,8 +94,10 @@ export const EdgeGlyph = memo(function EdgeGlyph(props: {
   const bend = props.liveBend ?? e.bend;
   // the line runs rim-to-rim: nodes with a translucent fill would let a
   // center-to-center line show through their interior, so both ends are
-  // pulled back to the node boundary
-  const ra = nodeSize(a.kind) / 2;
+  // pulled back to the node boundary. The rims are camera-aware: past 1x
+  // zoom the pins stay natural size on screen, so the world-space trim
+  // shrinks accordingly (see rimOffset)
+  const ra = rimOffset(a.kind, settledCamScale);
   // start at the source rim, along the first segment (a -> bend when bent)
   const sx = bend ? bend.x : b.x;
   const sy = bend ? bend.y : b.y;
@@ -109,8 +116,8 @@ export const EdgeGlyph = memo(function EdgeGlyph(props: {
   const len = Math.hypot(dx, dy);
   const ux = len > 0 ? dx / len : 0;
   const uy = len > 0 ? dy / len : 0;
-  const tipX = b.x - ux * (nodeSize(b.kind) / 2);
-  const tipY = b.y - uy * (nodeSize(b.kind) / 2);
+  const tipX = b.x - ux * rimOffset(b.kind, settledCamScale);
+  const tipY = b.y - uy * rimOffset(b.kind, settledCamScale);
   // fills are not covered by non-scaling-stroke: the arrowhead
   // counter-scales with the live camera so it keeps a constant screen
   // size at any zoom (evaluated on the UI thread; the tip and direction

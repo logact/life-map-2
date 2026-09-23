@@ -205,7 +205,10 @@ from domain objects directly. Flow: gesture → `run(mutate)` → mutate domain 
 - *Pinch zoom* multiplies the base camera (0.25×–4×), anchored at the pinch
   midpoint. Nodes render at natural size (52/40/20) at ≥ 1×; below 1× pins
   and titles shrink with the camera (titles drop out under 18px pins), so
-  proportions — and no-overlap — hold at every zoom. Lens steps
+  proportions — and no-overlap — hold at every zoom. Edges trim rim-to-rim
+  against the RENDERED pin size (`rimOffset`: the plain world radius at
+  ≤ 1×, shrinking with the camera past 1×), so roads stay glued to their
+  pins at any zoom. Lens steps
   reveal/collapse children in place — a spread that lands too cramped
   zooms the camera in toward the revealed group (a roomy camera is left
   alone).

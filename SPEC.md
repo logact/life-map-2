@@ -208,10 +208,12 @@ from domain objects directly. Flow: gesture → `run(mutate)` → mutate domain 
   proportions — and no-overlap — hold at every zoom. Edges trim rim-to-rim
   against the RENDERED pin size (`rimOffset`: the plain world radius at
   ≤ 1×, shrinking with the camera past 1×), so roads stay glued to their
-  pins at any zoom. Lens steps
-  reveal/collapse children in place — a spread that lands too cramped
-  zooms the camera in toward the revealed group (a roomy camera is left
-  alone).
+  pins at any zoom. Lens steps reveal/collapse children in place — a spread
+  that lands too cramped zooms the camera in toward the revealed group (a
+  roomy camera is left alone): deliberate actions (the Zoom-in button, menu
+  Expand) center the group on screen, while a spread fired mid-pinch pivots
+  the extra zoom on the pinch midpoint, so the camera never jumps away from
+  the fingers.
 - *Pan* = one-finger drag on empty canvas.
 - A world-anchored dot grid (spacing 28, doubling as needed) keeps a constant
   look at any zoom.

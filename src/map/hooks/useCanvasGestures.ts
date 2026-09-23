@@ -28,7 +28,9 @@ export function useCanvasGestures(params: {
   // sync the settled camera mirror once the gesture ends
   settleCamera: () => void;
   pinchCameraZoom: (ratio: number, mx: number, my: number) => void;
-  zoomSelectionStep: (deeper: boolean) => void;
+  // a mid-pinch lens step frames cramped reveals around the pinch midpoint
+  // (the anchor), never re-centering the camera on the group
+  zoomSelectionStep: (deeper: boolean, anchor?: { x: number; y: number }) => void;
   // a user gesture cancels any programmatic camera tween in flight
   cancelCameraTween: () => void;
   bendDragRef: RefObject<{ edgeId: string; x: number; y: number } | null>;
@@ -107,7 +109,7 @@ export function useCanvasGestures(params: {
           detailAcc.current *= ratio;
           if (detailAcc.current >= PINCH_RATIO) {
             detailAcc.current = 1;
-            latest.current.zoomSelectionStep(true);
+            latest.current.zoomSelectionStep(true, { x: mx, y: my });
           } else if (detailAcc.current <= 1 / PINCH_RATIO) {
             detailAcc.current = 1;
             latest.current.zoomSelectionStep(false);

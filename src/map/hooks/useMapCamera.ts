@@ -111,12 +111,10 @@ export function useMapCamera(width: number, height: number) {
     panY.value = y;
   };
 
-  // continuous pinch camera zoom, anchored at the pinch midpoint (mx, my):
-  // the world point under it keeps its screen position
-  const pinchCameraZoom = (ratio: number, mx: number, my: number) => {
-    cancelCameraTween();
-    const z = Math.min(MAX_USER_SCALE, Math.max(MIN_USER_SCALE, userScale.value * ratio));
-    if (z === userScale.value) return;
+  // set the pinch zoom to z while keeping the world point under the
+  // screen point (mx, my) fixed on screen — the shared anchor math for
+  // pinchCameraZoom and pinch-initiated lens framing
+  const zoomAboutScreenPoint = (z: number, mx: number, my: number) => {
     const camNow = getCam();
     const wx = (mx - panX.value - camNow.x) / camNow.scale;
     const wy = (my - panY.value - camNow.y) / camNow.scale;
@@ -124,6 +122,15 @@ export function useMapCamera(width: number, height: number) {
     const newCam = getCam();
     panX.value = mx - wx * newCam.scale - newCam.x;
     panY.value = my - wy * newCam.scale - newCam.y;
+  };
+
+  // continuous pinch camera zoom, anchored at the pinch midpoint (mx, my):
+  // the world point under it keeps its screen position
+  const pinchCameraZoom = (ratio: number, mx: number, my: number) => {
+    cancelCameraTween();
+    const z = Math.min(MAX_USER_SCALE, Math.max(MIN_USER_SCALE, userScale.value * ratio));
+    if (z === userScale.value) return;
+    zoomAboutScreenPoint(z, mx, my);
   };
 
   // center a world point on screen instantly (search results, confirmed
@@ -168,10 +175,13 @@ export function useMapCamera(width: number, height: number) {
 
   // lens zoom-in framing: when a spread reveals children too cramped to
   // work with, stretch the sheet (not the world) — zoom toward the group
-  // until its span fills LENS_FRAME_FILL of the smaller screen dimension,
-  // centered. Only ever zooms IN: a camera that already gives the group
-  // room is left alone
-  const frameNodes = (nodes: { x: number; y: number }[]) => {
+  // until its span fills LENS_FRAME_FILL of the smaller screen dimension.
+  // Only ever zooms IN: a camera that already gives the group room is left
+  // alone. Deliberate actions (Zoom-in button, menu expand) center the
+  // group on screen; a mid-pinch spread passes the pinch midpoint as
+  // `anchor` instead, and the extra zoom pivots there — the camera never
+  // teleports away from the user's fingers mid-gesture
+  const frameNodes = (nodes: { x: number; y: number }[], anchor?: { x: number; y: number }) => {
     if (nodes.length === 0) return;
     cancelCameraTween();
     let minX = Infinity;
@@ -193,12 +203,18 @@ export function useMapCamera(width: number, height: number) {
     );
     if (target <= base.scale * userScale.value) return; // already roomy
     const z = target / base.scale;
-    userScale.value = z;
-    const newCam = composedCam(base, z, { width, height });
-    const cx = (minX + maxX) / 2;
-    const cy = (minY + maxY) / 2;
-    panX.value = width / 2 - cx * newCam.scale - newCam.x;
-    panY.value = height / 2 - cy * newCam.scale - newCam.y;
+    if (anchor) {
+      // mid-pinch: the world point under the fingers keeps its screen
+      // position — the framing adds zoom without moving the focal point
+      zoomAboutScreenPoint(z, anchor.x, anchor.y);
+    } else {
+      userScale.value = z;
+      const newCam = composedCam(base, z, { width, height });
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      panX.value = width / 2 - cx * newCam.scale - newCam.x;
+      panY.value = height / 2 - cy * newCam.scale - newCam.y;
+    }
     settleCamera();
   };
 

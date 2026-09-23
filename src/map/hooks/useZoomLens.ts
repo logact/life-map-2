@@ -13,7 +13,10 @@ import { edgeEndpointNodes } from "../utils";
 // they land too cramped to work with, frameNodes stretches the camera
 // toward the group (the world itself never moves).
 export function useZoomLens(params: {
-  frameNodes: (nodes: { x: number; y: number }[]) => void;
+  // `anchor` is the live pinch midpoint when a step fires mid-pinch: the
+  // framing zoom pivots there instead of re-centering on the group, so the
+  // camera never jumps away from the user's fingers
+  frameNodes: (nodes: { x: number; y: number }[], anchor?: { x: number; y: number }) => void;
 }) {
   const { frameNodes } = params;  const [zoomEdgeIds, setZoomEdgeIds] = useState<string[]>([]);
   const zoomEdgeIdsRef = useRef(zoomEdgeIds);
@@ -46,8 +49,10 @@ export function useZoomLens(params: {
   // children inherit it on zoom-in, parents inherit it on collapse. With
   // no selection, a collapse pops the zoom history instead: a squeeze
   // undoes the last spread even after the lens was accidentally cleared.
-  // A spread that lands cramped zooms the camera toward the group.
-  const zoomSelectionStep = (deeper: boolean) => {
+  // A spread that lands cramped zooms the camera toward the group —
+  // re-centering on it for deliberate actions, pivoting on the pinch
+  // midpoint when the step fired mid-pinch.
+  const zoomSelectionStep = (deeper: boolean, anchor?: { x: number; y: number }) => {
     const d = useDocStore.getState().doc;
     const zoomed = zoomedIdsRef.current;
     let sel = zoomEdgeIdsRef.current;
@@ -104,7 +109,7 @@ export function useZoomLens(params: {
     if (deeper) {
       // make room to work inside the group: the spread edges and their
       // revealed children, framed together (a roomy camera is left alone)
-      frameNodes(edgeEndpointNodes(d, [...sel, ...inherited]));
+      frameNodes(edgeEndpointNodes(d, [...sel, ...inherited]), anchor);
     }
   };
 

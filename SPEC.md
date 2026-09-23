@@ -378,6 +378,13 @@ button (below the fit button; the route is `/calendar`).
   `dueDate`); tapping a row already on the day unpins it. Each toggle is
   one undoable `setNodeTimes` command, and the grid behind the sheet
   updates live.
+- **+ New** (same header) creates on the selected day: the chooser
+  (`src/calendar/createSheet.tsx`) picks goal / task / record, then the
+  map's shared create form opens with the day seeded — the goal's target,
+  the record's occurred-at (both editable in the form); a task's due date
+  is pinned silently at save. Creation is one undoable `addFreeNode`
+  command; the node lands on the map near the content center, fanned by a
+  golden-angle step so repeated adds don't stack.
 
 ---
 

@@ -58,7 +58,7 @@ export function ScheduleSheet(props: {
           <Text style={cs.title}>Schedule on {fmtDate(dayMs)}</Text>
           <ScrollView style={cs.list} contentContainerStyle={{ gap: 2 }}>
             {candidates.length === 0 ? (
-              <Text style={cs.empty}>No goals or tasks yet — create them on the map</Text>
+              <Text style={cs.empty}>No goals or tasks yet — add one with + New</Text>
             ) : (
               candidates.map(({ node, onThisDay }) => {
                 const pinned = pinnedDay(node);

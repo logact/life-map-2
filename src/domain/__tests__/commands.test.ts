@@ -466,6 +466,17 @@ describe("backdating", () => {
     expect(next.nodes[t1].dueDate).toBeUndefined();
   });
 
+  it("addFreeNode pins a task's dueDate at creation (calendar '+ New') — one undoable step", () => {
+    const { doc } = fixture();
+    const t = addFreeNode("task", "T", "", { x: 0, y: 0 }, undefined, undefined, YESTERDAY);
+    const next = expectRoundTrip(doc, t.recipe);
+    expect(next.nodes[t.nodeId].dueDate).toBe(YESTERDAY);
+    // goals and records never grow a dueDate from the param
+    const g = addFreeNode("goal", "G", "", { x: 0, y: 0 }, undefined, undefined, YESTERDAY);
+    const next2 = run(next, g.recipe);
+    expect(next2.nodes[g.nodeId].dueDate).toBeUndefined();
+  });
+
   it("addNote stamps the given time and keeps the list newest-first by date", () => {
     let { doc, t1 } = fixture();
     const n1 = addNote(t1, "today's");

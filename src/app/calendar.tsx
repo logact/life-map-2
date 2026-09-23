@@ -3,8 +3,12 @@ import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } fr
 import { useRouter } from "expo-router";
 
 import { ScheduleSheet } from "@/calendar/scheduleSheet";
+import { CreateSheet } from "@/calendar/createSheet";
 import { CalItem, calendarMonth, CalTone } from "@/domain/calendar";
-import { Recipe } from "@/domain/commands";
+import { addFreeNode, Recipe } from "@/domain/commands";
+import { LifeMapDoc, NodeKind } from "@/domain/doc";
+import { contentCenter } from "@/map/fitZoom";
+import { CreateNodeForm, TextDraft } from "@/map/overlays/forms";
 import { fmtDate } from "@/map/utils";
 import { useDocStore } from "@/state/docStore";
 import { CANVAS_BG, INK, RADIUS, SHADOW, STATUS_COLOR } from "@/ui/theme";
@@ -14,6 +18,21 @@ import { CANVAS_BG, INK, RADIUS, SHADOW, STATUS_COLOR } from "@/ui/theme";
 // below. Tapping an item hands the node back to the map through the store
 // (pendingNodeFocusId) and returns — the map reveals and centers it.
 // Weeks start on Sunday, like the date picker and the recurrence rules.
+//
+// The day card also creates: "+ New" adds a goal (target = the day), a
+// task (due = the day) or a record (occurred = the day) as a free node —
+// the map places it near the content center, spread by a golden-angle
+// step so repeated adds don't stack
+
+// a calendar-created node's spot on the map: near the content center, on a
+// golden-angle ring indexed by the node count so repeated adds fan out
+// instead of stacking
+function freeSpot(doc: LifeMapDoc): { x: number; y: number } {
+  const nodes = Object.values(doc.nodes);
+  const c = contentCenter(nodes) ?? { x: 0, y: 0 };
+  const angle = nodes.length * 2.4;
+  return { x: c.x + 180 * Math.cos(angle), y: c.y + 180 * Math.sin(angle) };
+}
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -59,6 +78,11 @@ export default function CalendarScreen() {
   // the scheduling sheet for the selected day (goals' target dates and
   // plain tasks' due dates are pinned from here)
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  // creating on the selected day: the kind chooser, then the shared create
+  // form seeded with the day (record's occurred-at, goal's target; a task's
+  // due date is pinned at save)
+  const [createChooserOpen, setCreateChooserOpen] = useState(false);
+  const [create, setCreate] = useState<{ mode: NodeKind; draft: TextDraft } | null>(null);
   useEffect(() => {
     const id = setTimeout(() => {
       const ms = Date.now();
@@ -109,6 +133,35 @@ export default function CalendarScreen() {
   // scheduling goes through the store directly: the map's post-run pruning
   // is canvas state, nothing the calendar holds
   const run = (recipe: Recipe) => useDocStore.getState().run(recipe);
+
+  // kind picked in the chooser: open the create form with the day seeded —
+  // a record logs the day, a goal targets it; a task's due date is pinned
+  // at save (the form has no task date row)
+  const pickCreateKind = (mode: NodeKind) => {
+    setCreateChooserOpen(false);
+    const draft: TextDraft = { title: "", detail: "" };
+    if (mode === "record") draft.occurredAt = selectedDayMs;
+    if (mode === "goal") draft.targetDate = selectedDayMs;
+    setCreate({ mode, draft });
+  };
+
+  // one undoable command: the free node, with the day carried on it
+  const saveCreate = () => {
+    if (!create) return;
+    const title = create.draft.title.trim();
+    if (!title) return;
+    const add = addFreeNode(
+      create.mode,
+      title,
+      create.draft.detail.trim(),
+      freeSpot(doc),
+      create.draft.occurredAt,
+      create.draft.targetDate,
+      create.mode === "task" ? selectedDayMs : undefined,
+    );
+    run(add.recipe);
+    setCreate(null);
+  };
 
   return (
     <View style={cs.container}>
@@ -182,13 +235,22 @@ export default function CalendarScreen() {
       <View style={[cs.card, cs.dayCard]}>
         <View style={cs.dayHeader}>
           <Text style={cs.dayTitle}>{fmtDate(selectedDayMs)}</Text>
-          <Pressable
-            accessibilityLabel="Schedule a goal or task on this day"
-            onPress={() => setScheduleOpen(true)}
-            hitSlop={8}
-          >
-            <Text style={cs.scheduleAction}>+ Schedule</Text>
-          </Pressable>
+          <View style={cs.dayActions}>
+            <Pressable
+              accessibilityLabel="Add a goal, task or record on this day"
+              onPress={() => setCreateChooserOpen(true)}
+              hitSlop={8}
+            >
+              <Text style={cs.scheduleAction}>+ New</Text>
+            </Pressable>
+            <Pressable
+              accessibilityLabel="Schedule a goal or task on this day"
+              onPress={() => setScheduleOpen(true)}
+              hitSlop={8}
+            >
+              <Text style={cs.scheduleAction}>+ Schedule</Text>
+            </Pressable>
+          </View>
         </View>
         <ScrollView contentContainerStyle={{ gap: 2 }}>
           {dayItems.length === 0 ? (
@@ -220,6 +282,25 @@ export default function CalendarScreen() {
           dayMs={selectedDayMs}
           run={run}
           onClose={() => setScheduleOpen(false)}
+        />
+      )}
+
+      {/* create on the selected day: the chooser swaps to the shared create
+          form (never stacked modals); saving pins the day onto the node */}
+      {createChooserOpen && (
+        <CreateSheet
+          dayMs={selectedDayMs}
+          onPick={pickCreateKind}
+          onClose={() => setCreateChooserOpen(false)}
+        />
+      )}
+      {create && (
+        <CreateNodeForm
+          mode={create.mode}
+          draft={create.draft}
+          onDraftChange={(draft) => setCreate((c) => (c ? { ...c, draft } : c))}
+          onSave={saveCreate}
+          onClose={() => setCreate(null)}
         />
       )}
     </View>
@@ -355,6 +436,10 @@ const cs = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 8,
+  },
+  dayActions: {
+    flexDirection: "row",
+    gap: 16,
   },
   scheduleAction: {
     fontSize: 13,

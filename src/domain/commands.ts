@@ -90,8 +90,9 @@ function makeNodeOfKind(
   detail?: string,
   occurredAt?: number,
   targetDate?: number,
+  dueDate?: number,
 ): NodeData {
-  if (kind === "task") return makeTask(x, y, title);
+  if (kind === "task") return makeTask(x, y, title, dueDate !== undefined ? { dueDate } : undefined);
   if (kind === "record") return makeRecordNode(x, y, title, detail ?? "", occurredAt ?? Date.now());
   const extra: Partial<NodeData> = {};
   if (detail) extra.description = detail;
@@ -108,8 +109,9 @@ function mustNode(draft: Draft<LifeMapDoc>, id: Id): NodeData {
 // ---------- node creation ----------
 
 // a node with no edges, placed on the canvas (double-tap create).
-// occurredAt backdates a record, targetDate sets a goal's target; both
-// ignored for other kinds
+// occurredAt backdates a record, targetDate sets a goal's target, dueDate
+// pins a plain task's planned day (the calendar's "+ New" on a day); all
+// three are ignored by the kinds they don't belong to
 export function addFreeNode(
   kind: NodeKind,
   title: string,
@@ -117,8 +119,9 @@ export function addFreeNode(
   pos: { x: number; y: number },
   occurredAt?: number,
   targetDate?: number,
+  dueDate?: number,
 ) {
-  const node = makeNodeOfKind(kind, pos.x, pos.y, title, detail, occurredAt, targetDate);
+  const node = makeNodeOfKind(kind, pos.x, pos.y, title, detail, occurredAt, targetDate, dueDate);
   return {
     nodeId: node.id,
     recipe: (draft: Draft<LifeMapDoc>) => {

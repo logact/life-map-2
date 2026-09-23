@@ -1,7 +1,12 @@
 import { describe, expect, it } from "@jest/globals";
 
+import { enablePatches, produceWithPatches } from "immer";
+
 import { calendarMonth } from "../calendar";
+import { addFreeNode } from "../commands";
 import { emptyDoc, LifeMapDoc, makeGoal, makeRecordNode, makeTask, NodeData } from "../doc";
+
+enablePatches();
 
 // fixed local dates inside September 2026 (month0 = 8); 2026-09-14 is a
 // Monday, so 23 = Wed. `now` is Wednesday the 23rd at noon
@@ -150,5 +155,20 @@ describe("calendarMonth", () => {
     const month = calendarMonth(docWith(habit), Y, M, NOW);
     expect(month.get(28)?.some((it) => it.label === "Due date")).toBe(false);
     expect(month.get(28)?.[0].label).toBe("Scheduled");
+  });
+
+  it("lists what the calendar's '+ New' creates on a day, pinned by kind", () => {
+    // the screen's exact wiring: addFreeNode with the day as targetDate
+    // (goal), dueDate (task) and occurredAt (record)
+    const day = new Date(2026, 8, 29).getTime(); // local midnight, as the screen computes it
+    let doc = emptyDoc();
+    const adds = [
+      addFreeNode("goal", "Ship it", "", { x: 0, y: 0 }, undefined, day),
+      addFreeNode("task", "Book flights", "", { x: 0, y: 0 }, undefined, undefined, day),
+      addFreeNode("record", "Called grandma", "", { x: 0, y: 0 }, day),
+    ];
+    for (const a of adds) doc = produceWithPatches(doc, a.recipe)[0];
+    const items = calendarMonth(doc, Y, M, NOW).get(29) ?? [];
+    expect(items.map((it) => it.label)).toEqual(["Target date", "Due date", "Record"]);
   });
 });

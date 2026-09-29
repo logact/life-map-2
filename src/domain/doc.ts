@@ -105,6 +105,11 @@ export interface LifeMapDoc {
   rootNodeIds: Id[];
   // top-level edges, in layout order
   rootEdgeIds: Id[];
+  // manual row order for calendar days: the local day start (epoch ms, see
+  // dayStart in src/domain/recur.ts) as a string key -> that day's CalItem
+  // keys in display order (src/domain/calendar.ts). A day absent here keeps
+  // the derived tone order
+  dayOrder: Record<string, string[]>;
 }
 
 export function newId(): Id {
@@ -119,6 +124,7 @@ export function emptyDoc(): LifeMapDoc {
     tags: {},
     rootNodeIds: [],
     rootEdgeIds: [],
+    dayOrder: {},
   };
 }
 

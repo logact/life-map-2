@@ -2,7 +2,7 @@ import { describe, expect, it } from "@jest/globals";
 
 import { enablePatches, produceWithPatches } from "immer";
 
-import { calendarMonth } from "../calendar";
+import { calendarMonth, CalItem, CalState, CalTone, groupDayItems, itemState } from "../calendar";
 import { addFreeNode } from "../commands";
 import { emptyDoc, LifeMapDoc, makeGoal, makeRecordNode, makeTask, NodeData } from "../doc";
 
@@ -26,7 +26,7 @@ describe("calendarMonth", () => {
     const rec = makeRecordNode(0, 0, "Shipped v1", "notes", at("2026-09-05"));
     const month = calendarMonth(docWith(rec), Y, M, NOW);
     expect(month.get(5)).toEqual([
-      { nodeId: rec.id, title: "Shipped v1", label: "Record", tone: "neutral" },
+      { nodeId: rec.id, key: `${rec.id}:record`, kind: "record", title: "Shipped v1", label: "Record", tone: "neutral" },
     ]);
     expect(month.has(6)).toBe(false);
   });
@@ -39,7 +39,7 @@ describe("calendarMonth", () => {
     });
     const month = calendarMonth(docWith(goal), Y, M, NOW);
     expect(month.get(30)).toEqual([
-      { nodeId: goal.id, title: "Launch", label: "Target date", tone: "primary" },
+      { nodeId: goal.id, key: `${goal.id}:target`, kind: "goal", title: "Launch", label: "Target date", tone: "primary" },
     ]);
     expect(month.get(1)?.[0].label).toBe("Started");
     expect(month.get(28)?.[0].tone).toBe("done");
@@ -62,19 +62,22 @@ describe("calendarMonth", () => {
       log: [at("2026-09-21")],
     });
     const month = calendarMonth(docWith(habit), Y, M, NOW);
+    // the key is slot-based, so it stays `${id}:habit` across every label flip
     expect(month.get(20)).toEqual([
-      { nodeId: habit.id, title: "Gym", label: "Missed", tone: "attention" },
+      { nodeId: habit.id, key: `${habit.id}:habit`, kind: "habit", title: "Gym", label: "Missed", tone: "attention" },
     ]);
     expect(month.get(21)?.[0].label).toBe("Logged");
     expect(month.get(21)?.[0].tone).toBe("done");
+    expect(month.get(21)?.[0].key).toBe(`${habit.id}:habit`);
+    expect(month.get(21)?.[0].kind).toBe("habit");
     expect(month.get(22)).toEqual([
-      { nodeId: habit.id, title: "Gym", label: "Missed", tone: "attention" },
+      { nodeId: habit.id, key: `${habit.id}:habit`, kind: "habit", title: "Gym", label: "Missed", tone: "attention" },
     ]);
     expect(month.get(23)).toEqual([
-      { nodeId: habit.id, title: "Gym", label: "Due today", tone: "attention" },
+      { nodeId: habit.id, key: `${habit.id}:habit`, kind: "habit", title: "Gym", label: "Due today", tone: "attention" },
     ]);
     expect(month.get(24)).toEqual([
-      { nodeId: habit.id, title: "Gym", label: "Scheduled", tone: "future" },
+      { nodeId: habit.id, key: `${habit.id}:habit`, kind: "habit", title: "Gym", label: "Scheduled", tone: "future" },
     ]);
     expect(month.has(19)).toBe(false); // before the anchor
   });
@@ -131,18 +134,18 @@ describe("calendarMonth", () => {
     });
     const month = calendarMonth(docWith(overdue, dueToday, future, done), Y, M, NOW);
     expect(month.get(20)).toEqual([
-      { nodeId: overdue.id, title: "Old", label: "Overdue", tone: "attention" },
+      { nodeId: overdue.id, key: `${overdue.id}:due`, kind: "task", title: "Old", label: "Overdue", tone: "attention" },
     ]);
     expect(month.get(23)).toEqual([
-      { nodeId: dueToday.id, title: "Now", label: "Due today", tone: "attention" },
+      { nodeId: dueToday.id, key: `${dueToday.id}:due`, kind: "task", title: "Now", label: "Due today", tone: "attention" },
     ]);
     expect(month.get(28)).toEqual([
-      { nodeId: future.id, title: "Soon", label: "Due date", tone: "primary" },
+      { nodeId: future.id, key: `${future.id}:due`, kind: "task", title: "Soon", label: "Due date", tone: "primary" },
     ]);
     // a finished task's due date is plain history; the completion stamp
     // still shows on its own day
     expect(month.get(25)).toEqual([
-      { nodeId: done.id, title: "Finished", label: "Due date", tone: "neutral" },
+      { nodeId: done.id, key: `${done.id}:due`, kind: "task", title: "Finished", label: "Due date", tone: "neutral" },
     ]);
     expect(month.get(22)?.some((it) => it.nodeId === done.id && it.label === "Completed")).toBe(true);
   });
@@ -170,5 +173,119 @@ describe("calendarMonth", () => {
     for (const a of adds) doc = produceWithPatches(doc, a.recipe)[0];
     const items = calendarMonth(doc, Y, M, NOW).get(29) ?? [];
     expect(items.map((it) => it.label)).toEqual(["Target date", "Due date", "Record"]);
+  });
+
+  it("a stored day order overrides the tone order", () => {
+    const habit = makeTask(0, 0, "Gym", {
+      recur: { freq: "daily", interval: 1, anchor: at("2026-09-01") },
+    });
+    const goal = makeGoal(0, 0, "Launch", { targetDate: at("2026-09-23") });
+    const rec = makeRecordNode(0, 0, "Shipped", "", at("2026-09-23"));
+    const doc = docWith(habit, goal, rec);
+    doc.dayOrder[String(new Date(2026, 8, 23).getTime())] = [
+      `${rec.id}:record`,
+      `${goal.id}:target`,
+      `${habit.id}:habit`,
+    ];
+    const month = calendarMonth(doc, Y, M, NOW);
+    expect(month.get(23)?.map((it) => it.key)).toEqual([
+      `${rec.id}:record`,
+      `${goal.id}:target`,
+      `${habit.id}:habit`,
+    ]);
+  });
+
+  it("items unknown to the stored order append after the known ones, tone-sorted", () => {
+    const habit = makeTask(0, 0, "Gym", {
+      recur: { freq: "daily", interval: 1, anchor: at("2026-09-01") },
+    });
+    const goal = makeGoal(0, 0, "Launch", { targetDate: at("2026-09-23") });
+    const rec = makeRecordNode(0, 0, "Shipped", "", at("2026-09-23"));
+    const doc = docWith(habit, goal, rec);
+    doc.dayOrder[String(new Date(2026, 8, 23).getTime())] = [`${goal.id}:target`];
+    const month = calendarMonth(doc, Y, M, NOW);
+    expect(month.get(23)?.map((it) => it.key)).toEqual([
+      `${goal.id}:target`,
+      `${habit.id}:habit`, // attention outranks the record's neutral
+      `${rec.id}:record`,
+    ]);
+  });
+
+  it("stored keys with no item on the day are ignored", () => {
+    const goal = makeGoal(0, 0, "Launch", { targetDate: at("2026-09-23") });
+    const doc = docWith(goal);
+    doc.dayOrder[String(new Date(2026, 8, 23).getTime())] = [
+      "gone:record",
+      `${goal.id}:target`,
+      "alsogone:habit",
+    ];
+    const month = calendarMonth(doc, Y, M, NOW);
+    expect(month.get(23)?.map((it) => it.key)).toEqual([`${goal.id}:target`]);
+  });
+
+  it("skips synthetic midpoint tasks, even completed ones", () => {
+    const mid = makeTask(0, 0, "", { completedAt: at("2026-09-23"), synthetic: true });
+    const month = calendarMonth(docWith(mid), Y, M, NOW);
+    expect(month.size).toBe(0);
+  });
+
+  it("groups a node's same-day rows: Completed beats Due today", () => {
+    // the filter-critical case: a task due today that was completed today
+    // answers Done, not To do
+    const task = makeTask(0, 0, "Ship it", {
+      dueDate: at("2026-09-23"),
+      completedAt: at("2026-09-23"),
+    });
+    const month = calendarMonth(docWith(task), Y, M, NOW);
+    const grouped = groupDayItems(month.get(23) ?? []);
+    expect(grouped.map((it) => it.label)).toEqual(["Completed"]);
+    expect(grouped[0].tone).toBe("done");
+  });
+
+  it("groups a goal's target + started + completed day to Completed", () => {
+    const goal = makeGoal(0, 0, "Launch", {
+      targetDate: at("2026-09-23"),
+      startedAt: at("2026-09-23"),
+      completedAt: at("2026-09-23"),
+    });
+    const month = calendarMonth(docWith(goal), Y, M, NOW);
+    expect(groupDayItems(month.get(23) ?? []).map((it) => it.label)).toEqual(["Completed"]);
+  });
+
+  it("groups a future Due date with a same-day Started to the Due date", () => {
+    const task = makeTask(0, 0, "Slow burn", {
+      dueDate: at("2026-09-28"),
+      startedAt: at("2026-09-28"),
+    });
+    const month = calendarMonth(docWith(task), Y, M, NOW);
+    expect(groupDayItems(month.get(28) ?? []).map((it) => it.label)).toEqual(["Due date"]);
+  });
+
+  it("grouping keeps the derivation order for the survivors", () => {
+    const habit = makeTask(0, 0, "Gym", {
+      recur: { freq: "daily", interval: 1, anchor: at("2026-09-01") },
+    });
+    const rec = makeRecordNode(0, 0, "Shipped", "", at("2026-09-23"));
+    const month = calendarMonth(docWith(habit, rec), Y, M, NOW);
+    expect(groupDayItems(month.get(23) ?? []).map((it) => it.key)).toEqual([
+      `${habit.id}:habit`,
+      `${rec.id}:record`,
+    ]);
+  });
+});
+
+describe("itemState", () => {
+  it("maps the tones onto the To do / Done / Log chips", () => {
+    const cases: [CalTone, CalState][] = [
+      ["attention", "todo"],
+      ["primary", "todo"],
+      ["future", "todo"],
+      ["done", "done"],
+      ["neutral", "log"],
+    ];
+    for (const [tone, state] of cases) {
+      const item = { nodeId: "n", key: "n:due", kind: "task", title: "t", label: "l", tone } as CalItem;
+      expect(itemState(item)).toBe(state);
+    }
   });
 });

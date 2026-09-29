@@ -21,6 +21,7 @@ import {
   removeNote,
   renameNode,
   renameTag,
+  reorderDayItems,
   replaceDoc,
   setEdgeBend,
   setNodeDetail,
@@ -689,5 +690,24 @@ describe("recurring tasks", () => {
     const pasted = next.nodes[paste.nodeIds[0]];
     expect(pasted.recur).toEqual(rule);
     expect(pasted.log).toHaveLength(1);
+  });
+});
+
+
+describe("calendar day order", () => {
+  const dayKey = String(new Date(2026, 8, 23).getTime());
+  const noon = new Date(2026, 8, 23, 12).getTime();
+
+  it("stores the key list under the day's local start", () => {
+    const { doc } = fixture();
+    const next = run(doc, reorderDayItems(noon, ["a:due", "b:record"]));
+    expect(next.dayOrder[dayKey]).toEqual(["a:due", "b:record"]);
+  });
+
+  it("re-reordering overwrites, and every reorder undoes to the exact prior doc", () => {
+    const { doc } = fixture();
+    const next = expectRoundTrip(doc, reorderDayItems(noon, ["a:due"]));
+    const again = expectRoundTrip(next, reorderDayItems(noon, ["b:record", "a:due"]));
+    expect(again.dayOrder[dayKey]).toEqual(["b:record", "a:due"]);
   });
 });

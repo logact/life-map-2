@@ -154,10 +154,24 @@ log on an unscheduled catch-up day still happened; a logged scheduled day
 reads as done, never missed). A task's due date classifies too:
 **Overdue** / **Due today** ask for attention, a future pin is a plain
 deadline, a finished task's pin is history. Each item carries a **tone**
-(attention / primary / done / neutral / future) that fixes both its dot
-color and its row order inside a day. Pure like the recurrence
+(attention / primary / done / neutral / future) that fixes its dot color
+and its default row order inside a day, a **kind** (goal / task / habit /
+record — a task with a recur rule is a habit) for the day list's filters,
+and a stable slot-based **key** (`nodeId:slot`) that survives label flips —
+a day's manual order (§4) is stored against these keys and overrides the
+tone order for the items it knows; items it doesn't know append
+tone-sorted. Synthetic midpoint tasks (edge structure, see §3) are skipped,
+like in the schedule sheet. Pure like the recurrence
 derivations: `now` is an explicit parameter, so the rules test without a
 clock.
+
+`groupDayItems(items)` collapses one day's rows to **one row per node**,
+keeping the most meaningful label by precedence (Completed/Logged >
+Missed/Due today/Overdue > Target/Due date > Started > Scheduled > Record)
+— a task due today that was completed today answers **Done**, not **To
+do**; the losing stamps still happened and the map still holds them. The
+day list's state chips ride on the tones via `itemState`: **To do** =
+attention/primary/future, **Done** = done, **Log** = neutral.
 
 ---
 
@@ -173,6 +187,8 @@ Local **SQLite** (`lifemap.db`, WAL mode) — no server, no account.
   bend_x, bend_y)` — stores the whole edge tree.
 - `tags(id, name, color)` — the tag registry; a node's `tagIds` live in its
   `data` blob.
+- `day_order(day_ms, keys)` — manual row order for calendar days, one row
+  per ordered day; `keys` is the day's item keys (JSON) in display order.
 - `meta(key, value)` — app-level flags that are not map content (currently
   just `seed_applied`).
 - **Save** = full rewrite inside one transaction, debounced through a
@@ -361,11 +377,26 @@ button (below the fit button; the route is `/calendar`).
 - A **month grid** (weeks start Sunday, like the date picker and the
   recurrence rules): today is outlined, the selected day is filled, and each
   day carries up to three tone dots from `calendarMonth` (§1.9) with a
-  legend underneath.
-- The **selected day's list** shows every item — tone dot, node title,
-  caption (Due today / Missed / Overdue / Due date / Logged / Scheduled /
-  Target date / Completed / Started / Record). Month nav moves the view
+  legend underneath. A chevron in the card's header collapses the grid to a
+  **week strip** — the selected day's week with day numbers and tone dots,
+  the selected day filled, today ringed, every cell a tap target (a day in
+  an adjacent month shifts the month view). Session state; the list gets
+  the freed space on busy days.
+- The **selected day's list** shows one row per node (§1.9's grouping) —
+  tone dot, node title, the winning caption (Due today / Missed / Overdue /
+  Due date / Logged / Scheduled / Target date / Completed / Started /
+  Record). Two **filter rows** sit above it, each single-select — state
+  (**All / To do / Done / Log**) and kind (**All kinds / Tasks / Habits /
+  Goals / Records**) — combining as intersection; they persist while
+  swiping days and never affect the grid's dots. Month nav moves the view
   (selecting the 1st); **Today** jumps back to the current month and day.
+- The day list is **orderable**: drag a row's grip handle (or long-press the
+  row) to a new slot; the drop commits one undoable `reorderDayItems` command
+  storing the day's row keys in display order (`day_order` table, keyed by
+  the day's local start). A day never reordered keeps the tone order (§1.9);
+  on a reordered day, items arriving later append tone-sorted after the
+  positioned ones. Reordering rests while a filter is on, so a filtered
+  drag can't commit a partial order over the day's full one.
 - **Tapping an item hands the node to the map**: the page sets
   `pendingNodeFocusId` on the doc store (transient, never persisted) and
   pops back; the map consumes the id with the note search's reveal — zoom

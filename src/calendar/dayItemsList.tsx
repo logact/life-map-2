@@ -48,6 +48,9 @@ interface RowProps {
   item: CalItem;
   // the row's position in the rendered list; the slot map displaces from here
   index: number;
+  // false while the day list is filtered: a partial drag would commit a
+  // partial order, so the grip/long-press affordance rests
+  reorderable: boolean;
   slots: SharedValue<Slots>;
   draggingKey: SharedValue<string | null>;
   dragStartSlot: SharedValue<number>;
@@ -61,6 +64,7 @@ interface RowProps {
 const DayRow = memo(function DayRow({
   item,
   index,
+  reorderable,
   slots,
   draggingKey,
   dragStartSlot,
@@ -119,10 +123,20 @@ const DayRow = memo(function DayRow({
       runOnJS(commitKeys)(ordered);
     };
     return {
-      handlePan: Gesture.Pan().minDistance(2).onStart(start).onUpdate(update).onFinalize(finalize),
-      rowPan: Gesture.Pan().activateAfterLongPress(200).onStart(start).onUpdate(update).onFinalize(finalize),
+      handlePan: Gesture.Pan()
+        .enabled(reorderable)
+        .minDistance(2)
+        .onStart(start)
+        .onUpdate(update)
+        .onFinalize(finalize),
+      rowPan: Gesture.Pan()
+        .enabled(reorderable)
+        .activateAfterLongPress(200)
+        .onStart(start)
+        .onUpdate(update)
+        .onFinalize(finalize),
     };
-  }, [item.key, slots, draggingKey, dragStartSlot, dragOffset, count, lockScroll, commitKeys]);
+  }, [item.key, reorderable, slots, draggingKey, dragStartSlot, dragOffset, count, lockScroll, commitKeys]);
 
   const animatedStyle = useAnimatedStyle(() => {
     const slot = slots.value[item.key] ?? index;
@@ -151,13 +165,15 @@ const DayRow = memo(function DayRow({
             {item.title}
           </Text>
           <Text style={ls.itemLabel}>{item.label}</Text>
-          <GestureDetector gesture={handlePan}>
-            <View accessibilityLabel="Drag to reorder" style={ls.grip}>
-              <View style={ls.gripBar} />
-              <View style={ls.gripBar} />
-              <View style={ls.gripBar} />
-            </View>
-          </GestureDetector>
+          {reorderable && (
+            <GestureDetector gesture={handlePan}>
+              <View accessibilityLabel="Drag to reorder" style={ls.grip}>
+                <View style={ls.gripBar} />
+                <View style={ls.gripBar} />
+                <View style={ls.gripBar} />
+              </View>
+            </GestureDetector>
+          )}
         </Pressable>
       </Animated.View>
     </GestureDetector>
@@ -169,11 +185,18 @@ export function DayItemsList({
   dayMs,
   onPressItem,
   run,
+  reorderable = true,
+  emptyHint,
 }: {
   items: CalItem[];
   dayMs: number;
   onPressItem: (nodeId: Id) => void;
   run: (recipe: Recipe) => void;
+  // false while the list is filtered: a drag commits only the rendered rows,
+  // which would shred the day's full stored order
+  reorderable?: boolean;
+  // empty-state caption; defaults to the plain "Nothing on this day"
+  emptyHint?: string;
 }) {
   const slots = useSharedValue<Slots>(Object.fromEntries(items.map((it, i) => [it.key, i])));
   const draggingKey = useSharedValue<string | null>(null);
@@ -204,7 +227,7 @@ export function DayItemsList({
   const lockScroll = useCallback((locked: boolean) => setScrollLocked(locked), []);
 
   if (items.length === 0) {
-    return <Text style={ls.empty}>Nothing on this day</Text>;
+    return <Text style={ls.empty}>{emptyHint ?? "Nothing on this day"}</Text>;
   }
 
   return (
@@ -215,6 +238,7 @@ export function DayItemsList({
             key={it.key}
             item={it}
             index={index}
+            reorderable={reorderable}
             slots={slots}
             draggingKey={draggingKey}
             dragStartSlot={dragStartSlot}

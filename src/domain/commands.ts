@@ -15,7 +15,7 @@ import {
   RecurRule,
 } from "./doc";
 import { ClipboardPayload } from "./clipboard";
-import { parseRecurLog, parseRecurRule } from "./recur";
+import { dayStart, parseRecurLog, parseRecurRule } from "./recur";
 import { PALETTE } from "@/ui/palette";
 
 // ---------- commands: the ONLY way a doc changes ----------
@@ -636,6 +636,16 @@ export function setNodeTimes(
       if (typeof times.targetDate === "number") node.targetDate = times.targetDate;
       else if (times.targetDate === null) delete node.targetDate;
     }
+  };
+}
+
+// the calendar day list's manual order: keys are that day's CalItem keys in
+// display order. The caller always passes the full current list, so items
+// that left the day drop out of the stored order here
+export function reorderDayItems(dayMs: number, keys: string[]): Recipe {
+  const day = String(dayStart(dayMs));
+  return (draft) => {
+    draft.dayOrder[day] = keys;
   };
 }
 

@@ -154,8 +154,11 @@ log on an unscheduled catch-up day still happened; a logged scheduled day
 reads as done, never missed). A task's due date classifies too:
 **Overdue** / **Due today** ask for attention, a future pin is a plain
 deadline, a finished task's pin is history. Each item carries a **tone**
-(attention / primary / done / neutral / future) that fixes both its dot
-color and its row order inside a day. Pure like the recurrence
+(attention / primary / done / neutral / future) that fixes its dot color
+and its default row order inside a day, and a stable slot-based **key**
+(`nodeId:slot`) that survives label flips — a day's manual order (§4) is
+stored against these keys and overrides the tone order for the items it
+knows; items it doesn't know append tone-sorted. Pure like the recurrence
 derivations: `now` is an explicit parameter, so the rules test without a
 clock.
 
@@ -173,6 +176,8 @@ Local **SQLite** (`lifemap.db`, WAL mode) — no server, no account.
   bend_x, bend_y)` — stores the whole edge tree.
 - `tags(id, name, color)` — the tag registry; a node's `tagIds` live in its
   `data` blob.
+- `day_order(day_ms, keys)` — manual row order for calendar days, one row
+  per ordered day; `keys` is the day's item keys (JSON) in display order.
 - `meta(key, value)` — app-level flags that are not map content (currently
   just `seed_applied`).
 - **Save** = full rewrite inside one transaction, debounced through a
@@ -366,6 +371,12 @@ button (below the fit button; the route is `/calendar`).
   caption (Due today / Missed / Overdue / Due date / Logged / Scheduled /
   Target date / Completed / Started / Record). Month nav moves the view
   (selecting the 1st); **Today** jumps back to the current month and day.
+- The day list is **orderable**: drag a row's grip handle (or long-press the
+  row) to a new slot; the drop commits one undoable `reorderDayItems` command
+  storing the day's row keys in display order (`day_order` table, keyed by
+  the day's local start). A day never reordered keeps the tone order (§1.9);
+  on a reordered day, items arriving later append tone-sorted after the
+  positioned ones.
 - **Tapping an item hands the node to the map**: the page sets
   `pendingNodeFocusId` on the doc store (transient, never persisted) and
   pops back; the map consumes the id with the note search's reveal — zoom

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useRouter } from "expo-router";
 
+import { DayItemsList, TONE_COLOR } from "@/calendar/dayItemsList";
 import { ScheduleSheet } from "@/calendar/scheduleSheet";
 import { CreateSheet } from "@/calendar/createSheet";
 import { CalItem, calendarMonth, CalTone } from "@/domain/calendar";
@@ -11,12 +12,14 @@ import { contentCenter } from "@/map/fitZoom";
 import { CreateNodeForm, TextDraft } from "@/map/overlays/forms";
 import { fmtDate } from "@/map/utils";
 import { useDocStore } from "@/state/docStore";
-import { CANVAS_BG, INK, RADIUS, SHADOW, STATUS_COLOR } from "@/ui/theme";
+import { CANVAS_BG, INK, RADIUS, SHADOW } from "@/ui/theme";
 
 // The calendar page: the document's dated side as a month calendar. Days
 // carry tone dots (what the month holds); the selected day's items list
 // below. Tapping an item hands the node back to the map through the store
 // (pendingNodeFocusId) and returns — the map reveals and centers it.
+// Long-pressing a row — or dragging its grip handle — moves it to a new
+// position: the day's order persists (src/calendar/dayItemsList.tsx).
 // Weeks start on Sunday, like the date picker and the recurrence rules.
 //
 // The day card also creates: "+ New" adds a goal (target = the day), a
@@ -39,14 +42,6 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ];
 const DOW = ["S", "M", "T", "W", "T", "F", "S"];
-
-const TONE_COLOR: Record<CalTone, string> = {
-  attention: STATUS_COLOR["in-progress"],
-  primary: INK.primary,
-  done: STATUS_COLOR.done,
-  neutral: INK.tertiary,
-  future: INK.hairline,
-};
 
 const LEGEND: { tone: CalTone; label: string }[] = [
   { tone: "attention", label: "Due/Missed" },
@@ -252,25 +247,7 @@ export default function CalendarScreen() {
             </Pressable>
           </View>
         </View>
-        <ScrollView contentContainerStyle={{ gap: 2 }}>
-          {dayItems.length === 0 ? (
-            <Text style={cs.empty}>Nothing on this day</Text>
-          ) : (
-            dayItems.map((it, i) => (
-              <Pressable
-                key={`${it.nodeId}-${it.label}-${i}`}
-                style={({ pressed }) => [cs.item, pressed && { opacity: 0.6 }]}
-                onPress={() => focusOnMap(it.nodeId)}
-              >
-                <View style={[cs.dot, { backgroundColor: TONE_COLOR[it.tone] }]} />
-                <Text style={cs.itemTitle} numberOfLines={1}>
-                  {it.title}
-                </Text>
-                <Text style={cs.itemLabel}>{it.label}</Text>
-              </Pressable>
-            ))
-          )}
-        </ScrollView>
+        <DayItemsList items={dayItems} dayMs={selectedDayMs} onPressItem={focusOnMap} run={run} />
       </View>
 
       {/* schedule picker: pin a goal's target date or a plain task's due
@@ -445,28 +422,5 @@ const cs = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
     color: INK.primary,
-  },
-  empty: {
-    fontSize: 13,
-    color: INK.tertiary,
-    paddingVertical: 8,
-  },
-  item: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: INK.subtle,
-  },
-  itemTitle: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "500",
-    color: INK.primary,
-  },
-  itemLabel: {
-    fontSize: 12,
-    color: INK.tertiary,
   },
 });

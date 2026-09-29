@@ -33,3 +33,20 @@ describe("mapDb tag persistence", () => {
     expect(parsed.schemaVersion).toBe(3);
   });
 });
+
+
+describe("mapDb day order persistence", () => {
+  it("docToRows/rowsToDoc round-trips manual day orders", () => {
+    const doc = emptyDoc();
+    doc.dayOrder = { "1790000000000": ["a:due", "b:record"] };
+    const rows = docToRows(doc);
+    expect(rows.dayOrder).toEqual([{ day_ms: 1790000000000, keys: '["a:due","b:record"]' }]);
+    expect(rowsToDoc(rows.nodes, rows.notes, rows.edges, rows.tags, rows.dayOrder)).toEqual(doc);
+  });
+
+  it("skips a corrupt keys blob without failing the load", () => {
+    expect(rowsToDoc([], [], [], [], [{ day_ms: 123, keys: "{not json" }]).dayOrder).toEqual({});
+    // valid JSON but not a string array is skipped too
+    expect(rowsToDoc([], [], [], [], [{ day_ms: 123, keys: "[1,2]" }]).dayOrder).toEqual({});
+  });
+});

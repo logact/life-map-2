@@ -80,7 +80,19 @@ async function migrate1to2(db: SQLite.SQLiteDatabase): Promise<void> {
   `);
 }
 
-const MIGRATIONS: ((db: SQLite.SQLiteDatabase) => Promise<void>)[] = [migrate0to1, migrate1to2];
+async function migrate2to3(db: SQLite.SQLiteDatabase): Promise<void> {
+  // manual row order for calendar days: one row per manually ordered day,
+  // keys = the day's CalItem keys (JSON array) in display order
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS day_order (
+      day_ms INTEGER PRIMARY KEY,
+      keys TEXT NOT NULL
+    );
+    PRAGMA user_version = 3;
+  `);
+}
+
+const MIGRATIONS: ((db: SQLite.SQLiteDatabase) => Promise<void>)[] = [migrate0to1, migrate1to2, migrate2to3];
 
 async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
   const row = await db.getFirstAsync<{ user_version: number }>("PRAGMA user_version");
@@ -147,6 +159,11 @@ export interface TagRow {
   color: string | null;
 }
 
+export interface DayOrderRow {
+  day_ms: number;
+  keys: string;
+}
+
 // ---------- doc <-> rows (pure; unit-tested without sqlite) ----------
 
 function serializeKindData(node: NodeData): Record<string, unknown> {
@@ -187,6 +204,7 @@ export function docToRows(doc: LifeMapDoc): {
   notes: NoteRow[];
   edges: EdgeRow[];
   tags: TagRow[];
+  dayOrder: DayOrderRow[];
 } {
   const nodes: NodeRow[] = [];
   const notes: NoteRow[] = [];
@@ -234,7 +252,11 @@ export function docToRows(doc: LifeMapDoc): {
   };
   doc.rootEdgeIds.forEach((id, i) => collect(id, i, 0, null));
   const tags: TagRow[] = Object.values(doc.tags).map((t) => ({ id: t.id, name: t.name, color: t.color }));
-  return { nodes, notes, edges, tags };
+  const dayOrder: DayOrderRow[] = Object.entries(doc.dayOrder).map(([dayMs, keys]) => ({
+    day_ms: Number(dayMs),
+    keys: JSON.stringify(keys),
+  }));
+  return { nodes, notes, edges, tags, dayOrder };
 }
 
 function parseNodeRow(row: NodeRow): NodeData | null {
@@ -291,6 +313,7 @@ export function rowsToDoc(
   noteRows: NoteRow[],
   edgeRows: EdgeRow[],
   tagRows: TagRow[] = [],
+  dayOrderRows: DayOrderRow[] = [],
 ): LifeMapDoc {
   const doc: LifeMapDoc = {
     schemaVersion: 3,
@@ -299,10 +322,22 @@ export function rowsToDoc(
     tags: {},
     rootNodeIds: [],
     rootEdgeIds: [],
+    dayOrder: {},
   };
 
   for (const row of tagRows) {
     doc.tags[row.id] = { id: row.id, name: row.name, color: row.color ?? "" };
+  }
+
+  for (const row of dayOrderRows) {
+    try {
+      const keys: unknown = JSON.parse(row.keys);
+      if (Array.isArray(keys) && keys.every((k) => typeof k === "string")) {
+        doc.dayOrder[String(row.day_ms)] = keys;
+      }
+    } catch (err) {
+      console.warn(`[mapDb] skipping day_order row ${row.day_ms}: corrupt keys`, err);
+    }
   }
 
   for (const row of nodeRows) {
@@ -360,7 +395,9 @@ export async function saveDoc(doc: LifeMapDoc): Promise<void> {
   const db = await getDb();
   const rows = docToRows(doc);
   await db.withExclusiveTransactionAsync(async (txn) => {
-    await txn.execAsync("DELETE FROM notes; DELETE FROM edges; DELETE FROM nodes; DELETE FROM tags;");
+    await txn.execAsync(
+      "DELETE FROM notes; DELETE FROM edges; DELETE FROM nodes; DELETE FROM tags; DELETE FROM day_order;",
+    );
     for (const row of rows.nodes) {
       await txn.runAsync("INSERT INTO nodes (id, kind, title, x, y, data) VALUES (?, ?, ?, ?, ?, ?)", [
         row.id,
@@ -399,6 +436,9 @@ export async function saveDoc(doc: LifeMapDoc): Promise<void> {
         row.color,
       ]);
     }
+    for (const row of rows.dayOrder) {
+      await txn.runAsync("INSERT INTO day_order (day_ms, keys) VALUES (?, ?)", [row.day_ms, row.keys]);
+    }
   });
 }
 
@@ -416,7 +456,8 @@ export async function loadDoc(): Promise<LifeMapDoc | null> {
   const noteRows = await db.getAllAsync<NoteRow>("SELECT * FROM notes ORDER BY position ASC");
   const edgeRows = await db.getAllAsync<EdgeRow>("SELECT * FROM edges");
   const tagRows = await db.getAllAsync<TagRow>("SELECT * FROM tags");
-  return rowsToDoc(nodeRows, noteRows, edgeRows, tagRows);
+  const dayOrderRows = await db.getAllAsync<DayOrderRow>("SELECT * FROM day_order");
+  return rowsToDoc(nodeRows, noteRows, edgeRows, tagRows, dayOrderRows);
 }
 
 // ---------- meta: app-level flags that are not map content ----------

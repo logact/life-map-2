@@ -40,6 +40,9 @@ function NodeInfoCard(props: {
   doc: LifeMapDoc;
   run: (recipe: Recipe) => void;
   onOpenNotes: () => void;
+  // reports the inline edit's active state: the screen reserves keyboard
+  // room in its bottom-dock camera accommodation only while an edit is on
+  onInlineEditChange: (active: boolean) => void;
   // the screen's clock, captured outside render: feeds the recurring
   // task's due-state text and the goal target's countdown
   now: number;
@@ -137,6 +140,7 @@ function NodeInfoCard(props: {
     if (editing && editing !== field) commit(editing, draft);
     setDraft(initial);
     setEditing(field);
+    props.onInlineEditChange(true);
   };
   // every edit-end path funnels through these (submit, blur, ✓/✕, a press
   // on another control). They clear the ref first, so a late native onBlur
@@ -148,10 +152,12 @@ function NodeInfoCard(props: {
     commit(field, text);
     latestRef.current = { editing: null, draft: "" };
     setEditing(null);
+    props.onInlineEditChange(false);
   };
   const cancelEdit = () => {
     latestRef.current = { editing: null, draft: "" };
     setEditing(null);
+    props.onInlineEditChange(false);
   };
   // a blur only ends the edit if it belongs to the field that is still
   // active — a late blur from an input that was just swapped out (field
@@ -469,6 +475,7 @@ export function MapInfoCard(props: {
   zoomedIds: ReadonlySet<string>;
   run: (recipe: Recipe) => void;
   onOpenNotes: (nodeId: string) => void;
+  onInlineEditChange: (active: boolean) => void;
   onZoomStep: (deeper: boolean) => void;
   onCloseEdge: () => void;
   now: number;
@@ -486,6 +493,7 @@ export function MapInfoCard(props: {
         doc={doc}
         run={props.run}
         onOpenNotes={() => props.onOpenNotes(node.id)}
+        onInlineEditChange={props.onInlineEditChange}
         now={props.now}
       />
     );

@@ -3,6 +3,7 @@ import {
   Alert,
   AppState,
   Keyboard,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -162,6 +163,32 @@ export default function MapScreen() {
     return () => clearTimeout(id);
   }, []);
 
+  // the soft keyboard's height while open (iOS only): while an info-card
+  // field is edited inline, the BottomPanel rides above the keyboard (its
+  // KeyboardAvoidingView), so the camera accommodation must clear the
+  // panel AND the keyboard. Android re-anchors the panel through the
+  // window resize instead, so it needs no extra room
+  const [keyboardH, setKeyboardH] = useState(0);
+  useEffect(() => {
+    if (Platform.OS !== "ios") return;
+    // will* events fire with the keyboard's slide, keeping the camera
+    // move in step with the panel's lift (KeyboardAvoidingView uses the
+    // same events)
+    const show = Keyboard.addListener("keyboardWillShow", (e) =>
+      setKeyboardH(e.endCoordinates.height),
+    );
+    const hide = Keyboard.addListener("keyboardWillHide", () => setKeyboardH(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  // an info card reports whether its inline edit is active; only an
+  // ACTIVE edit reserves keyboard room — the flag resets on every tap
+  // that dismisses or retargets the card, so a stale flag (mid-edit
+  // retarget) can't make the accommodation reserve room no input uses
+  const [inlineEditActive, setInlineEditActive] = useState(false);
+
   const closeOverlays = () => {
     setInfoTarget(null);
     setNodeFocusId(null);
@@ -171,6 +198,7 @@ export default function MapScreen() {
     setNoteDraft(null);
     setCreatePicker(null);
     setRoadMenuOpen(false);
+    setInlineEditActive(false);
   };
 
   // Every domain change goes through the store's run(). Afterwards, prune
@@ -397,8 +425,10 @@ export default function MapScreen() {
 
   // bottom-dock accommodation: when a panel opens (or grows), ease the
   // camera up just enough that the panel's object stays clear of the
-  // panel's area. An object already visible stays put (no jumpiness); any
-  // user gesture cancels the tween (useMapCamera)
+  // panel's area — plus the keyboard's height while an info-card field is
+  // being edited inline (the panel rides up over the keyboard then, so the
+  // object would land under it). An object already visible stays put (no
+  // jumpiness); any user gesture cancels the tween (useMapCamera)
   useEffect(() => {
     const open = Boolean(menuNodeId || menuEdgeId || infoTarget || createPicker || roadMenuOpen);
     // a stale height after close is harmless: the panel re-measures on the
@@ -421,11 +451,12 @@ export default function MapScreen() {
     if (!world) return;
     const camNow = camera.getCam();
     const screenY = world.y * camNow.scale + camNow.y + camera.getViewport().y;
-    const limit = height - panelHeight - 40;
+    const limit = height - panelHeight - (inlineEditActive ? keyboardH : 0) - 40;
     if (screenY > limit) camera.panByAnimated(0, limit - screenY);
-    // fires on panel open / height change only; reads the camera via refs
+    // fires on panel open / height change / keyboard show-hide only; reads
+    // the camera via refs
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panelHeight, menuNodeId, menuEdgeId, infoTarget, createPicker, roadMenuOpen]);
+  }, [panelHeight, inlineEditActive, keyboardH, menuNodeId, menuEdgeId, infoTarget, createPicker, roadMenuOpen]);
 
   // ---------- derived render state ----------
 
@@ -547,6 +578,7 @@ export default function MapScreen() {
     setDragArmedId(null);
     setMenuNodeId(null);
     setMenuEdgeId(null);
+    setInlineEditActive(false); // the retargeted card mounts with no edit
     setInfoTarget({ kind: "node", id });
     // nodes aren't zoomable; the edge lens clears unless it is locked
     if (!selectionLocked) setZoomEdgeIds([]);
@@ -554,6 +586,7 @@ export default function MapScreen() {
 
   const onNodeDoubleTap = (id: string) => {
     setInfoTarget(null);
+    setInlineEditActive(false); // the menu has no inline edit
     setMenuEdgeId(null);
     setMenuNodeId(id);
     // spotlight the menu's node the way a single tap would — the object
@@ -601,6 +634,7 @@ export default function MapScreen() {
   const onEdgeSingleTap = (id: string) => {
     setMenuNodeId(null);
     setMenuEdgeId(null);
+    setInlineEditActive(false); // the retargeted card mounts with no edit
     setInfoTarget({ kind: "edge", id });
     setNodeFocusId(null); // the edge's own selection takes over the canvas
     setZoomEdgeIds([id]); // the tapped edge becomes the zoom selection
@@ -608,6 +642,7 @@ export default function MapScreen() {
 
   const onEdgeDoubleTap = (id: string) => {
     setInfoTarget(null);
+    setInlineEditActive(false); // the menu has no inline edit
     setNodeFocusId(null);
     setMenuNodeId(null);
     setMenuEdgeId(id);
@@ -1144,6 +1179,7 @@ export default function MapScreen() {
             zoomedIds={zoomedIds}
             run={run}
             onOpenNotes={(nodeId) => setNotesNodeId(nodeId)}
+            onInlineEditChange={setInlineEditActive}
             onZoomStep={(deeper) => zoomSelectionStep(deeper)}
             onCloseEdge={() => {
               setInfoTarget(null);

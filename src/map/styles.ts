@@ -537,14 +537,22 @@ export const styles = StyleSheet.create({
   // bottom-docked panel: the single home for object UI (menus, info
   // card). Touches outside the card fall through to the canvas (the wrap
   // is box-none); the camera shifts up so the focused object stays clear
-  // of the panel's area
+  // of the panel's area. The wrap fills the screen (not just hugs the
+  // panel) so the KAV's frame spans down to the screen bottom — padding
+  // avoidance compares that frame against the keyboard's window
+  // coordinates, and a content-sized frame would compute zero lift and
+  // never raise the panel. No top padding: the wrap's origin must sit at
+  // window y=0 or the same comparison underruns by the padding
   bottomPanelWrap: {
     position: "absolute",
     left: 0,
     right: 0,
+    top: 0,
     bottom: 0,
     alignItems: "center",
-    padding: 16,
+    justifyContent: "flex-end",
+    paddingHorizontal: 16,
+    paddingBottom: 16,
   },
   // keyboard-avoidance shell around the panel: padding mode lifts the
   // panel above the keyboard while an info-card field is being edited

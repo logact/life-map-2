@@ -29,6 +29,9 @@ export interface CalItem {
   // "Started" | "Record"
   label: string;
   tone: CalTone;
+  // a focus segment record's measured duration — the day row shows it and
+  // the day header sums it
+  durationMs?: number;
 }
 
 // the day list's state partition, one chip per tone group: To do asks
@@ -162,7 +165,9 @@ export function calendarMonth(
     if (ms === undefined || !inMonth(ms, year, month0)) return;
     const day = new Date(ms).getDate();
     const list = byDay.get(day) ?? [];
-    list.push({ nodeId: node.id, key: `${node.id}:${slot}`, kind, title: node.title, label, tone });
+    const item: CalItem = { nodeId: node.id, key: `${node.id}:${slot}`, kind, title: node.title, label, tone };
+    if (isRecord(node) && node.durationMs !== undefined) item.durationMs = node.durationMs;
+    list.push(item);
     byDay.set(day, list);
   };
 

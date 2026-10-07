@@ -8,6 +8,7 @@ import { CreateSheet } from "@/calendar/createSheet";
 import { CalItem, calendarMonth, CalKind, CalState, CalTone, groupDayItems, itemState } from "@/domain/calendar";
 import { addFreeNode, Recipe } from "@/domain/commands";
 import { LifeMapDoc, NodeKind } from "@/domain/doc";
+import { fmtDuration, focusedMsOnDay } from "@/domain/focus";
 import { contentCenter } from "@/map/fitZoom";
 import { CreateNodeForm, TextDraft } from "@/map/overlays/forms";
 import { fmtDate } from "@/map/utils";
@@ -175,6 +176,8 @@ export default function CalendarScreen() {
   ];
   const dayItems = monthItems.get(selectedDay) ?? [];
   const selectedDayMs = new Date(view.y, view.m, selectedDay).getTime();
+  // the day header's focused-time total: the day's focus segment records
+  const dayFocusMs = focusedMsOnDay(doc, selectedDayMs);
   // one row per node, then the two chips as an intersection; the grid dots
   // above keep reading the ungrouped, unfiltered month items
   const filtering = stateFilter !== "all" || kindFilter !== "all";
@@ -333,7 +336,10 @@ export default function CalendarScreen() {
 
       <View style={[cs.card, cs.dayCard]}>
         <View style={cs.dayHeader}>
-          <Text style={cs.dayTitle}>{fmtDate(selectedDayMs)}</Text>
+          <Text style={cs.dayTitle}>
+            {fmtDate(selectedDayMs)}
+            {dayFocusMs > 0 ? ` · ${fmtDuration(dayFocusMs)} focused` : ""}
+          </Text>
           <View style={cs.dayActions}>
             <Pressable
               accessibilityLabel="Add a goal, task or record on this day"

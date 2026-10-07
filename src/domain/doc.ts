@@ -77,6 +77,10 @@ export interface NodeData {
   note?: string;
   occurredAt?: number;
   createdAt?: number;
+  // measured time: an ended focus segment writes one record carrying how
+  // long it ran (src/state/focusStore.ts); plain journal records leave it
+  // unset
+  durationMs?: number;
   // set on the synthetic midpoint node expand() inserts into an edge, so
   // status rollups can skip it (it is structure, not a real child task)
   synthetic?: boolean;

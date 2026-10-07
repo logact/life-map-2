@@ -15,6 +15,7 @@ import {
   RecurRule,
 } from "./doc";
 import { ClipboardPayload } from "./clipboard";
+import { fmtDuration } from "./focus";
 import { dayStart, parseRecurLog, parseRecurRule } from "./recur";
 import { PALETTE } from "@/ui/palette";
 
@@ -191,6 +192,32 @@ export function connectNodes(fromId: Id, toId: Id, parentEdgeId: Id | null = nul
     recipe: (draft: Draft<LifeMapDoc>) => {
       mustNode(draft, fromId);
       mustNode(draft, toId);
+      linkEdge(draft, edge);
+    },
+  };
+}
+
+// an ended focus segment: one record under the focused task carrying the
+// measured duration (focus mode's only write of its own — every other
+// quick-add reuses an existing command). occurredAt is the segment's END,
+// so the record lands on the calendar day the work finished
+export function addFocusSegment(
+  parentId: Id,
+  startedAt: number,
+  endedAt: number,
+  pos: { x: number; y: number },
+) {
+  const durationMs = Math.max(0, endedAt - startedAt);
+  const node = makeRecordNode(pos.x, pos.y, `Focus · ${fmtDuration(durationMs)}`, "", endedAt);
+  node.durationMs = durationMs;
+  const edge = makeEdgeData(parentId, node.id, null);
+  return {
+    nodeId: node.id,
+    edgeId: edge.id,
+    recipe: (draft: Draft<LifeMapDoc>) => {
+      const parent = mustNode(draft, parentId);
+      if (parent.kind === "record") throw new DomainError("records are leaves");
+      draft.nodes[node.id] = node;
       linkEdge(draft, edge);
     },
   };
@@ -733,6 +760,7 @@ export function pastePayload(payload: ClipboardPayload, at: { x: number; y: numb
       const occurred = typeof d.occurredAt === "number" ? d.occurredAt : d.occuredAt;
       node.occurredAt = typeof occurred === "number" ? occurred : Date.now();
       node.createdAt = typeof d.createdAt === "number" ? d.createdAt : Date.now();
+      if (typeof d.durationMs === "number") node.durationMs = d.durationMs;
     } else {
       if (typeof d.description === "string") node.description = d.description;
       if (typeof d.targetDate === "number") node.targetDate = d.targetDate;

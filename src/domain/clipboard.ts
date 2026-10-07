@@ -76,6 +76,7 @@ function captureKindData(node: NodeData): Record<string, unknown> {
       note: node.note ?? "",
       createdAt: node.createdAt ?? null,
       occurredAt: node.occurredAt ?? null,
+      durationMs: node.durationMs ?? null,
     };
   }
   return {};

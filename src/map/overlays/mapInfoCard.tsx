@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
+import { useRouter } from "expo-router";
 
 import { Recipe, renameNode, setNodeDetail, setNodeRecurrence, setNodeTimes, StatusAction, transitionNodeStatus } from "@/domain/commands";
 import { EdgeData, edgeDepth, isGoal, isRecord, isTask, LifeMapDoc, NodeData } from "@/domain/doc";
+import { fmtDuration, focusedMs } from "@/domain/focus";
 import { describeRecur, dueState, nextDue, prevDue, recurStats } from "@/domain/recur";
 import { edgeStatus, nodeStatus } from "@/domain/status";
 import { SheetButton } from "../components/sheets";
@@ -48,6 +50,7 @@ function NodeInfoCard(props: {
   now: number;
 }) {
   const { node } = props;
+  const router = useRouter();
   const [editing, setEditing] = useState<EditField | null>(null);
   const [draft, setDraft] = useState("");
   // the date field open in the picker sheet, with the value it opened on
@@ -109,6 +112,9 @@ function NodeInfoCard(props: {
     }
   })();
   const stats = node.recur ? recurStats(node.recur, node.log ?? [], props.now) : null;
+  // total measured focus time on this node (sum of the focus segment
+  // records directly under it)
+  const totalFocusMs = focusedMs(props.doc, node.id);
 
   const commit = (field: EditField, text: string) => {
     if (field === "title") {
@@ -304,6 +310,27 @@ function NodeInfoCard(props: {
               }}
             />
           ))}
+        </View>
+      )}
+      {/* focus mode entry: goals/tasks get a Focus button (a goal opens the
+          focus screen as context and picks one of its tasks there); the
+          total focused time on this node rides underneath once segments
+          have been logged */}
+      {(isTask(node) || isGoal(node)) && !node.synthetic && (
+        <View style={styles.infoStatusRow}>
+          {totalFocusMs > 0 && (
+            <Text style={styles.infoStatusText}>Focused: {fmtDuration(totalFocusMs)}</Text>
+          )}
+          <SheetButton
+            label="Focus"
+            onPress={() => {
+              endEdit();
+              router.push({
+                pathname: "/focus",
+                params: isTask(node) ? { taskId: node.id } : { goalId: node.id },
+              });
+            }}
+          />
         </View>
       )}
       {stats && stats.total > 0 && (

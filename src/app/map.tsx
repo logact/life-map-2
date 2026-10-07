@@ -41,6 +41,7 @@ import { EdgeGlyph } from "@/map/components/edgeGlyph";
 import { CameraG } from "@/map/components/cameraG";
 import { CanvasNode } from "@/map/components/nodeGlyph";
 import { BottomPanel } from "@/map/components/bottomPanel";
+import { FocusBanner } from "@/map/components/focusBanner";
 import { NoteSearchPanel, RoutePanel } from "@/map/components/panels";
 import { ModeBanner, SelectionBar } from "@/map/components/sheets";
 import { DOUBLE_TAP_MS } from "@/map/constants";
@@ -1150,10 +1151,13 @@ export default function MapScreen() {
         </Pressable>
       )}
 
+      {/* an active focus session is visible at all times; tapping the
+          banner returns to the focus screen */}
+      <FocusBanner />
+
       {/* mode banners: summarize mode retargets edge taps; bend mode
           retargets the next canvas drag */}
-      {summarizeMode && (
-        <ModeBanner
+      {summarizeMode && (        <ModeBanner
           text={`Tap edges to summarize (${selectedEdgeIds.length} selected)`}
           confirmLabel="Summarize"
           onConfirm={summarizeSelected}

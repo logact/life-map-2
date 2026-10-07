@@ -190,6 +190,7 @@ function serializeKindData(node: NodeData): Record<string, unknown> {
       note: node.note ?? "",
       createdAt: node.createdAt ?? null,
       occurredAt: node.occurredAt ?? null,
+      durationMs: node.durationMs ?? null,
     };
   }
   return {};
@@ -294,6 +295,8 @@ function parseNodeRow(row: NodeRow): NodeData | null {
     // blobs; the fallback keeps pre-migration reads safe)
     node.occurredAt = millis(data.occurredAt) ?? millis(data.occuredAt) ?? Date.now();
     node.createdAt = millis(data.createdAt) ?? Date.now();
+    const durationMs = millis(data.durationMs);
+    if (durationMs !== undefined) node.durationMs = durationMs;
   } else {
     if (typeof data.description === "string") node.description = data.description;
     const targetDate = millis(data.targetDate);

@@ -4,7 +4,7 @@ import { Recipe, setNodeTimes } from "@/domain/commands";
 import { isGoal, isTask, LifeMapDoc, NodeData } from "@/domain/doc";
 import { dayStart } from "@/domain/recur";
 import { fmtDate } from "@/map/utils";
-import { BACKDROP, INK, STATUS_COLOR } from "@/ui/theme";
+import { BACKDROP, CARD_BG, HANDLE, INK, ON_INK, STATUS_COLOR, TYPE } from "@/ui/theme";
 
 // The calendar's scheduling sheet: every schedulable node — goals (their
 // target date) and plain tasks (their one-off due date; habits schedule
@@ -101,7 +101,7 @@ const cs = StyleSheet.create({
     justifyContent: "flex-end",
   },
   sheet: {
-    backgroundColor: "#ffffff",
+    backgroundColor: CARD_BG,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 24,
@@ -112,11 +112,10 @@ const cs = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: "#d8dade",
+    backgroundColor: HANDLE,
   },
   title: {
-    fontSize: 17,
-    fontWeight: "600",
+    ...TYPE.title,
     color: INK.primary,
   },
   list: {
@@ -166,6 +165,6 @@ const cs = StyleSheet.create({
   doneText: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#ffffff",
+    color: ON_INK,
   },
 });

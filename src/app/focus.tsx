@@ -18,7 +18,7 @@ import { fmtClock, fmtDuration, focusedMs } from "@/domain/focus";
 import { childPosition, fmtDate } from "@/map/utils";
 import { useDocStore } from "@/state/docStore";
 import { useFocusStore } from "@/state/focusStore";
-import { CANVAS_BG, INK, RADIUS, SHADOW, STATUS_COLOR } from "@/ui/theme";
+import { CANVAS_BG, CARD_BG, INK, ON_INK, RADIUS, SHADOW, STATUS_COLOR, TYPE } from "@/ui/theme";
 
 // The focus screen (/focus): "I am working on this task right now." A
 // running stopwatch (optionally against a pomodoro target — a visual cue
@@ -414,8 +414,7 @@ const fs = StyleSheet.create({
     justifyContent: "space-between",
   },
   headerTitle: {
-    fontSize: 17,
-    fontWeight: "600",
+    ...TYPE.title,
     color: INK.primary,
   },
   headerAction: {
@@ -425,7 +424,7 @@ const fs = StyleSheet.create({
     minWidth: 56,
   },
   card: {
-    backgroundColor: "#ffffff",
+    backgroundColor: CARD_BG,
     borderRadius: RADIUS.lg,
     borderWidth: 1,
     borderColor: INK.subtle,
@@ -456,8 +455,7 @@ const fs = StyleSheet.create({
     color: INK.primary,
   },
   meta: {
-    fontSize: 12,
-    fontWeight: "500",
+    ...TYPE.meta,
     color: INK.tertiary,
   },
   chipRow: {
@@ -480,7 +478,7 @@ const fs = StyleSheet.create({
     color: INK.secondary,
   },
   chipTextOn: {
-    color: "#ffffff",
+    color: ON_INK,
   },
   quickRow: {
     flexDirection: "row",
@@ -561,7 +559,7 @@ const fs = StyleSheet.create({
   primaryButtonText: {
     fontSize: 15,
     fontWeight: "600",
-    color: "#ffffff",
+    color: ON_INK,
   },
   stopButton: {
     alignItems: "center",
@@ -574,6 +572,6 @@ const fs = StyleSheet.create({
   stopButtonText: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#ffffff",
+    color: ON_INK,
   },
 });

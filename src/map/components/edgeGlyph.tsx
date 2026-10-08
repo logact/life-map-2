@@ -2,16 +2,13 @@ import { memo } from "react";
 import { Circle, G, Line, Polygon, Polyline } from "react-native-svg";
 import Animated, { useAnimatedProps } from "react-native-reanimated";
 
-import { ACCENT, INK, STATUS_COLOR } from "@/ui/theme";
+import { ACCENT, CARD_BG, EDGE_NEUTRAL, INK, STATUS_COLOR } from "@/ui/theme";
 import { CameraSv } from "../hooks/useMapCamera";
 import { EdgeViewModel, NodeViewModel } from "../types";
 import { rimOffset, splitPath } from "../utils";
 
 const AnimatedPolygon = Animated.createAnimatedComponent(Polygon);
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
-
-// the neutral road color: edges with no status (they touch a record)
-const EDGE_NEUTRAL = "#aeaeb4";
 
 // status rides on the stroke color; record-touching roads stay neutral
 function statusStroke(status: EdgeViewModel["status"]): string {
@@ -89,7 +86,7 @@ export const EdgeGlyph = memo(function EdgeGlyph(props: {
       ? ACCENT
       : props.related
         ? INK.secondary
-        : "#aeaeb4";
+        : EDGE_NEUTRAL;
   const edgeWidth = overridden ? 4 : Math.max(1.5, 3 - e.layer);
   const bend = props.liveBend ?? e.bend;
   // the line runs rim-to-rim: nodes with a translucent fill would let a
@@ -218,7 +215,7 @@ export const EdgeGlyph = memo(function EdgeGlyph(props: {
           cx={props.liveBend.x}
           cy={props.liveBend.y}
           r={10}
-          fill="#ffffff"
+          fill={CARD_BG}
           stroke={INK.primary}
           strokeWidth={1.5}
         />

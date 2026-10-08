@@ -5,6 +5,16 @@ import { Recipe } from "@/domain/commands";
 import { buildSeedDoc } from "@/domain/seedDoc";
 import { emptyDoc, Id, LifeMapDoc } from "@/domain/doc";
 import { getMeta, loadDoc, scheduleSave, setMeta } from "@/data/mapDb";
+import {
+  isSyncAvailable,
+  loadSyncEnabled,
+  localSavedAt,
+  markAdoptedRemote,
+  readRemoteEnvelope,
+  scheduleCloudPush,
+  syncNow as cloudSyncNow,
+} from "@/data/cloudSync";
+import { decideSync, SyncDecision } from "@/data/syncPolicy";
 
 // records that the real-life seed has been applied: installs that predate
 // the seed (they hold the old demo map) get it once, on their first launch
@@ -43,6 +53,9 @@ export interface DocStore {
   undo: () => void;
   redo: () => void;
   load: (screen: { width: number; height: number }) => Promise<void>;
+  // the menu's "Sync now": one immediate iCloud round — pulls and adopts a
+  // newer remote snapshot, otherwise uploads local
+  syncNow: () => Promise<void>;
 }
 
 export function createDocStore() {
@@ -78,6 +91,7 @@ export function createDocStore() {
       redoStack.length = 0;
       set({ doc: next, canUndo: true, canRedo: false });
       scheduleSave(next);
+      scheduleCloudPush(next);
     },
 
     undo() {
@@ -89,6 +103,7 @@ export function createDocStore() {
       redoStack.push(entry);
       set({ doc: next, canUndo: undoStack.length > 0, canRedo: true });
       scheduleSave(next);
+      scheduleCloudPush(next);
     },
 
     redo() {
@@ -98,6 +113,7 @@ export function createDocStore() {
       undoStack.push(entry);
       set({ doc: next, canUndo: true, canRedo: redoStack.length > 0 });
       scheduleSave(next);
+      scheduleCloudPush(next);
     },
 
     load(screen) {
@@ -105,10 +121,34 @@ export function createDocStore() {
       // rows, open failure, first launch) resolves to a valid seeded document
       if (!loadPromise) {
         loadPromise = (async () => {
+          // iCloud first: a newer remote snapshot replaces whatever is local
+          // (fresh install on a second device, a wiped phone). Sync failures
+          // are swallowed inside cloudSync and must not affect loading.
+          let cloud: SyncDecision = "none";
+          try {
+            if ((await loadSyncEnabled()) && (await isSyncAvailable())) {
+              const remote = await readRemoteEnvelope();
+              const decision = decideSync(await localSavedAt(), remote);
+              if (decision === "pull" && remote) {
+                set({ doc: remote.doc, loaded: true });
+                scheduleSave(remote.doc);
+                await markAdoptedRemote(remote.savedAt);
+                // the remote doc wins: never (re)seed over it
+                setMeta(SEED_APPLIED_KEY, "1").catch((err) =>
+                  console.warn("[docStore] seed flag save failed", err),
+                );
+                return;
+              }
+              cloud = decision; // "push": upload local once it is established
+            }
+          } catch (err) {
+            console.warn("[docStore] cloud check failed, loading local", err);
+          }
           try {
             const [doc, seedApplied] = await Promise.all([loadDoc(), getMeta(SEED_APPLIED_KEY)]);
             if (doc && seedApplied !== null) {
               set({ doc, loaded: true });
+              if (cloud === "push") scheduleCloudPush(doc);
               return;
             }
             console.log(
@@ -122,12 +162,25 @@ export function createDocStore() {
           const doc = buildSeedDoc(screen.width / 2, screen.height / 3);
           set({ doc, loaded: true });
           scheduleSave(doc);
+          if (cloud === "push") scheduleCloudPush(doc);
           setMeta(SEED_APPLIED_KEY, "1").catch((err) =>
             console.warn("[docStore] seed flag save failed", err),
           );
         })();
       }
       return loadPromise;
+    },
+
+    async syncNow() {
+      const remote = await cloudSyncNow(get().doc);
+      if (!remote) return;
+      // adopting the remote replaces the document wholesale, so the undo
+      // history (patches against the old doc) is no longer valid
+      undoStack.length = 0;
+      redoStack.length = 0;
+      set({ doc: remote.doc, canUndo: false, canRedo: false });
+      scheduleSave(remote.doc);
+      await markAdoptedRemote(remote.savedAt);
     },
   };
   });

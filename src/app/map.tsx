@@ -36,6 +36,7 @@ import { buildSeedDoc } from "@/domain/seedDoc";
 import { visibleEdges } from "@/domain/visibility";
 import { useDocStore } from "@/state/docStore";
 import { flushPendingSave } from "@/data/mapDb";
+import { flushCloudPush } from "@/data/cloudSync";
 import { DOT_GRID_OPACITY, INK } from "@/ui/theme";
 import { EdgeGlyph } from "@/map/components/edgeGlyph";
 import { CameraG } from "@/map/components/cameraG";
@@ -404,11 +405,14 @@ export default function MapScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // saves are debounced: don't lose the pending write when the app goes
-  // to background
+  // saves are debounced: don't lose the pending write (or the pending
+  // iCloud upload) when the app goes to background
   useEffect(() => {
     const sub = AppState.addEventListener("change", (s) => {
-      if (s !== "active") flushPendingSave();
+      if (s !== "active") {
+        flushPendingSave();
+        flushCloudPush();
+      }
     });
     return () => sub.remove();
   }, []);
@@ -1148,6 +1152,17 @@ export default function MapScreen() {
           onPress={() => router.push("/calendar")}
         >
           <Text style={styles.queryButtonText}>📅</Text>
+        </Pressable>
+      )}
+
+      {/* settings page: iCloud sync on/off, status, manual sync */}
+      {!routeQuery.routeMode && !noteSearch.noteSearchMode && (
+        <Pressable
+          style={styles.settingsButton}
+          accessibilityLabel="Open settings"
+          onPress={() => router.push("/settings")}
+        >
+          <Text style={styles.queryButtonText}>{"⚙️"}</Text>
         </Pressable>
       )}
 

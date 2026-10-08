@@ -145,6 +145,20 @@ export const styles = StyleSheet.create({
     justifyContent: "center",
     ...SHADOW.floating,
   },
+  settingsButton: {
+    position: "absolute",
+    right: 20,
+    top: 316, // below the calendar button
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: CARD_BG,
+    borderWidth: 1,
+    borderColor: INK.subtle,
+    alignItems: "center",
+    justifyContent: "center",
+    ...SHADOW.floating,
+  },
   historyButtonDisabled: {
     opacity: 0.4,
   },

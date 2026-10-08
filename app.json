@@ -37,7 +37,13 @@
           "imageWidth": 76
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "react-native-cloud-storage",
+        {
+          "iCloudContainerIdentifier": "iCloud.com.logact.lifemap"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -1,60 +1,29 @@
-// design tokens for the map UI: refined grayscale theme. ACCENT is
-// reserved for the route highlight on the canvas; everything else rides
+// design tokens for the app UI — a facade over the active theme
+// (src/ui/themes): existing "@/ui/theme" imports keep working unchanged;
+// switch themes via the ACTIVE selector in src/ui/themes/index.ts. ACCENT
+// is reserved for the route highlight on the canvas; everything else rides
 // on the INK scale
-export const INK = {
-  primary: "#1a1a1c",
-  secondary: "#55555b",
-  tertiary: "#8e8e94",
-  hairline: "#c9c9cf",
-  subtle: "#ececef",
-} as const;
+import { THEME } from "./themes";
 
-export const CANVAS_BG = "#f7f7f5"; // warm off-white
-export const CARD_BG = "#ffffff";
-export const ACCENT = "#1a73e8"; // route highlight only
+export const INK = THEME.INK;
+export const CANVAS_BG = THEME.CANVAS_BG;
+export const CARD_BG = THEME.CARD_BG;
+export const ACCENT = THEME.ACCENT;
+export const STATUS_COLOR = THEME.STATUS_COLOR;
+export const RADIUS = THEME.RADIUS;
+export const SHADOW = THEME.SHADOW;
+export const TYPE = THEME.TYPE;
+export const BACKDROP = THEME.BACKDROP;
 
-// status rides on color: todo gray, in-progress orange, done green. The
-// hues are Okabe-Ito picks (colorblind-safe) and deliberately avoid blue,
-// which stays reserved for the route highlight. Objects with no status
-// (records, record-touching edges) use neutral grays instead.
-export const STATUS_COLOR = {
-  todo: "#8e8e94", // = INK.tertiary
-  "in-progress": "#E69F00",
-  done: "#009E73",
-} as const;
-
-export const RADIUS = {
-  sm: 10,
-  md: 16,
-  lg: 20,
-  pill: 999,
-} as const;
-
-// spreadable shadow presets: card for resting nodes, floating for
-// panels/cards above the canvas
-export const SHADOW = {
-  card: {
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-  },
-  floating: {
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
-  },
-} as const;
-
-export const TYPE = {
-  title: { fontSize: 17, fontWeight: "600" },
-  body: { fontSize: 14, fontWeight: "400" },
-  meta: { fontSize: 12, fontWeight: "500" },
-  nodeTitle: { fontSize: 13, fontWeight: "600" },
-  record: { fontSize: 9, fontWeight: "500" },
-} as const;
-
-export const BACKDROP = "rgba(28,28,30,0.35)";
+export const NODE_BORDER = THEME.NODE_BORDER;
+export const INPUT_BORDER = THEME.INPUT_BORDER;
+export const INPUT_BG = THEME.INPUT_BG;
+export const PRESSED_BG = THEME.PRESSED_BG;
+export const HANDLE = THEME.HANDLE;
+export const DANGER = THEME.DANGER;
+export const BANNER_BG = THEME.BANNER_BG;
+export const BANNER_TEXT = THEME.BANNER_TEXT;
+export const EDGE_NEUTRAL = THEME.EDGE_NEUTRAL;
+export const ON_INK = THEME.ON_INK;
+export const STATUS_BAR = THEME.STATUS_BAR;
+export const DOT_GRID_OPACITY = THEME.DOT_GRID_OPACITY;

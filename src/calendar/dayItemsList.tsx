@@ -16,7 +16,7 @@ import { CalItem, CalTone } from "@/domain/calendar";
 import { Recipe, reorderDayItems } from "@/domain/commands";
 import { Id } from "@/domain/doc";
 import { fmtDuration } from "@/domain/focus";
-import { INK, STATUS_COLOR } from "@/ui/theme";
+import { CARD_BG, INK, STATUS_COLOR, TYPE } from "@/ui/theme";
 
 // The selected day's rows, reorderable: drag a row's grip handle (instant)
 // or long-press the row itself, move it to a new slot, release to commit.
@@ -265,7 +265,7 @@ const ls = StyleSheet.create({
   },
   row: {
     height: ROW_H,
-    backgroundColor: "#ffffff",
+    backgroundColor: CARD_BG,
   },
   rowInner: {
     flex: 1,
@@ -287,7 +287,7 @@ const ls = StyleSheet.create({
     color: INK.primary,
   },
   itemLabel: {
-    fontSize: 12,
+    ...TYPE.meta,
     color: INK.tertiary,
   },
   // the reorder affordance: three grip bars at the row's right edge; the

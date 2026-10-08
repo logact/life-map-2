@@ -13,7 +13,7 @@ import { contentCenter } from "@/map/fitZoom";
 import { CreateNodeForm, TextDraft } from "@/map/overlays/forms";
 import { fmtDate } from "@/map/utils";
 import { useDocStore } from "@/state/docStore";
-import { CANVAS_BG, INK, RADIUS, SHADOW } from "@/ui/theme";
+import { CANVAS_BG, CARD_BG, INK, ON_INK, RADIUS, SHADOW, TYPE } from "@/ui/theme";
 
 // The calendar page: the document's dated side as a month calendar. Days
 // carry tone dots (what the month holds); the selected day's items list
@@ -443,8 +443,7 @@ const cs = StyleSheet.create({
     justifyContent: "space-between",
   },
   headerTitle: {
-    fontSize: 17,
-    fontWeight: "600",
+    ...TYPE.title,
     color: INK.primary,
   },
   headerAction: {
@@ -454,7 +453,7 @@ const cs = StyleSheet.create({
     minWidth: 56,
   },
   card: {
-    backgroundColor: "#ffffff",
+    backgroundColor: CARD_BG,
     borderRadius: RADIUS.lg,
     borderWidth: 1,
     borderColor: INK.subtle,
@@ -474,8 +473,7 @@ const cs = StyleSheet.create({
     paddingHorizontal: 12,
   },
   calTitle: {
-    fontSize: 15,
-    fontWeight: "600",
+    ...TYPE.title,
     color: INK.primary,
   },
   dowRow: {
@@ -508,7 +506,7 @@ const cs = StyleSheet.create({
     backgroundColor: INK.primary,
   },
   cellTextSelected: {
-    color: "#ffffff",
+    color: ON_INK,
     fontWeight: "700",
   },
   cellToday: {
@@ -618,6 +616,6 @@ const cs = StyleSheet.create({
     color: INK.secondary,
   },
   chipTextOn: {
-    color: "#ffffff",
+    color: ON_INK,
   },
 });

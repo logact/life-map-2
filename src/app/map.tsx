@@ -36,7 +36,7 @@ import { buildSeedDoc } from "@/domain/seedDoc";
 import { visibleEdges } from "@/domain/visibility";
 import { useDocStore } from "@/state/docStore";
 import { flushPendingSave } from "@/data/mapDb";
-import { INK } from "@/ui/theme";
+import { DOT_GRID_OPACITY, INK } from "@/ui/theme";
 import { EdgeGlyph } from "@/map/components/edgeGlyph";
 import { CameraG } from "@/map/components/cameraG";
 import { CanvasNode } from "@/map/components/nodeGlyph";
@@ -975,7 +975,7 @@ export default function MapScreen() {
             the settled camera, refreshing when each gesture ends */}
         <CameraG sv={camera.sv}>
           {gridDots.map((p, i) => (
-            <Circle key={i} cx={p.x} cy={p.y} r={1.5 / cam.scale} fill={INK.primary} opacity={0.06} />
+            <Circle key={i} cx={p.x} cy={p.y} r={1.5 / cam.scale} fill={INK.primary} opacity={DOT_GRID_OPACITY} />
           ))}
           {vm.edges.map((e) => {
             const a = posById.get(e.fromId);

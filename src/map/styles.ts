@@ -1,11 +1,28 @@
 import { StyleSheet } from "react-native";
 
-import { ACCENT, BACKDROP, CANVAS_BG, INK, SHADOW } from "@/ui/theme";
+import {
+  ACCENT,
+  BACKDROP,
+  BANNER_BG,
+  BANNER_TEXT,
+  CANVAS_BG,
+  CARD_BG,
+  DANGER,
+  HANDLE,
+  INK,
+  INPUT_BG,
+  INPUT_BORDER,
+  NODE_BORDER,
+  ON_INK,
+  PRESSED_BG,
+  SHADOW,
+  TYPE,
+} from "@/ui/theme";
 import { NODE_SIZE } from "./constants";
 
 export const styles = StyleSheet.create({
-  // refined grayscale: kind rides on shape, status on outline color,
-  // selection on border weight; tokens come from src/ui/theme.ts
+  // kind rides on shape, status on outline color, selection on border
+  // weight; tokens come from the active theme (src/ui/theme.ts)
   container: {
     flex: 1,
     backgroundColor: CANVAS_BG,
@@ -15,9 +32,9 @@ export const styles = StyleSheet.create({
     width: NODE_SIZE,
     height: NODE_SIZE,
     borderRadius: NODE_SIZE / 2,
-    backgroundColor: "#ffffff",
+    backgroundColor: CARD_BG,
     borderWidth: 1.5,
-    borderColor: "#d4d4d9",
+    borderColor: NODE_BORDER,
     alignItems: "center",
     justifyContent: "center",
     padding: 4,
@@ -32,7 +49,7 @@ export const styles = StyleSheet.create({
   },
   // long-pressed (armed) node lifts: a following movement drags it
   nodeArmed: {
-    shadowColor: "#000",
+    shadowColor: SHADOW.floating.shadowColor,
     shadowOpacity: 0.3,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
@@ -65,7 +82,7 @@ export const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#ffffff",
+    backgroundColor: CARD_BG,
     borderWidth: 1,
     borderColor: INK.subtle,
     alignItems: "center",
@@ -79,7 +96,7 @@ export const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#ffffff",
+    backgroundColor: CARD_BG,
     borderWidth: 1,
     borderColor: INK.subtle,
     alignItems: "center",
@@ -93,7 +110,7 @@ export const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#ffffff",
+    backgroundColor: CARD_BG,
     borderWidth: 1,
     borderColor: INK.subtle,
     alignItems: "center",
@@ -107,7 +124,7 @@ export const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#ffffff",
+    backgroundColor: CARD_BG,
     borderWidth: 1,
     borderColor: INK.subtle,
     alignItems: "center",
@@ -121,7 +138,7 @@ export const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#ffffff",
+    backgroundColor: CARD_BG,
     borderWidth: 1,
     borderColor: INK.subtle,
     alignItems: "center",
@@ -207,7 +224,7 @@ export const styles = StyleSheet.create({
   },
   noteRowMeta: {
     flex: 1,
-    fontSize: 12,
+    ...TYPE.meta,
     color: INK.secondary,
   },
   routePanel: {
@@ -218,7 +235,7 @@ export const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    backgroundColor: "#ffffff",
+    backgroundColor: CARD_BG,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: INK.subtle,
@@ -234,7 +251,7 @@ export const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     borderWidth: 1,
-    borderColor: "#e0e0e4",
+    borderColor: INPUT_BORDER,
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -259,14 +276,14 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderTopColor: "#f0f0f2",
+    borderTopColor: INK.subtle,
   },
   routeSuggestionText: {
     fontSize: 13,
     color: INK.primary,
   },
   routeSuggestionKind: {
-    fontSize: 12,
+    ...TYPE.meta,
     color: INK.tertiary,
   },
   routeIconButton: {
@@ -313,22 +330,21 @@ export const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   formSheet: {
-    backgroundColor: "#ffffff",
+    backgroundColor: CARD_BG,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 24,
     gap: 14,
   },
   formTitle: {
-    fontSize: 17,
-    fontWeight: "600",
+    ...TYPE.title,
     color: INK.primary,
   },
   formInput: {
     borderWidth: 1,
-    borderColor: "#e0e0e4",
+    borderColor: INPUT_BORDER,
     borderRadius: 12,
-    backgroundColor: "#f7f7f5",
+    backgroundColor: INPUT_BG,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
@@ -362,7 +378,7 @@ export const styles = StyleSheet.create({
     opacity: 0.4,
   },
   formSaveText: {
-    color: "#ffffff",
+    color: ON_INK,
     fontWeight: "600",
   },
   inspectorButton: {
@@ -385,8 +401,7 @@ export const styles = StyleSheet.create({
     padding: 6,
   },
   infoTitle: {
-    fontSize: 15,
-    fontWeight: "700",
+    ...TYPE.title,
     color: INK.primary,
   },
   infoHeader: {
@@ -487,7 +502,7 @@ export const styles = StyleSheet.create({
     color: INK.primary,
   },
   notePeekMeta: {
-    fontSize: 12,
+    ...TYPE.meta,
     color: INK.secondary,
     marginTop: 2,
   },
@@ -510,20 +525,20 @@ export const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 16,
-    backgroundColor: "#2c2c2e",
+    backgroundColor: BANNER_BG,
     borderRadius: 24,
     paddingHorizontal: 16,
     paddingVertical: 10,
     ...SHADOW.floating,
   },
   modeBannerText: {
-    color: "#ffffff",
+    color: BANNER_TEXT,
     fontSize: 14,
     fontWeight: "600",
     flexShrink: 1,
   },
   modeBannerAction: {
-    color: "#d8d8dc",
+    color: BANNER_TEXT,
     fontSize: 14,
     fontWeight: "600",
   },
@@ -532,7 +547,7 @@ export const styles = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: "#d8dade",
+    backgroundColor: HANDLE,
   },
   // bottom-docked panel: the single home for object UI (menus, info
   // card). Touches outside the card fall through to the canvas (the wrap
@@ -563,7 +578,7 @@ export const styles = StyleSheet.create({
   bottomPanel: {
     width: "100%",
     maxWidth: 420,
-    backgroundColor: "#ffffff",
+    backgroundColor: CARD_BG,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: INK.subtle,
@@ -590,7 +605,7 @@ export const styles = StyleSheet.create({
     paddingVertical: 11,
   },
   menuRowPressed: {
-    backgroundColor: "#f4f4f6",
+    backgroundColor: PRESSED_BG,
   },
   menuRowText: {
     flexShrink: 1,
@@ -599,7 +614,7 @@ export const styles = StyleSheet.create({
     color: INK.primary,
   },
   menuRowTextDestructive: {
-    color: "#b3402f",
+    color: DANGER,
   },
   // the armed (second-tap) state of a destructive row
   menuRowTextArmed: {
@@ -617,7 +632,7 @@ export const styles = StyleSheet.create({
     borderRadius: 6,
     marginHorizontal: 2,
     borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.08)",
+    borderColor: INK.subtle,
   },
   menuSeparator: {
     height: 1,
@@ -634,7 +649,7 @@ export const styles = StyleSheet.create({
     borderRadius: 9,
     backgroundColor: INK.primary,
     borderWidth: 2,
-    borderColor: "#ffffff",
+    borderColor: CARD_BG,
     ...SHADOW.card,
   },
   // recurring habit badge on a task pin: a small ↻ medallion at the
@@ -646,7 +661,7 @@ export const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: "#ffffff",
+    backgroundColor: CARD_BG,
     borderWidth: 1,
     borderColor: INK.subtle,
     alignItems: "center",
@@ -698,8 +713,7 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   calTitle: {
-    fontSize: 15,
-    fontWeight: "600",
+    ...TYPE.title,
     color: INK.primary,
   },
   calRow: {
@@ -732,7 +746,7 @@ export const styles = StyleSheet.create({
     backgroundColor: INK.primary,
   },
   calCellTextSelected: {
-    color: "#ffffff",
+    color: ON_INK,
     fontWeight: "700",
   },
   calCellToday: {
@@ -804,7 +818,7 @@ export const styles = StyleSheet.create({
     color: INK.primary,
   },
   recurChipTextSelected: {
-    color: "#ffffff",
+    color: ON_INK,
   },
   recurStepperRow: {
     flexDirection: "row",
@@ -833,7 +847,7 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   tagPickRowPressed: {
-    backgroundColor: "#f4f4f6",
+    backgroundColor: PRESSED_BG,
   },
   tagPickName: {
     flex: 1,

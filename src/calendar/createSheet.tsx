@@ -2,7 +2,7 @@ import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { NodeKind } from "@/domain/doc";
 import { fmtDate } from "@/map/utils";
-import { BACKDROP, INK } from "@/ui/theme";
+import { BACKDROP, CARD_BG, HANDLE, INK, TYPE } from "@/ui/theme";
 
 // the calendar's create chooser: which kind to add on the selected day.
 // Each kind carries the day onto the node in its own way — a goal takes it
@@ -53,7 +53,7 @@ const cs = StyleSheet.create({
     justifyContent: "flex-end",
   },
   sheet: {
-    backgroundColor: "#ffffff",
+    backgroundColor: CARD_BG,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 24,
@@ -64,12 +64,11 @@ const cs = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: "#d8dade",
+    backgroundColor: HANDLE,
     marginBottom: 8,
   },
   title: {
-    fontSize: 17,
-    fontWeight: "600",
+    ...TYPE.title,
     color: INK.primary,
     marginBottom: 8,
   },

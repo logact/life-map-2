@@ -5,7 +5,7 @@ import { useRouter } from "expo-router";
 import { fmtDuration } from "@/domain/focus";
 import { useDocStore } from "@/state/docStore";
 import { useFocusStore } from "@/state/focusStore";
-import { RADIUS, SHADOW } from "@/ui/theme";
+import { BANNER_BG, BANNER_TEXT, RADIUS, SHADOW } from "@/ui/theme";
 
 // the active focus session's ever-present pill on the map:
 // "● task · 12m". Tapping it returns to the focus screen. It ticks its
@@ -41,14 +41,14 @@ const bs = StyleSheet.create({
     top: 110, // below the top row, same lane as the mode banners
     left: 20,
     maxWidth: "70%",
-    backgroundColor: "#2c2c2e",
+    backgroundColor: BANNER_BG,
     borderRadius: RADIUS.pill,
     paddingHorizontal: 14,
     paddingVertical: 8,
     ...SHADOW.floating,
   },
   text: {
-    color: "#ffffff",
+    color: BANNER_TEXT,
     fontSize: 13,
     fontWeight: "600",
   },

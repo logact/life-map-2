@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useRouter } from "expo-router";
 
 import { EdgeData, isRecord, NodeData, NodeKind } from "@/domain/doc";
 import { MenuCard, MenuEntry } from "../components/bottomPanel";
@@ -117,15 +118,17 @@ export function EdgeMenu(props: {
 }
 
 // double-tap empty canvas: create a node at the tapped point (the create
-// form opens next), or paste the clipboard snapshot there. The last row
-// replaces the whole map with the tutorial seed (destructive; it
-// confirms in place and undo restores the old map)
+// form opens next), or paste the clipboard snapshot there. The last rows
+// are app-level: Settings (iCloud sync lives there), then the tutorial
+// seed (which replaces the whole map — destructive; it confirms in place
+// and undo restores the old map)
 export function CreateMenu(props: {
   hasClipboard: boolean;
   onPickKind: (kind: NodeKind) => void;
   onPaste: () => void;
   onLoadSeed: () => void;
 }) {
+  const router = useRouter();
   const entries: MenuEntry[] = (["goal", "task", "record"] as NodeKind[]).map((kind) => ({
     key: kind,
     label: kindLabel(kind),
@@ -140,13 +143,17 @@ export function CreateMenu(props: {
       onPress: () => props.onPaste(),
     });
   }
-  entries.push("sep", {
-    key: "seed",
-    label: "Load the tutorial",
-    glyph: "🎓",
-    onPress: () => props.onLoadSeed(),
-    destructive: true,
-  });
+  entries.push(
+    "sep",
+    { key: "settings", label: "Settings", glyph: "⚙", onPress: () => router.push("/settings") },
+    {
+      key: "seed",
+      label: "Load the tutorial",
+      glyph: "🎓",
+      onPress: () => props.onLoadSeed(),
+      destructive: true,
+    },
+  );
   return <MenuCard title="Create" entries={entries} />;
 }
 

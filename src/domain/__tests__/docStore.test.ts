@@ -21,6 +21,17 @@ jest.mock("@/data/mapDb", () => ({
   setMeta: jest.fn(),
 }));
 
+// cloudSync talks to iCloud through a native module; the store tests never
+// sync — unavailable, no remote, no pushes
+jest.mock("@/data/cloudSync", () => ({
+  isSyncAvailable: jest.fn(async () => false),
+  localSavedAt: jest.fn(async () => null),
+  markAdoptedRemote: jest.fn(async () => {}),
+  readRemoteEnvelope: jest.fn(async () => null),
+  scheduleCloudPush: jest.fn(),
+  syncNow: jest.fn(async () => null),
+}));
+
 
 const mockLoadDoc = loadDoc as jest.MockedFunction<typeof loadDoc>;
 const mockGetMeta = getMeta as jest.MockedFunction<typeof getMeta>;

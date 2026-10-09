@@ -79,6 +79,21 @@ export async function setSyncEnabled(enabled: boolean): Promise<void> {
   }
 }
 
+// the library wraps native failures in CloudStorageError with a stable
+// `code` (e.g. ERR_DIRECTORY_NOT_FOUND when the ubiquity container itself
+// is unreachable); keep code + message so a TestFlight screenshot of the
+// settings screen carries the real cause
+function errorCode(err: unknown): string | null {
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === "string" ? code : null;
+}
+
+function errorDetail(err: unknown): string {
+  const code = errorCode(err);
+  const message = err instanceof Error ? err.message : String(err);
+  return code ? `${code}: ${message}` : message;
+}
+
 export async function isSyncAvailable(): Promise<boolean> {
   const mod = cloudModule();
   if (!mod) return false;
@@ -86,7 +101,37 @@ export async function isSyncAvailable(): Promise<boolean> {
     return await mod.CloudStorage.isCloudAvailable();
   } catch (err) {
     console.warn("[cloudSync] availability check failed", err);
+    useSyncStore.getState().markUnavailable(errorDetail(err));
     return false;
+  }
+}
+
+// one boolean can't tell "signed out of iCloud" apart from "the build's
+// ubiquity container is broken" (issue #31) — diagnoseSync probes the
+// container itself. Settings runs it on focus; sync paths keep the cheap
+// boolean check above.
+export type SyncDiagnosis =
+  | { kind: "ok" }
+  | { kind: "no-module" }
+  | { kind: "signed-out" }
+  | { kind: "container-missing"; detail: string }
+  | { kind: "error"; detail: string };
+
+export async function diagnoseSync(): Promise<SyncDiagnosis> {
+  const mod = cloudModule();
+  if (!mod) return { kind: "no-module" };
+  if (!(await isSyncAvailable())) return { kind: "signed-out" };
+  try {
+    // exists() resolves the ubiquity container URL natively; when the App
+    // ID/provisioning profile lacks the container, that URL is nil and this
+    // throws ERR_DIRECTORY_NOT_FOUND even though the user is signed in
+    await mod.CloudStorage.exists(CLOUD_DIR, docScope());
+    return { kind: "ok" };
+  } catch (err) {
+    console.warn("[cloudSync] container probe failed", err);
+    const detail = errorDetail(err);
+    if (errorCode(err) === "ERR_DIRECTORY_NOT_FOUND") return { kind: "container-missing", detail };
+    return { kind: "error", detail };
   }
 }
 
@@ -128,6 +173,7 @@ export async function readRemoteEnvelope(): Promise<CloudEnvelope | null> {
     return envelope;
   } catch (err) {
     console.warn("[cloudSync] remote read failed", err);
+    useSyncStore.getState().markError(errorDetail(err));
     return null;
   }
 }
@@ -166,7 +212,7 @@ async function writeRemoteEnvelope(doc: LifeMapDoc): Promise<number | null> {
     return savedAt;
   } catch (err) {
     console.warn("[cloudSync] remote write failed", err);
-    useSyncStore.getState().markError();
+    useSyncStore.getState().markError(errorDetail(err));
     return null;
   }
 }

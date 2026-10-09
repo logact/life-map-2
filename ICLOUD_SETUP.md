@@ -82,3 +82,15 @@ and the signing errors clear.
   the Apple Developer portal under **Profiles**.
 - **Runtime error "container not found" on device**: the App ID/container
   assignment in step 3 above wasn't saved, or the device build predates it.
+- **TestFlight build shows "iCloud unavailable" although the user is signed
+  in** (issue #31): the production provisioning profile predates the
+  container assignment, so iOS strips the ubiquity entitlement at install.
+  Verify in the portal that the App ID `com.logact.lifemap` has the container
+  `iCloud.com.logact.lifemap` checked (step 3), then remove the production
+  provisioning profile and rebuild as described above. On the device, also
+  check Settings → Apple Account → iCloud → iCloud Drive is on and this app
+  is enabled under the iCloud Drive app list. Since the fix for this issue,
+  the settings screen shows which case it is: "can't reach the app's iCloud
+  container" means the build/profile, the "sign into your Apple Account"
+  message means the device, and the small detail line carries the native
+  error code.

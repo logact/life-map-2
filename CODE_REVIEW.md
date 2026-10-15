@@ -30,7 +30,7 @@ Ordered so early items unblock later ones.
   A star or disjoint selection (3+ boundary nodes) passes the `< 2` guard and links two random nodes. Fix: require exactly 2 boundary nodes and verify the selection forms one directed chain; add the same validation inside `LifeMap.summarize` (`src/domain/lifeMap.ts:348`).
 
 - [ ] **B5. Dead features: inspector + note search. 🔴(feature-shaped hole)**
-  `setInspectorNodeId` is only ever called with `null` → nodes can never be renamed (`src/app/map.tsx:3049–3193`, `:1683`). `enterNoteSearchMode` is never called (`:1197`) → note search is unreachable. Decide per feature: wire an entry point (inspector: "Edit" in the node sheet seeding `inspectorDraft`; note search: a button or long-press on 🔍) or delete the ~250 lines, `focusNoteNode`, and `searchNotes`.
+  `setInspectorNodeId` is only ever called with `null` → nodes can never be renamed (`src/app/map.tsx:3049–3193`, `:1683`). ~~`enterNoteSearchMode` is never called~~ — **search half fixed 2026-10-14 (issue #36):** 🔍 tap opens the new SearchPanel (`enterSearchMode`), which matches node titles and notes; long-press 🔍 keeps the route query. Remaining: the inspector — wire an entry point ("Edit" in the node sheet seeding `inspectorDraft`) or delete the ~250 lines.
 
 ### Phase 2 — state consistency (the undo/mode bug family)
 

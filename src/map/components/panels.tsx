@@ -91,23 +91,25 @@ export function RoutePanel(props: {
   );
 }
 
-// note query panel: one search input over every note on the map; each
-// result shows the note excerpt and its owning node
-export function NoteSearchPanel(props: {
+// quick-find panel: one search input over every node title and every note
+// on the map; each result focuses the matching node (title matches first)
+export function SearchPanel(props: {
   query: string;
-  results: { noteId: string; nodeId: string; excerpt: string; nodeTitle: string; nodeKind: NodeKind; createdAt: number }[];
+  titleResults: { nodeId: string; title: string; kind: NodeKind }[];
+  noteResults: { noteId: string; nodeId: string; excerpt: string; nodeTitle: string; nodeKind: NodeKind; createdAt: number }[];
   onChangeQuery: (text: string) => void;
   onPickResult: (nodeId: string) => void;
   onClose: () => void;
 }) {
+  const empty = props.query.trim() !== "" && props.titleResults.length === 0 && props.noteResults.length === 0;
   return (
     <View style={styles.routePanel}>
       <View style={styles.routeFields}>
         <View style={styles.routeRow}>
-          <Text style={styles.routeRowLabel}>Note</Text>
+          <Text style={styles.routeRowLabel}>Find</Text>
           <TextInput
             style={styles.routeInput}
-            placeholder="Search notes…"
+            placeholder="Search items and notes…"
             value={props.query}
             autoCapitalize="none"
             autoCorrect={false}
@@ -116,11 +118,23 @@ export function NoteSearchPanel(props: {
             onChangeText={props.onChangeQuery}
           />
         </View>
-        {props.query.trim() !== "" && props.results.length === 0 && (
-          <Text style={styles.noteSearchEmpty}>No notes match</Text>
-        )}
+        {empty && <Text style={styles.noteSearchEmpty}>Nothing matches</Text>}
         <ScrollView style={styles.noteResults}>
-          {props.results.map((r) => (
+          {props.titleResults.length > 0 && <Text style={styles.infoMeta}>Items</Text>}
+          {props.titleResults.map((r) => (
+            <Pressable
+              key={r.nodeId}
+              style={styles.routeSuggestion}
+              onPress={() => props.onPickResult(r.nodeId)}
+            >
+              <Text style={styles.routeSuggestionText} numberOfLines={1}>
+                {r.title}
+              </Text>
+              <Text style={styles.routeSuggestionKind}>{r.kind}</Text>
+            </Pressable>
+          ))}
+          {props.noteResults.length > 0 && <Text style={styles.infoMeta}>Notes</Text>}
+          {props.noteResults.map((r) => (
             <Pressable
               key={r.noteId}
               style={styles.routeSuggestion}

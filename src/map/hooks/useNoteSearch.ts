@@ -2,14 +2,15 @@ import { RefObject, useState } from "react";
 import { Keyboard } from "react-native";
 
 import { edgeDepth, LifeMapDoc } from "@/domain/doc";
-import { searchNotes } from "@/domain/search";
+import { searchNodes, searchNotes } from "@/domain/search";
 import { revealEdge } from "@/domain/visibility";
 import { useDocStore } from "@/state/docStore";
 import { InfoTarget } from "../types";
 
-// note query flow: keyword search across every note on the map. The hook
-// owns only its own state; the screen composes the mutual exclusion with
-// the other modes (route query, connect, summarize, …)
+// item & note query flow: one keyword search across every node title and
+// every note on the map. The hook owns only its own state; the screen
+// composes the mutual exclusion with the other modes (route query,
+// connect, summarize, …)
 export function useNoteSearch(params: {
   doc: LifeMapDoc;
   // center a world point on screen (the camera owns the math)
@@ -62,14 +63,17 @@ export function useNoteSearch(params: {
     setInfoTarget({ kind: "node", id: node.id });
   };
 
-  // note search results over the whole map (hidden layers included),
-  // recomputed on every render while the panel is open
+  // search results over the whole map (hidden layers included), recomputed
+  // on every render while the panel is open: title matches first, then
+  // note matches
+  const titleResults = noteSearchMode ? searchNodes(doc, noteQuery) : [];
   const noteResults = noteSearchMode ? searchNotes(doc, noteQuery) : [];
 
   return {
     noteSearchMode,
     noteQuery,
     setNoteQuery,
+    titleResults,
     noteResults,
     enterNoteSearchMode,
     exitNoteSearchMode,

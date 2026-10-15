@@ -43,7 +43,7 @@ import { CameraG } from "@/map/components/cameraG";
 import { CanvasNode } from "@/map/components/nodeGlyph";
 import { BottomPanel } from "@/map/components/bottomPanel";
 import { FocusBanner } from "@/map/components/focusBanner";
-import { NoteSearchPanel, RoutePanel } from "@/map/components/panels";
+import { SearchPanel, RoutePanel } from "@/map/components/panels";
 import { ModeBanner, SelectionBar } from "@/map/components/sheets";
 import { DOUBLE_TAP_MS } from "@/map/constants";
 import { useCanvasGestures } from "@/map/hooks/useCanvasGestures";
@@ -296,11 +296,33 @@ export default function MapScreen() {
     closeOverlays();
   };
 
-  // modes are mutually exclusive: entering one tears the other down
+  // modes are mutually exclusive: entering one tears the other down. A
+  // pending single-tap timer must not fire its delayed action over the new
+  // mode's panel, so mode entries flush the tap timers first
+  const cancelTapTimers = () => {
+    if (nodeTapRef.current) {
+      clearTimeout(nodeTapRef.current.timer);
+      nodeTapRef.current = null;
+    }
+    if (edgeTapRef.current) {
+      clearTimeout(edgeTapRef.current.timer);
+      edgeTapRef.current = null;
+    }
+    cancelCanvasTap();
+  };
+
   const enterRouteMode = () => {
+    cancelTapTimers();
     resetCanvasModes();
     noteSearch.exitNoteSearchMode();
     routeQuery.enterRouteMode();
+  };
+
+  const enterSearchMode = () => {
+    cancelTapTimers();
+    resetCanvasModes();
+    routeQuery.exitRouteMode();
+    noteSearch.enterNoteSearchMode();
   };
 
   // double tap on empty canvas opens the create menu for that point; the
@@ -382,7 +404,7 @@ export default function MapScreen() {
     run(connectNodes(id, targetId).recipe);
   };
 
-  const { panResponder } = useCanvasGestures({
+  const { panResponder, cancelCanvasTap } = useCanvasGestures({
     getViewport: camera.getViewport,
     getCam: camera.getCam,
     panTo: camera.panTo,
@@ -1110,7 +1132,13 @@ export default function MapScreen() {
             onLongPress={editSelection}
           />
         ) : (
-          <Pressable style={styles.queryButton} onPress={enterRouteMode}>
+          <Pressable
+            style={styles.queryButton}
+            accessibilityLabel="Search the map"
+            accessibilityHint="Find items and notes by keyword; long-press for route search"
+            onPress={enterSearchMode}
+            onLongPress={enterRouteMode}
+          >
             <Text style={styles.queryButtonText}>🔍</Text>
           </Pressable>
         ))}
@@ -1322,12 +1350,18 @@ export default function MapScreen() {
         />
       )}
 
-      {/* note query panel: search every note on the map; tapping a result
-          focuses the owning node */}
+      {/* quick-find panel: search every item title and note on the map;
+          tapping a result reveals the node's layer, centers it, opens its
+          card (focusNoteNode) */}
       {noteSearch.noteSearchMode && (
-        <NoteSearchPanel
+        <SearchPanel
           query={noteSearch.noteQuery}
-          results={noteSearch.noteResults.map((r) => ({
+          titleResults={noteSearch.titleResults.map((n) => ({
+            nodeId: n.id,
+            title: n.title,
+            kind: n.kind,
+          }))}
+          noteResults={noteSearch.noteResults.map((r) => ({
             noteId: r.note.id,
             nodeId: r.node.id,
             excerpt: r.note.text,

@@ -196,5 +196,7 @@ export function useCanvasGestures(params: {
     }),
   );
 
-  return { panResponder };
+  // mode switches (search, route query) cancel a pending tap so its
+  // delayed single-tap action can't fire over the new mode's panel
+  return { panResponder, cancelCanvasTap };
 }

@@ -98,7 +98,17 @@ export async function isSyncAvailable(): Promise<boolean> {
   const mod = cloudModule();
   if (!mod) return false;
   try {
-    return await mod.CloudStorage.isCloudAvailable();
+    const available = await mod.CloudStorage.isCloudAvailable();
+    if (!available) {
+      // a clean `false` carries no error, but iOS returns a nil token both
+      // for "signed out" and for a build whose ubiquity entitlement was
+      // stripped (issue #31) — record what we know so the settings screen
+      // always has a detail line; diagnoseSync() separates the cases
+      useSyncStore.getState().markUnavailable("isCloudAvailable=false (ubiquityIdentityToken is nil)");
+    } else {
+      useSyncStore.getState().markAvailable();
+    }
+    return available;
   } catch (err) {
     console.warn("[cloudSync] availability check failed", err);
     useSyncStore.getState().markUnavailable(errorDetail(err));
@@ -106,33 +116,71 @@ export async function isSyncAvailable(): Promise<boolean> {
   }
 }
 
-// one boolean can't tell "signed out of iCloud" apart from "the build's
-// ubiquity container is broken" (issue #31) — diagnoseSync probes the
-// container itself. Settings runs it on focus; sync paths keep the cheap
-// boolean check above.
+// iOS collapses "signed out of iCloud" and "this build's ubiquity container
+// is broken" into the same signal: isCloudAvailable() is just
+// ubiquityIdentityToken != nil, which is nil in both cases (issue #31). So
+// diagnoseSync probes the container even when the token check fails — the
+// combination is what separates the cases. Settings runs it on focus; sync
+// paths keep the cheap boolean check above.
 export type SyncDiagnosis =
   | { kind: "ok" }
   | { kind: "no-module" }
   | { kind: "signed-out" }
   | { kind: "container-missing"; detail: string }
+  | { kind: "no-token-no-container"; detail: string }
   | { kind: "error"; detail: string };
 
 export async function diagnoseSync(): Promise<SyncDiagnosis> {
   const mod = cloudModule();
   if (!mod) return { kind: "no-module" };
-  if (!(await isSyncAvailable())) return { kind: "signed-out" };
+  let available: boolean;
   try {
-    // exists() resolves the ubiquity container URL natively; when the App
-    // ID/provisioning profile lacks the container, that URL is nil and this
-    // throws ERR_DIRECTORY_NOT_FOUND even though the user is signed in
-    await mod.CloudStorage.exists(CLOUD_DIR, docScope());
-    return { kind: "ok" };
+    available = await mod.CloudStorage.isCloudAvailable();
   } catch (err) {
-    console.warn("[cloudSync] container probe failed", err);
+    console.warn("[cloudSync] availability check failed", err);
     const detail = errorDetail(err);
-    if (errorCode(err) === "ERR_DIRECTORY_NOT_FOUND") return { kind: "container-missing", detail };
+    useSyncStore.getState().markUnavailable(detail);
     return { kind: "error", detail };
   }
+  // exists() resolves the ubiquity container URL natively; when the App
+  // ID/provisioning profile lacks the container, that URL is nil and this
+  // throws ERR_DIRECTORY_NOT_FOUND
+  let containerErr: unknown = null;
+  try {
+    await mod.CloudStorage.exists(CLOUD_DIR, docScope());
+  } catch (err) {
+    console.warn("[cloudSync] container probe failed", err);
+    containerErr = err;
+  }
+  if (!containerErr) {
+    if (available) {
+      // both signals alive — clear any "unavailable" a failed check left
+      // behind earlier this session, so the settings screen shows the truth
+      useSyncStore.getState().markAvailable();
+      return { kind: "ok" };
+    }
+    // the container resolves but iOS has no account token: genuinely signed
+    // out, or iCloud Drive off for the device/this app
+    const detail = "isCloudAvailable=false (ubiquityIdentityToken is nil; container resolves)";
+    useSyncStore.getState().markUnavailable(detail);
+    return { kind: "signed-out" };
+  }
+  const detail = errorDetail(containerErr);
+  if (errorCode(containerErr) !== "ERR_DIRECTORY_NOT_FOUND") {
+    useSyncStore.getState().markError(detail);
+    return { kind: "error", detail };
+  }
+  if (available) {
+    // signed in, but the container can't be resolved: the build's
+    // provisioning profile predates the container assignment
+    useSyncStore.getState().markError(detail);
+    return { kind: "container-missing", detail };
+  }
+  // the issue #31 TestFlight case: both signals dead. Either the user really
+  // is signed out, or iOS stripped the ubiquity entitlement at install —
+  // the token check alone can't tell, so the settings message covers both
+  useSyncStore.getState().markUnavailable(`token nil and container unresolvable (${detail})`);
+  return { kind: "no-token-no-container", detail };
 }
 
 // false when the running binary lacks the native module (an OTA update on

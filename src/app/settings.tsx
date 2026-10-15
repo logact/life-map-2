@@ -54,24 +54,33 @@ export default function SettingsScreen() {
 
   const containerMissing = diagnosis?.kind === "container-missing";
   const signedOut = diagnosis?.kind === "signed-out";
+  // issue #31: both iCloud signals are dead — either really signed out, or
+  // the installed build lost the ubiquity entitlement; the message asks for
+  // the device check first and points at the build fix second
+  const noTokenNoContainer = diagnosis?.kind === "no-token-no-container";
   const status = !enabled
     ? "Sync is off — the map stays on this device only."
     : moduleMissing
       ? "This build doesn't include iCloud sync yet — build a new version with EAS (eas build --profile development) and install it."
       : containerMissing
         ? "iCloud is signed in, but this build can't reach the app's iCloud container — the app needs a fixed build (the App ID must have the iCloud.com.logact.lifemap container assigned; see ICLOUD_SETUP.md)."
-        : signedOut || state === "unavailable"
-          ? "iCloud unavailable — sign into your Apple Account in the iOS Settings app (and make sure iCloud Drive is on)."
-          : state === "syncing"
-            ? "Syncing…"
-            : state === "error"
-              ? "Last sync failed — it will retry on the next edit."
-              : lastSyncedAt
-                ? `Last synced ${fmtDate(lastSyncedAt)}`
-                : "Not synced yet — the first upload happens on your next edit.";
+        : noTokenNoContainer
+          ? "iOS reports no iCloud account token and this build can't find its iCloud container. If you are signed in (iOS Settings → Apple Account → iCloud → iCloud Drive on, this app enabled), the provisioning profile is missing the container — regenerate it and rebuild (see ICLOUD_SETUP.md)."
+          : signedOut || state === "unavailable"
+            ? "iCloud unavailable — sign into your Apple Account in the iOS Settings app (and make sure iCloud Drive is on)."
+            : state === "syncing"
+              ? "Syncing…"
+              : state === "error"
+                ? "Last sync failed — it will retry on the next edit."
+                : lastSyncedAt
+                  ? `Last synced ${fmtDate(lastSyncedAt)}`
+                  : "Not synced yet — the first upload happens on your next edit.";
 
   const showIosSettingsButton =
-    enabled && !moduleMissing && !containerMissing && (signedOut || state === "unavailable");
+    enabled &&
+    !moduleMissing &&
+    !containerMissing &&
+    (signedOut || noTokenNoContainer || state === "unavailable");
 
   const toggle = (on: boolean) => {
     setSyncEnabled(on);

@@ -229,6 +229,71 @@ describe("calendarMonth", () => {
     expect(month.size).toBe(0);
   });
 
+  it("a timed due date turns overdue the moment it passes", () => {
+    // now is Wed the 23rd at noon: a 9:00 deadline today has passed, a
+    // 15:00 one is still due today; an all-day pin stays due all day
+    const morning = makeTask(0, 0, "Morning", {
+      dueDate: new Date("2026-09-23T09:00:00").getTime(),
+      dueHasTime: true,
+    });
+    const afternoon = makeTask(0, 0, "Afternoon", {
+      dueDate: new Date("2026-09-23T15:00:00").getTime(),
+      dueHasTime: true,
+    });
+    const allday = makeTask(0, 0, "Allday", { dueDate: new Date(2026, 8, 23).getTime() });
+    const month = calendarMonth(docWith(morning, afternoon, allday), Y, M, NOW);
+    const items = month.get(23) ?? [];
+    const byId = (id: string) => items.find((it) => it.nodeId === id);
+    expect(byId(morning.id)?.label).toBe("Overdue");
+    expect(byId(afternoon.id)?.label).toBe("Due today");
+    expect(byId(allday.id)?.label).toBe("Due today");
+    expect(byId(morning.id)?.timeMs).toBe(morning.dueDate);
+    expect(byId(allday.id)?.timeMs).toBeUndefined();
+  });
+
+  it("a timed future due date keeps its time and stays a deadline", () => {
+    const task = makeTask(0, 0, "Soon", {
+      dueDate: new Date("2026-09-28T09:00:00").getTime(),
+      dueHasTime: true,
+    });
+    const item = calendarMonth(docWith(task), Y, M, NOW).get(28)?.[0];
+    expect(item?.label).toBe("Due date");
+    expect(item?.tone).toBe("primary");
+    expect(item?.timeMs).toBe(task.dueDate);
+  });
+
+  it("a timed goal target carries its time", () => {
+    const goal = makeGoal(0, 0, "Launch", {
+      targetDate: new Date("2026-09-30T18:00:00").getTime(),
+      targetHasTime: true,
+    });
+    const item = calendarMonth(docWith(goal), Y, M, NOW).get(30)?.[0];
+    expect(item?.timeMs).toBe(goal.targetDate);
+  });
+
+  it("orders timed rows earliest-first ahead of all-day rows within a tone", () => {
+    const late = makeTask(0, 0, "Late", { dueDate: new Date("2026-09-28T15:00:00").getTime(), dueHasTime: true });
+    const allday = makeTask(0, 0, "Allday", { dueDate: at("2026-09-28") });
+    const early = makeTask(0, 0, "Early", { dueDate: new Date("2026-09-28T09:00:00").getTime(), dueHasTime: true });
+    const month = calendarMonth(docWith(late, allday, early), Y, M, NOW);
+    expect(month.get(28)?.map((it) => it.title)).toEqual(["Early", "Late", "Allday"]);
+  });
+
+  it("a timed habit stamps each occurrence with the anchor's time-of-day", () => {
+    const habit = makeTask(0, 0, "Gym", {
+      recur: { freq: "daily", interval: 1, anchor: new Date("2026-09-20T07:30:00").getTime(), hasTime: true },
+    });
+    const t = calendarMonth(docWith(habit), Y, M, NOW).get(24)?.[0].timeMs;
+    expect(t).toBeDefined();
+    const d = new Date(t!);
+    expect([d.getDate(), d.getHours(), d.getMinutes()]).toEqual([24, 7, 30]);
+    // an untimed habit stays all-day
+    const plain = makeTask(0, 0, "Read", {
+      recur: { freq: "daily", interval: 1, anchor: at("2026-09-20") },
+    });
+    expect(calendarMonth(docWith(plain), Y, M, NOW).get(24)?.[0].timeMs).toBeUndefined();
+  });
+
   it("groups a node's same-day rows: Completed beats Due today", () => {
     // the filter-critical case: a task due today that was completed today
     // answers Done, not To do

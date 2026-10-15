@@ -4,7 +4,7 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, Vie
 import { RecurFreq, RecurRule } from "@/domain/doc";
 import { describeRecur } from "@/domain/recur";
 import { styles } from "../styles";
-import { fmtDate } from "../utils";
+import { fmtDateTime } from "../utils";
 import { DatePickerBody } from "./datePicker";
 
 // recurrence rule editor, in the app's sheet chrome: freq chips, an
@@ -37,6 +37,7 @@ export function RecurSheet(props: {
   const [freq, setFreq] = useState<RecurFreq>(props.rule?.freq ?? "daily");
   const [interval, setInterval] = useState(props.rule?.interval ?? 1);
   const [anchor, setAnchor] = useState(props.rule?.anchor ?? props.now);
+  const [hasTime, setHasTime] = useState(props.rule?.hasTime ?? false);
   const [weekdays, setWeekdays] = useState<number[]>(
     () => props.rule?.weekdays ?? [new Date(props.rule?.anchor ?? props.now).getDay()],
   );
@@ -51,6 +52,7 @@ export function RecurSheet(props: {
     interval,
     ...(freq === "weekly" ? { weekdays: [...weekdays].sort((a, b) => a - b) } : {}),
     anchor,
+    ...(hasTime ? { hasTime: true } : {}),
   };
   const unit = UNITS[freq][interval === 1 ? 0 : 1];
   const valid = freq !== "weekly" || weekdays.length > 0;
@@ -69,7 +71,7 @@ export function RecurSheet(props: {
           <Text style={styles.formTitle}>{pickingAnchor ? "Starts" : "Repeat"}</Text>
           {pickingAnchor ? (
             <>
-              <DatePickerBody value={anchor} onChange={setAnchor} />
+              <DatePickerBody value={anchor} onChange={setAnchor} hasTime={hasTime} onHasTimeChange={setHasTime} />
               <Pressable
                 style={({ pressed }) => [styles.formSave, pressed && { opacity: 0.6 }]}
                 onPress={() => setPickingAnchor(false)}
@@ -132,7 +134,7 @@ export function RecurSheet(props: {
               )}
               <Pressable style={styles.dateRow} onPress={() => setPickingAnchor(true)}>
                 <Text style={styles.dateRowLabel}>Starts</Text>
-                <Text style={styles.dateRowValue}>{fmtDate(anchor)}</Text>
+                <Text style={styles.dateRowValue}>{fmtDateTime(anchor, hasTime)}</Text>
               </Pressable>
               <Text style={styles.calSummary}>{valid ? describeRecur(draft) : "Pick at least one weekday"}</Text>
               <View style={styles.formButtons}>

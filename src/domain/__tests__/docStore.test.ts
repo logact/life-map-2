@@ -268,6 +268,26 @@ describe("docToRows/rowsToDoc", () => {
     expect(loaded.nodes[t.nodeId].dueDate).toBe(12345);
   });
 
+  it("round-trips the schedule time flags", () => {
+    let doc = emptyDoc();
+    const t = addFreeNode("task", "T", "", { x: 0, y: 0 });
+    const g = addFreeNode("goal", "G", "", { x: 0, y: 0 });
+    doc = produceWithPatches(doc, t.recipe)[0];
+    doc = produceWithPatches(doc, g.recipe)[0];
+    doc = produceWithPatches(doc, setNodeTimes(t.nodeId, { dueDate: 12345, dueHasTime: true }))[0];
+    doc = produceWithPatches(doc, setNodeTimes(g.nodeId, { targetDate: 12345, targetHasTime: true }))[0];
+    const rows = docToRows(doc);
+    const loaded = rowsToDoc(rows.nodes, rows.notes, rows.edges);
+    expect(loaded.nodes[t.nodeId].dueHasTime).toBe(true);
+    expect(loaded.nodes[g.nodeId].targetHasTime).toBe(true);
+    // untimed nodes parse back without the flags
+    const plain = addFreeNode("task", "P", "", { x: 0, y: 0 });
+    doc = produceWithPatches(doc, plain.recipe)[0];
+    const rows2 = docToRows(doc);
+    const loaded2 = rowsToDoc(rows2.nodes, rows2.notes, rows2.edges);
+    expect(loaded2.nodes[plain.nodeId].dueHasTime).toBeUndefined();
+  });
+
   it("reads the legacy occuredAt key (pre-migration data)", () => {
     const doc = buildSeedDoc(400, 300);
     const rows = docToRows(doc);

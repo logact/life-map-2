@@ -166,12 +166,33 @@ describe("describeRecur", () => {
       "Every 2 months on the 3rd",
     );
   });
+
+  it("appends the time-of-day when the rule is timed", () => {
+    // at() stamps noon; a 9:05 rule needs an explicit anchor time
+    const morning = new Date("2026-09-14T09:05:00").getTime();
+    expect(describeRecur(rule({ freq: "daily", anchor: morning, hasTime: true }))).toBe("Every day at 9:05");
+    expect(describeRecur(rule({ freq: "weekly", weekdays: [1], anchor: morning, hasTime: true }))).toBe(
+      "Every week on Mon at 9:05",
+    );
+    // the flag is what counts — a midnight anchor with no flag stays day-only
+    expect(describeRecur(rule({ freq: "daily", anchor: morning }))).toBe("Every day");
+  });
 });
 
 describe("blob parsing", () => {
   it("round-trips a valid rule", () => {
     const r = rule({ freq: "weekly", interval: 2, weekdays: [1, 5] });
     expect(parseRecurRule(JSON.parse(JSON.stringify(r)))).toEqual(r);
+  });
+
+  it("round-trips the time flag and drops junk values for it", () => {
+    const timed = rule({ freq: "daily", hasTime: true });
+    expect(parseRecurRule(JSON.parse(JSON.stringify(timed)))).toEqual(timed);
+    expect(parseRecurRule({ freq: "daily", interval: 1, anchor: 5, hasTime: "yes" })).toEqual({
+      freq: "daily",
+      interval: 1,
+      anchor: 5,
+    });
   });
 
   it("drops what it cannot recognize", () => {

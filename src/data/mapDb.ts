@@ -171,6 +171,7 @@ function serializeKindData(node: NodeData): Record<string, unknown> {
     return {
       description: node.description ?? null,
       targetDate: node.targetDate ?? null,
+      targetHasTime: node.targetHasTime ?? null,
       completedAt: node.completedAt ?? null,
     };
   }
@@ -180,6 +181,7 @@ function serializeKindData(node: NodeData): Record<string, unknown> {
       startedAt: node.startedAt ?? null,
       completedAt: node.completedAt ?? null,
       dueDate: node.dueDate ?? null,
+      dueHasTime: node.dueHasTime ?? null,
       synthetic: node.synthetic ?? null,
       recur: node.recur ?? null,
       log: node.log ?? null,
@@ -284,6 +286,7 @@ function parseNodeRow(row: NodeRow): NodeData | null {
     if (startedAt !== undefined) node.startedAt = startedAt;
     if (completedAt !== undefined) node.completedAt = completedAt;
     if (dueDate !== undefined) node.dueDate = dueDate;
+    if (data.dueHasTime === true) node.dueHasTime = true;
     if (data.synthetic === true) node.synthetic = true;
     const recur = parseRecurRule(data.recur);
     if (recur) node.recur = recur;
@@ -302,6 +305,7 @@ function parseNodeRow(row: NodeRow): NodeData | null {
     const targetDate = millis(data.targetDate);
     const completedAt = millis(data.completedAt);
     if (targetDate !== undefined) node.targetDate = targetDate;
+    if (data.targetHasTime === true) node.targetHasTime = true;
     if (completedAt !== undefined) node.completedAt = completedAt;
   }
   // rows saved before tags existed have no key — tagIds stays undefined

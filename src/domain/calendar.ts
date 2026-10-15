@@ -29,6 +29,10 @@ export interface CalItem {
   // "Started" | "Record"
   label: string;
   tone: CalTone;
+  // the item's time-of-day (epoch millis) when its schedule field is timed;
+  // absent = all-day. Shown on the day row and orders timed rows before
+  // all-day ones within a tone group
+  timeMs?: number;
   // a focus segment record's measured duration — the day row shows it and
   // the day header sums it
   durationMs?: number;
@@ -124,6 +128,8 @@ function habitItems(
   if (!rule) return;
   const loggedDays = new Set((node.log ?? []).map(dayStart));
   const days = new Date(y, m + 1, 0).getDate();
+  // a timed rule stamps each occurrence with the anchor's time-of-day
+  const anchorTime = rule.hasTime ? new Date(rule.anchor) : null;
   for (let day = 1; day <= days; day++) {
     const dayMs = new Date(y, m, day).getTime();
     const key = `${node.id}:habit`;
@@ -136,6 +142,9 @@ function habitItems(
       else if (dayMs === today)
         item = { nodeId: node.id, key, kind: "habit", title: node.title, label: "Due today", tone: "attention" };
       else item = { nodeId: node.id, key, kind: "habit", title: node.title, label: "Scheduled", tone: "future" };
+    }
+    if (item && anchorTime) {
+      item.timeMs = new Date(y, m, day, anchorTime.getHours(), anchorTime.getMinutes()).getTime();
     }
     if (item) {
       const list = byDay.get(day) ?? [];
@@ -161,11 +170,13 @@ export function calendarMonth(
     slot: string,
     label: string,
     tone: CalTone,
+    timeMs?: number,
   ) => {
     if (ms === undefined || !inMonth(ms, year, month0)) return;
     const day = new Date(ms).getDate();
     const list = byDay.get(day) ?? [];
     const item: CalItem = { nodeId: node.id, key: `${node.id}:${slot}`, kind, title: node.title, label, tone };
+    if (timeMs !== undefined) item.timeMs = timeMs;
     if (isRecord(node) && node.durationMs !== undefined) item.durationMs = node.durationMs;
     list.push(item);
     byDay.set(day, list);
@@ -179,15 +190,23 @@ export function calendarMonth(
       // a recurring task never completes: its schedule and log ARE its days
       habitItems(node, year, month0, today, byDay);
     } else if (isGoal(node)) {
-      push(node, "goal", node.targetDate, "target", "Target date", "primary");
+      const targetTime = node.targetHasTime ? node.targetDate : undefined;
+      push(node, "goal", node.targetDate, "target", "Target date", "primary", targetTime);
       push(node, "goal", node.startedAt, "started", "Started", "neutral");
       push(node, "goal", node.completedAt, "completed", "Completed", "done");
     } else if (isTask(node)) {
       // a one-off due date is a deadline pin: it asks for attention on the
-      // day and while overdue; a finished task's due date is plain history
+      // day and while overdue; a finished task's due date is plain history.
+      // A TIMED due date is an exact deadline — it turns overdue the moment
+      // it passes instead of at end of day
       if (node.dueDate !== undefined) {
+        const timeMs = node.dueHasTime ? node.dueDate : undefined;
         if (node.completedAt !== undefined) {
-          push(node, "task", node.dueDate, "due", "Due date", "neutral");
+          push(node, "task", node.dueDate, "due", "Due date", "neutral", timeMs);
+        } else if (node.dueHasTime) {
+          if (node.dueDate < now) push(node, "task", node.dueDate, "due", "Overdue", "attention", timeMs);
+          else if (dayStart(node.dueDate) === today) push(node, "task", node.dueDate, "due", "Due today", "attention", timeMs);
+          else push(node, "task", node.dueDate, "due", "Due date", "primary", timeMs);
         } else {
           const d = dayStart(node.dueDate);
           if (d < today) push(node, "task", node.dueDate, "due", "Overdue", "attention");
@@ -200,7 +219,13 @@ export function calendarMonth(
     }
   }
   for (const [day, list] of byDay) {
-    list.sort((a, b) => TONE_RANK[a.tone] - TONE_RANK[b.tone]);
+    // tone first; within a tone, timed rows run earliest-first ahead of
+    // all-day rows (the sort is stable, so derivation order breaks ties)
+    list.sort(
+      (a, b) =>
+        TONE_RANK[a.tone] - TONE_RANK[b.tone] ||
+        (a.timeMs ?? Number.MAX_SAFE_INTEGER) - (b.timeMs ?? Number.MAX_SAFE_INTEGER),
+    );
     const dayMs = new Date(year, month0, day).getTime();
     byDay.set(day, applyDayOrder(list, doc.dayOrder[String(dayMs)]));
   }

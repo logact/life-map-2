@@ -29,8 +29,12 @@ export interface RecurRule {
   // weekly only: scheduled weekdays, 0 = Sunday .. 6 = Saturday; omitted
   // means "the anchor's weekday"
   weekdays?: number[];
-  // the first scheduled day (epoch millis); time-of-day is ignored
+  // the first scheduled day (epoch millis). Time-of-day is ignored unless
+  // hasTime is set — then it is the habit's planned time on each scheduled
+  // day (display and intra-day ordering; due/overdue stay day-granular)
   anchor: number;
+  // when true, the anchor's time-of-day is meaningful
+  hasTime?: boolean;
 }
 
 export interface NoteData {
@@ -65,6 +69,9 @@ export interface NodeData {
   // pin. Display only: it never drives the status machine. Habits take a
   // recur rule instead, so setting a rule clears this
   dueDate?: number;
+  // when true, the due date's time-of-day is meaningful (a deadline at an
+  // exact time); absent/false = an all-day pin
+  dueHasTime?: boolean;
   // recurring task fields: the rule and its occurrence log (ascending
   // timestamps). While recur is set the stored status stays "todo" and the
   // DERIVED state (due/overdue/…) takes over — see src/domain/recur.ts
@@ -73,6 +80,9 @@ export interface NodeData {
   // goal fields
   description?: string;
   targetDate?: number;
+  // when true, the target date's time-of-day is meaningful; absent/false =
+  // an all-day target
+  targetHasTime?: boolean;
   // record fields
   note?: string;
   occurredAt?: number;

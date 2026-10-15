@@ -17,6 +17,7 @@ interface SyncStore {
   setEnabled: (enabled: boolean) => void;
   markSyncing: () => void;
   markSynced: (at: number) => void;
+  markAvailable: () => void;
   markUnavailable: (detail?: string) => void;
   markError: (detail?: string) => void;
 }
@@ -29,6 +30,10 @@ export const useSyncStore = create<SyncStore>((set) => ({
   setEnabled: (enabled) => set({ enabled }),
   markSyncing: () => set({ state: "syncing" }),
   markSynced: (at) => set({ state: "idle", lastSyncedAt: at, lastError: null }),
+  // a fresh check that succeeded clears a stale "unavailable" — otherwise the
+  // settings screen keeps showing it after iCloud has recovered (issue #31)
+  markAvailable: () =>
+    set((s) => (s.state === "unavailable" ? { state: "idle", lastError: null } : s)),
   // a call without detail keeps the previous one — several layers report the
   // same failure and only the lowest has the native error
   markUnavailable: (detail) => set((s) => ({ state: "unavailable", lastError: detail ?? s.lastError })),

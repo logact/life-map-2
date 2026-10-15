@@ -84,13 +84,17 @@ and the signing errors clear.
   assignment in step 3 above wasn't saved, or the device build predates it.
 - **TestFlight build shows "iCloud unavailable" although the user is signed
   in** (issue #31): the production provisioning profile predates the
-  container assignment, so iOS strips the ubiquity entitlement at install.
-  Verify in the portal that the App ID `com.logact.lifemap` has the container
-  `iCloud.com.logact.lifemap` checked (step 3), then remove the production
-  provisioning profile and rebuild as described above. On the device, also
-  check Settings → Apple Account → iCloud → iCloud Drive is on and this app
-  is enabled under the iCloud Drive app list. Since the fix for this issue,
-  the settings screen shows which case it is: "can't reach the app's iCloud
-  container" means the build/profile, the "sign into your Apple Account"
-  message means the device, and the small detail line carries the native
-  error code.
+  container assignment, so iOS strips the ubiquity entitlement at install —
+  and `ubiquityIdentityToken` comes back nil, which looks exactly like
+  "signed out". Verify in the portal that the App ID `com.logact.lifemap`
+  has the container `iCloud.com.logact.lifemap` checked (step 3), then
+  remove the production provisioning profile and rebuild as described above.
+  On the device, also check Settings → Apple Account → iCloud → iCloud Drive
+  is on and this app is enabled under the iCloud Drive app list. The
+  settings screen now separates the cases: "can't reach the app's iCloud
+  container" means the token is fine but the container isn't (build/profile
+  problem); "no iCloud account token and can't find its iCloud container"
+  means both signals are dead (either really signed out, or the stripped
+  entitlement); "sign into your Apple Account" means the container resolves
+  but there's no account token (device-side sign-in). The small detail line
+  under the status always carries the native error code or token state.

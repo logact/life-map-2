@@ -359,6 +359,24 @@ describe("pastePayload", () => {
     expect(root.bend).toBeDefined();
     expect(next.rootEdgeIds).toContain(paste.rootEdgeIds[0]);
   });
+
+  it("carries the schedule fields: due date, time flags, timed rule", () => {
+    let { doc, t1, h } = fixture();
+    const DAY = 86400000;
+    const due = Date.now() + DAY;
+    doc = run(doc, setNodeTimes(t1, { dueDate: due, dueHasTime: true }));
+    doc = run(doc, setNodeTimes(h, { targetDate: due, targetHasTime: true }));
+    const pasteT = pastePayload(snapshotNode(doc, t1), { x: 0, y: 0 });
+    let next = run(doc, pasteT.recipe);
+    const pastedTask = next.nodes[pasteT.nodeIds[0]];
+    expect(pastedTask.dueDate).toBe(due);
+    expect(pastedTask.dueHasTime).toBe(true);
+    const pasteH = pastePayload(snapshotNode(doc, h), { x: 0, y: 0 });
+    next = run(doc, pasteH.recipe);
+    const pastedGoal = next.nodes[pasteH.nodeIds[0]];
+    expect(pastedGoal.targetDate).toBe(due);
+    expect(pastedGoal.targetHasTime).toBe(true);
+  });
 });
 
 
@@ -465,6 +483,31 @@ describe("backdating", () => {
     expect(doc.nodes[t1].dueDate).toBeUndefined();
     next = run(doc, setNodeTimes(t1, { dueDate: YESTERDAY }));
     expect(next.nodes[t1].dueDate).toBeUndefined();
+  });
+
+  it("setNodeTimes manages the time flags next to the dates", () => {
+    let { doc, t1, h } = fixture();
+    // a date written with a flag becomes timed; rewriting the date without
+    // the flag keeps it; clearing the date clears the flag with it
+    let next = expectRoundTrip(doc, setNodeTimes(t1, { dueDate: YESTERDAY, dueHasTime: true }));
+    expect(next.nodes[t1].dueHasTime).toBe(true);
+    next = run(next, setNodeTimes(t1, { dueDate: LAST_WEEK }));
+    expect(next.nodes[t1].dueHasTime).toBe(true);
+    next = expectRoundTrip(next, setNodeTimes(t1, { dueDate: null }));
+    expect(next.nodes[t1].dueHasTime).toBeUndefined();
+    // false clears the flag but keeps the date
+    doc = run(doc, setNodeTimes(t1, { dueDate: YESTERDAY, dueHasTime: true }));
+    next = expectRoundTrip(doc, setNodeTimes(t1, { dueHasTime: false }));
+    expect(next.nodes[t1].dueDate).toBe(YESTERDAY);
+    expect(next.nodes[t1].dueHasTime).toBeUndefined();
+    // the goal's target carries its own flag
+    next = expectRoundTrip(doc, setNodeTimes(h, { targetDate: YESTERDAY, targetHasTime: true }));
+    expect(next.nodes[h].targetHasTime).toBe(true);
+    next = expectRoundTrip(next, setNodeTimes(h, { targetDate: null }));
+    expect(next.nodes[h].targetHasTime).toBeUndefined();
+    // setting a rule drops the due pin's flag too
+    next = run(doc, setNodeRecurrence(t1, { freq: "daily", interval: 1, anchor: LAST_WEEK }));
+    expect(next.nodes[t1].dueHasTime).toBeUndefined();
   });
 
   it("addFreeNode pins a task's dueDate at creation (calendar '+ New') — one undoable step", () => {
@@ -690,6 +733,14 @@ describe("recurring tasks", () => {
     const pasted = next.nodes[paste.nodeIds[0]];
     expect(pasted.recur).toEqual(rule);
     expect(pasted.log).toHaveLength(1);
+  });
+
+  it("setNodeRecurrence keeps the rule's time flag", () => {
+    let { doc, t1 } = fixture();
+    doc = expectRoundTrip(doc, setNodeRecurrence(t1, { ...rule, hasTime: true }));
+    expect(doc.nodes[t1].recur?.hasTime).toBe(true);
+    doc = expectRoundTrip(doc, setNodeRecurrence(t1, rule));
+    expect(doc.nodes[t1].recur?.hasTime).toBeUndefined();
   });
 });
 

@@ -1,5 +1,6 @@
 import { FitView } from "@/map/fitZoom";
 import { Id, LifeMapDoc, NodeData, NodeKind } from "@/domain/doc";
+import { fmtTime } from "@/domain/time";
 import {
   BREAKPOINT_GAP,
   CHILD_RADIUS,
@@ -80,6 +81,12 @@ export function edgeEndpointNodes(doc: LifeMapDoc, edgeIds: Id[]): NodeData[] {
 // short readable date for the inspector's timestamps (epoch millis)
 export function fmtDate(ms: number): string {
   return new Date(ms).toDateString().slice(4); // drop the weekday prefix
+}
+
+// a schedule field's display: the date, with its time-of-day appended when
+// the field is timed ("Oct 15 2026 · 21:30"); all-day reads as the bare date
+export function fmtDateTime(ms: number, hasTime?: boolean): string {
+  return hasTime ? `${fmtDate(ms)} · ${fmtTime(ms)}` : fmtDate(ms);
 }
 
 // a target date's distance from now in whole days: "today", "in 3 days",

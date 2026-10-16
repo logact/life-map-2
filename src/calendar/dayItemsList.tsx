@@ -16,6 +16,7 @@ import { CalItem, CalTone } from "@/domain/calendar";
 import { Recipe, reorderDayItems } from "@/domain/commands";
 import { Id } from "@/domain/doc";
 import { fmtDuration } from "@/domain/focus";
+import { fmtTime } from "@/domain/time";
 import { CARD_BG, INK, STATUS_COLOR, TYPE } from "@/ui/theme";
 
 // The selected day's rows, reorderable: drag a row's grip handle (instant)
@@ -166,7 +167,13 @@ const DayRow = memo(function DayRow({
             {item.title}
           </Text>
           <Text style={ls.itemLabel}>
-            {item.durationMs !== undefined ? `${item.label} · ${fmtDuration(item.durationMs)}` : item.label}
+            {[
+              item.timeMs !== undefined ? fmtTime(item.timeMs) : null,
+              item.label,
+              item.durationMs !== undefined ? fmtDuration(item.durationMs) : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </Text>
           {reorderable && (
             <GestureDetector gesture={handlePan}>

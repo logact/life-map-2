@@ -3,7 +3,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 import { Recipe, setNodeTimes } from "@/domain/commands";
 import { isGoal, isTask, LifeMapDoc, NodeData } from "@/domain/doc";
 import { dayStart } from "@/domain/recur";
-import { fmtDate } from "@/map/utils";
+import { fmtDate, fmtDateTime } from "@/map/utils";
 import { BACKDROP, CARD_BG, HANDLE, INK, ON_INK, STATUS_COLOR, TYPE } from "@/ui/theme";
 
 // The calendar's scheduling sheet: every schedulable node — goals (their
@@ -17,6 +17,14 @@ import { BACKDROP, CARD_BG, HANDLE, INK, ON_INK, STATUS_COLOR, TYPE } from "@/ui
 function pinnedDay(node: NodeData): number | undefined {
   if (isGoal(node)) return node.targetDate;
   return node.dueDate;
+}
+
+// the pin's caption: the date, with its time when the field is timed
+function pinnedLabel(node: NodeData): string | null {
+  const pinned = pinnedDay(node);
+  if (pinned === undefined) return null;
+  const hasTime = isGoal(node) ? node.targetHasTime : node.dueHasTime;
+  return fmtDateTime(pinned, hasTime);
 }
 
 export function ScheduleSheet(props: {
@@ -42,10 +50,19 @@ export function ScheduleSheet(props: {
     );
 
   const toggle = (node: NodeData, onThisDay: boolean) => {
+    // re-pinning a timed node keeps its time-of-day on the new day (the
+    // same semantics as the date picker's day cells)
+    const carryTime = (hasTime: boolean | undefined, prev: number | undefined) => {
+      if (!hasTime || prev === undefined) return dayMs;
+      const t = new Date(prev);
+      const day = new Date(dayMs);
+      day.setHours(t.getHours(), t.getMinutes(), 0, 0);
+      return day.getTime();
+    };
     if (isGoal(node)) {
-      props.run(setNodeTimes(node.id, { targetDate: onThisDay ? null : dayMs }));
+      props.run(setNodeTimes(node.id, { targetDate: onThisDay ? null : carryTime(node.targetHasTime, node.targetDate) }));
     } else {
-      props.run(setNodeTimes(node.id, { dueDate: onThisDay ? null : dayMs }));
+      props.run(setNodeTimes(node.id, { dueDate: onThisDay ? null : carryTime(node.dueHasTime, node.dueDate) }));
     }
   };
 
@@ -61,7 +78,7 @@ export function ScheduleSheet(props: {
               <Text style={cs.empty}>No goals or tasks yet — add one with + New</Text>
             ) : (
               candidates.map(({ node, onThisDay }) => {
-                const pinned = pinnedDay(node);
+                const pinned = pinnedLabel(node);
                 return (
                   <Pressable
                     key={node.id}
@@ -75,7 +92,7 @@ export function ScheduleSheet(props: {
                     {onThisDay ? (
                       <Text style={cs.rowCheck}>✓</Text>
                     ) : (
-                      <Text style={cs.rowDate}>{pinned !== undefined ? fmtDate(pinned) : "—"}</Text>
+                      <Text style={cs.rowDate}>{pinned ?? "—"}</Text>
                     )}
                   </Pressable>
                 );

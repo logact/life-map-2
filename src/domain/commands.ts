@@ -608,11 +608,13 @@ export function setNodeRecurrence(id: Id, rule: RecurRule | null): Recipe {
         interval: Math.max(1, Math.round(rule.interval)),
         ...(rule.weekdays && rule.weekdays.length > 0 ? { weekdays: [...rule.weekdays] } : {}),
         anchor: rule.anchor,
+        ...(rule.hasTime ? { hasTime: true } : {}),
       };
       node.status = "todo";
       delete node.startedAt;
       delete node.completedAt;
       delete node.dueDate; // the rule owns the schedule now
+      delete node.dueHasTime;
     } else {
       delete node.recur;
     }
@@ -626,8 +628,11 @@ export function setNodeRecurrence(id: Id, rule: RecurRule | null): Recipe {
 // are only rewritten where already set (to start/complete, use
 // transitionNodeStatus) — while a record's occurredAt, a goal's
 // targetDate and a plain task's dueDate are always writable;
-// targetDate/dueDate: null clears. A recurring task's schedule is its
-// rule, so dueDate writes skip it
+// targetDate/dueDate: null clears (and clears its time flag). The
+// dueHasTime/targetHasTime flags mark the date's time-of-day as
+// meaningful: true sets, null clears; writing a date without a flag keeps
+// the existing flag. A recurring task's schedule is its rule, so dueDate
+// writes skip it
 export function setNodeTimes(
   id: Id,
   times: {
@@ -635,7 +640,9 @@ export function setNodeTimes(
     startedAt?: number;
     completedAt?: number;
     targetDate?: number | null;
+    targetHasTime?: boolean | null;
     dueDate?: number | null;
+    dueHasTime?: boolean | null;
   },
 ): Recipe {
   return (draft) => {
@@ -653,7 +660,12 @@ export function setNodeTimes(
       }
       if (!node.recur) {
         if (typeof times.dueDate === "number") node.dueDate = times.dueDate;
-        else if (times.dueDate === null) delete node.dueDate;
+        else if (times.dueDate === null) {
+          delete node.dueDate;
+          delete node.dueHasTime;
+        }
+        if (times.dueHasTime === true) node.dueHasTime = true;
+        else if (times.dueHasTime === null || times.dueHasTime === false) delete node.dueHasTime;
       }
     }
     if (node.kind === "goal") {
@@ -661,7 +673,12 @@ export function setNodeTimes(
         node.completedAt = times.completedAt;
       }
       if (typeof times.targetDate === "number") node.targetDate = times.targetDate;
-      else if (times.targetDate === null) delete node.targetDate;
+      else if (times.targetDate === null) {
+        delete node.targetDate;
+        delete node.targetHasTime;
+      }
+      if (times.targetHasTime === true) node.targetHasTime = true;
+      else if (times.targetHasTime === null || times.targetHasTime === false) delete node.targetHasTime;
     }
   };
 }
@@ -749,6 +766,8 @@ export function pastePayload(payload: ClipboardPayload, at: { x: number; y: numb
       if (typeof d.status === "string") node.status = d.status as NodeData["status"];
       if (typeof d.startedAt === "number") node.startedAt = d.startedAt;
       if (typeof d.completedAt === "number") node.completedAt = d.completedAt;
+      if (typeof d.dueDate === "number") node.dueDate = d.dueDate;
+      if (d.dueHasTime === true) node.dueHasTime = true;
       // rule and occurrence log copy verbatim, like the other stamps
       const recur = parseRecurRule(d.recur);
       if (recur) node.recur = recur;
@@ -764,6 +783,7 @@ export function pastePayload(payload: ClipboardPayload, at: { x: number; y: numb
     } else {
       if (typeof d.description === "string") node.description = d.description;
       if (typeof d.targetDate === "number") node.targetDate = d.targetDate;
+      if (d.targetHasTime === true) node.targetHasTime = true;
       if (typeof d.completedAt === "number") node.completedAt = d.completedAt;
     }
     // tag assignments ride along; ids missing from the registry are kept

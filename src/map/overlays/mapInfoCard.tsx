@@ -7,10 +7,11 @@ import { EdgeData, edgeDepth, isGoal, isRecord, isTask, LifeMapDoc, NodeData } f
 import { fmtDuration, focusedMs } from "@/domain/focus";
 import { describeRecur, dueState, nextDue, prevDue, recurStats } from "@/domain/recur";
 import { edgeStatus, nodeStatus } from "@/domain/status";
+import { fmtTime } from "@/domain/time";
 import { SheetButton } from "../components/sheets";
 import { styles } from "../styles";
 import { InfoTarget } from "../types";
-import { fmtDate, fmtRelative } from "../utils";
+import { fmtDate, fmtDateTime, fmtRelative } from "../utils";
 import { DatePickerSheet } from "./datePicker";
 import { RecurSheet } from "./recurSheet";
 import { TagPickerSheet } from "./tagPicker";
@@ -54,8 +55,10 @@ function NodeInfoCard(props: {
   const [editing, setEditing] = useState<EditField | null>(null);
   const [draft, setDraft] = useState("");
   // the date field open in the picker sheet, with the value it opened on
-  // (captured in the tap handler — Date.now() is impure in render)
-  const [dateField, setDateField] = useState<{ field: DateField; label: string; value: number } | null>(null);
+  // (captured in the tap handler — Date.now() is impure in render); hasTime
+  // is set only for the schedulable fields (due/target) — it both opts the
+  // picker into time editing and seeds the toggle
+  const [dateField, setDateField] = useState<{ field: DateField; label: string; value: number; hasTime?: boolean } | null>(null);
   const [tagPickerOpen, setTagPickerOpen] = useState(false);
   const [recurOpen, setRecurOpen] = useState(false);
   // tasks carry no detail; the goal's detail is its description, the
@@ -98,17 +101,19 @@ function NodeInfoCard(props: {
   const due = isTask(node) && node.recur ? dueState(node, props.now) : null;
   const recurText = (() => {
     if (!node.recur || !due) return "";
+    const rule = node.recur;
+    const at = rule.hasTime ? ` · ${fmtTime(rule.anchor)}` : "";
     switch (due) {
       case "done-today":
         return "Done today ✓";
       case "due":
-        return "Due today";
+        return `Due today${at}`;
       case "overdue": {
-        const missed = prevDue(node.recur, props.now);
+        const missed = prevDue(rule, props.now);
         return missed ? `Overdue since ${fmtDate(missed)}` : "Overdue";
       }
       default:
-        return `Next ${fmtDate(nextDue(node.recur, props.now))}`;
+        return `Next ${fmtDate(nextDue(rule, props.now))}${at}`;
     }
   })();
   const stats = node.recur ? recurStats(node.recur, node.log ?? [], props.now) : null;
@@ -182,20 +187,22 @@ function NodeInfoCard(props: {
   const nodeTagIds = node.tagIds ?? [];
   const assignedTags = Object.values(props.doc.tags).filter((t) => nodeTagIds.includes(t.id));
 
-  // the node's date rows, in display order; tapping one opens the picker
-  const dateRows: { field: DateField; label: string; value?: number; placeholder?: string }[] = [];
+  // the node's date rows, in display order; tapping one opens the picker.
+  // The schedulable fields (due/target) carry their time flag so the picker
+  // offers time-of-day editing; the backdating stamps stay day-only
+  const dateRows: { field: DateField; label: string; value?: number; hasTime?: boolean; placeholder?: string }[] = [];
   if (isRecord(node)) {
     dateRows.push({ field: "occurredAt", label: "Occurred", value: node.occurredAt, placeholder: "Set date…" });
   } else if (isTask(node)) {
     // a habit's schedule is its rule (the Repeat row below); a plain task
     // carries a one-off due date instead
     if (!node.recur) {
-      dateRows.push({ field: "dueDate", label: "Due", value: node.dueDate, placeholder: "Set due date…" });
+      dateRows.push({ field: "dueDate", label: "Due", value: node.dueDate, hasTime: node.dueHasTime ?? false, placeholder: "Set due date…" });
     }
     if (node.startedAt !== undefined) dateRows.push({ field: "startedAt", label: "Started", value: node.startedAt });
     if (node.completedAt !== undefined) dateRows.push({ field: "completedAt", label: "Done", value: node.completedAt });
   } else {
-    dateRows.push({ field: "targetDate", label: "Target", value: node.targetDate, placeholder: "Set target date…" });
+    dateRows.push({ field: "targetDate", label: "Target", value: node.targetDate, hasTime: node.targetHasTime ?? false, placeholder: "Set target date…" });
     if (node.completedAt !== undefined) dateRows.push({ field: "completedAt", label: "Done", value: node.completedAt });
   }
 
@@ -266,14 +273,14 @@ function NodeInfoCard(props: {
             // picker's opening value is captured here, in the press handler —
             // Date.now() is impure and must not run during render
             endEdit();
-            setDateField({ field: r.field, label: r.label, value: r.value ?? Date.now() });
+            setDateField({ field: r.field, label: r.label, value: r.value ?? Date.now(), hasTime: r.hasTime });
           }}
         >
           <Text style={styles.dateRowLabel}>{r.label}</Text>
           <Text style={r.value !== undefined ? styles.dateRowValue : styles.infoDetailPlaceholder}>
             {r.value !== undefined
               ? r.field === "targetDate" || r.field === "dueDate"
-                ? `${fmtDate(r.value)} · ${fmtRelative(r.value, props.now)}`
+                ? `${fmtDateTime(r.value, r.hasTime)} · ${fmtRelative(r.value, props.now)}`
                 : fmtDate(r.value)
               : r.placeholder}
           </Text>
@@ -394,8 +401,17 @@ function NodeInfoCard(props: {
         <DatePickerSheet
           title={dateField.label}
           value={dateField.value}
-          onDone={(ms) => {
-            props.run(setNodeTimes(node.id, { [dateField.field]: ms }));
+          hasTime={dateField.hasTime}
+          onDone={(ms, time) => {
+            // the schedulable fields carry their time flag alongside the
+            // value; undefined (a day-only field) leaves any flag untouched
+            const flag =
+              dateField.field === "dueDate"
+                ? { dueHasTime: time ?? null }
+                : dateField.field === "targetDate"
+                  ? { targetHasTime: time ?? null }
+                  : {};
+            props.run(setNodeTimes(node.id, { [dateField.field]: ms, ...flag }));
             setDateField(null);
           }}
           onClear={

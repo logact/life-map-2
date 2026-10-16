@@ -2,7 +2,7 @@ import { useState } from "react";
 import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { styles } from "../styles";
-import { fmtDate } from "../utils";
+import { fmtDate, fmtDateTime } from "../utils";
 
 // ---------- date picking: a small month calendar ----------
 // No date-picker library is installed, so this is a plain-RN calendar in
@@ -11,6 +11,10 @@ import { fmtDate } from "../utils";
 // don't reliably come to the front on iOS); DatePickerSheet wraps it in a
 // Modal with Save/Cancel for callers that are not already a modal (the
 // info card). Picking a day keeps the current value's time-of-day.
+//
+// Callers that pass hasTime/onHasTimeChange get a time row under the
+// calendar: an "All day" chip and hour/minute steppers. Without the pair
+// the calendar is day-only, exactly as before.
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -22,7 +26,13 @@ function sameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
-export function DatePickerBody(props: { value: number; onChange: (ms: number) => void }) {
+export function DatePickerBody(props: {
+  value: number;
+  onChange: (ms: number) => void;
+  // both present = the time row shows; both absent = day-only picking
+  hasTime?: boolean;
+  onHasTimeChange?: (on: boolean) => void;
+}) {
   const selected = new Date(props.value);
   // the month on display: follows the selection home on open, then moves
   // with the nav arrows only (picking a day never jumps the view)
@@ -39,6 +49,30 @@ export function DatePickerBody(props: { value: number; onChange: (ms: number) =>
     props.onChange(next.getTime());
   };
 
+  // the steppers wrap inside their unit (the modulo keeps hour/minute in
+  // range without ever rolling the date itself into the next day)
+  const shiftHour = (delta: number) => {
+    const next = new Date(props.value);
+    next.setHours((next.getHours() + delta + 24) % 24, next.getMinutes(), 0, 0);
+    props.onChange(next.getTime());
+  };
+  const shiftMinute = (delta: number) => {
+    const next = new Date(props.value);
+    next.setHours(next.getHours(), (next.getMinutes() + delta + 60) % 60, 0, 0);
+    props.onChange(next.getTime());
+  };
+  // enabling time on a day-only value (local midnight) defaults to 9:00 —
+  // a midnight deadline reads as a mistake more often than intent
+  const enableTime = () => {
+    const cur = new Date(props.value);
+    if (cur.getHours() === 0 && cur.getMinutes() === 0) {
+      const next = new Date(props.value);
+      next.setHours(9, 0, 0, 0);
+      props.onChange(next.getTime());
+    }
+    props.onHasTimeChange?.(true);
+  };
+
   const daysInMonth = new Date(view.y, view.m + 1, 0).getDate();
   const leadingBlanks = new Date(view.y, view.m, 1).getDay();
   const cells: (number | null)[] = [
@@ -46,6 +80,7 @@ export function DatePickerBody(props: { value: number; onChange: (ms: number) =>
     ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
   ];
   const today = new Date();
+  const hasTime = props.hasTime ?? false;
 
   return (
     <View>
@@ -94,22 +129,61 @@ export function DatePickerBody(props: { value: number; onChange: (ms: number) =>
           ),
         )}
       </View>
+      {props.onHasTimeChange && (
+        <View style={styles.recurStepperRow}>
+          <Text style={styles.dateRowLabel}>Time</Text>
+          <Pressable
+            accessibilityLabel="All day"
+            style={[styles.recurChip, !hasTime && styles.recurChipSelected]}
+            onPress={() => props.onHasTimeChange!(false)}
+          >
+            <Text style={[styles.recurChipText, !hasTime && styles.recurChipTextSelected]}>All day</Text>
+          </Pressable>
+          {hasTime ? (
+            <>
+              <Pressable accessibilityLabel="Decrease hour" hitSlop={12} onPress={() => shiftHour(-1)}>
+                <Text style={styles.calNav}>‹</Text>
+              </Pressable>
+              <Text style={styles.recurStepperValue}>{String(selected.getHours()).padStart(2, "0")}</Text>
+              <Pressable accessibilityLabel="Increase hour" hitSlop={12} onPress={() => shiftHour(1)}>
+                <Text style={styles.calNav}>›</Text>
+              </Pressable>
+              <Text style={styles.recurStepperValue}>:</Text>
+              <Pressable accessibilityLabel="Decrease minutes" hitSlop={12} onPress={() => shiftMinute(-5)}>
+                <Text style={styles.calNav}>‹</Text>
+              </Pressable>
+              <Text style={styles.recurStepperValue}>{String(selected.getMinutes()).padStart(2, "0")}</Text>
+              <Pressable accessibilityLabel="Increase minutes" hitSlop={12} onPress={() => shiftMinute(5)}>
+                <Text style={styles.calNav}>›</Text>
+              </Pressable>
+            </>
+          ) : (
+            <Pressable accessibilityLabel="Set a time" style={styles.recurChip} onPress={enableTime}>
+              <Text style={styles.recurChipText}>At a time</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
     </View>
   );
 }
 
 // modal wrapper with the sheet chrome: title, the calendar, and
 // Clear?/Cancel/Save. Clear only appears when the caller passes onClear
-// (the goal's target date — the one optional date)
+// (the goal's target date — the one optional date). Passing hasTime opts
+// the picker into time-of-day editing; onDone then reports the flag too
 export function DatePickerSheet(props: {
   title: string;
   value: number;
-  onDone: (ms: number) => void;
+  hasTime?: boolean;
+  onDone: (ms: number, hasTime?: boolean) => void;
   onClear?: () => void;
   onClose: () => void;
 }) {
   const [selected, setSelected] = useState(props.value);
+  const [hasTime, setHasTime] = useState(props.hasTime ?? false);
   const { onClear } = props;
+  const timed = props.hasTime !== undefined;
   return (
     <Modal visible transparent animationType="fade" onRequestClose={props.onClose}>
       <KeyboardAvoidingView
@@ -120,8 +194,12 @@ export function DatePickerSheet(props: {
         <View style={styles.formSheet}>
           <View style={styles.sheetHandle} />
           <Text style={styles.formTitle}>{props.title}</Text>
-          <DatePickerBody value={selected} onChange={setSelected} />
-          <Text style={styles.calSummary}>{fmtDate(selected)}</Text>
+          <DatePickerBody
+            value={selected}
+            onChange={setSelected}
+            {...(timed ? { hasTime, onHasTimeChange: setHasTime } : {})}
+          />
+          <Text style={styles.calSummary}>{timed ? fmtDateTime(selected, hasTime) : fmtDate(selected)}</Text>
           <View style={styles.formButtons}>
             {onClear && (
               <Pressable
@@ -143,7 +221,7 @@ export function DatePickerSheet(props: {
             </Pressable>
             <Pressable
               style={({ pressed }) => [styles.formSave, pressed && { opacity: 0.6 }]}
-              onPress={() => props.onDone(selected)}
+              onPress={() => props.onDone(selected, timed ? hasTime : undefined)}
             >
               <Text style={styles.formSaveText}>Save</Text>
             </Pressable>

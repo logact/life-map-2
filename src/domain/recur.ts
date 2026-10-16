@@ -1,4 +1,5 @@
 import { NodeData, RecurRule, Status } from "./doc";
+import { fmtTime } from "./time";
 
 // ---------- recurrence as pure derivation ----------
 // A recurring task is never permanently done: it carries a rule (when the
@@ -157,6 +158,7 @@ export function parseRecurRule(value: unknown): RecurRule | undefined {
     interval: Math.max(1, Math.round(r.interval)),
     anchor: r.anchor,
   };
+  if (r.hasTime === true) rule.hasTime = true;
   if (Array.isArray(r.weekdays)) {
     const days = r.weekdays.filter((d): d is number => typeof d === "number" && d >= 0 && d <= 6);
     if (days.length > 0) rule.weekdays = days;
@@ -186,18 +188,20 @@ function ordinal(n: number): string {
 }
 
 // one-line human rule for the info card and the editor sheet:
-// "Every day", "Every 2 days", "Every week on Mon, Fri", "Every month on the 15th"
+// "Every day", "Every 2 days", "Every week on Mon, Fri", "Every month on the
+// 15th" — with " at HH:MM" appended when the rule carries a time-of-day
 export function describeRecur(rule: RecurRule): string {
   const every = rule.interval === 1 ? "Every" : `Every ${rule.interval}`;
-  if (rule.freq === "daily") return rule.interval === 1 ? "Every day" : `${every} days`;
+  const at = rule.hasTime ? ` at ${fmtTime(rule.anchor)}` : "";
+  if (rule.freq === "daily") return (rule.interval === 1 ? "Every day" : `${every} days`) + at;
   if (rule.freq === "weekly") {
     const unit = rule.interval === 1 ? "week" : "weeks";
     const days = [...scheduledWeekdays(rule)]
       .sort((a, b) => a - b)
       .map((d) => WEEKDAY_NAMES[d])
       .join(", ");
-    return `${every} ${unit} on ${days}`;
+    return `${every} ${unit} on ${days}${at}`;
   }
   const unit = rule.interval === 1 ? "month" : "months";
-  return `${every} ${unit} on the ${ordinal(new Date(rule.anchor).getDate())}`;
+  return `${every} ${unit} on the ${ordinal(new Date(rule.anchor).getDate())}${at}`;
 }

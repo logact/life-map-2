@@ -59,6 +59,7 @@ function captureKindData(node: NodeData): Record<string, unknown> {
     return {
       description: node.description ?? null,
       targetDate: node.targetDate ?? null,
+      targetHasTime: node.targetHasTime ?? null,
       completedAt: node.completedAt ?? null,
     };
   }
@@ -67,6 +68,8 @@ function captureKindData(node: NodeData): Record<string, unknown> {
       status: node.status ?? "todo",
       startedAt: node.startedAt ?? null,
       completedAt: node.completedAt ?? null,
+      dueDate: node.dueDate ?? null,
+      dueHasTime: node.dueHasTime ?? null,
       recur: node.recur ?? null,
       log: node.log ?? null,
     };

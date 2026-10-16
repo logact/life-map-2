@@ -23,8 +23,8 @@ All nodes share: `id` (uuid), `x/y` (world coordinates), `title`, `kind`,
 
 | Kind   | Class    | Shape on map            | Extra fields |
 |--------|----------|-------------------------|--------------|
-| Goal   | `Goal`   | Large circle (52)       | `description?`, `targetDate?`, `completedAt?` |
-| Task   | `Task`   | Rounded square (40)     | `status` (stored), `startedAt?`, `completedAt?`, `dueDate?`, `recur?` + occurrence `log?` (§1.3) |
+| Goal   | `Goal`   | Large circle (52)       | `description?`, `targetDate?` (+ `targetHasTime?`), `completedAt?` |
+| Task   | `Task`   | Rounded square (40)     | `status` (stored), `startedAt?`, `completedAt?`, `dueDate?` (+ `dueHasTime?`), `recur?` + occurrence `log?` (§1.3) |
 | Record | `Record` | Small dot (20)          | `note`, `createdAt`, `occuredAt` — a leaf; nothing attaches under it |
 
 ### 1.2 Edges — directed roads with layers
@@ -74,7 +74,21 @@ appends to its occurrence `log` instead (backdatable like every stamp;
 derived from rule + log with attention semantics: due today or overdue →
 todo (the road into it asks with it); current or done today → done. Goal
 rollups skip recurring tasks entirely — an ongoing habit never blocks its
-goal's "done". A streak counts consecutive scheduled days with a log.
+goal's "done". A streak counts consecutive scheduled days with a log. A
+rule may carry a **time-of-day** (`hasTime`): the anchor's clock time is
+then the habit's planned time each scheduled day — shown in the rule's
+description and on the calendar rows — while due/overdue stay day-granular
+(a habit is a daily obligation, not a timed deadline).
+
+**Schedules carry an optional time-of-day.** The three scheduling fields —
+a task's `dueDate`, a goal's `targetDate`, a habit rule's anchor — store
+epoch millis and gain meaning at minute precision when their flag
+(`dueHasTime` / `targetHasTime` / the rule's `hasTime`) is set; without the
+flag the value is an **all-day** pin and behaves exactly as a bare date.
+All existing data is flagless, hence all-day — no migration. A timed due
+date is an exact deadline: it turns **Overdue** the moment it passes rather
+than at end of day. Seconds need no UI; the millis storage already holds
+them.
 
 **Edge status has frontier semantics** (`edgeStatus`): walk the hidden child
 chain in travel order, take the first non-done node status (skipping the
@@ -160,7 +174,10 @@ record — a task with a recur rule is a habit) for the day list's filters,
 and a stable slot-based **key** (`nodeId:slot`) that survives label flips —
 a day's manual order (§4) is stored against these keys and overrides the
 tone order for the items it knows; items it doesn't know append
-tone-sorted. Synthetic midpoint tasks (edge structure, see §3) are skipped,
+tone-sorted. An item whose schedule field is timed (§1.3) also carries
+`timeMs`: the day row shows the clock time, and within a tone group timed
+rows sort earliest-first ahead of all-day rows. Synthetic midpoint tasks
+(edge structure, see §3) are skipped,
 like in the schedule sheet. Pure like the recurrence
 derivations: `now` is an explicit parameter, so the rules test without a
 clock.
@@ -322,8 +339,11 @@ form, notes, route query, note search).
   date rows (a record's Occurred, a task's Due/Started/Done, a goal's
   Target — the two planned dates with a live countdown) open a small
   calendar and rewrite the stamp in
-  one undoable command; a task's Repeat row opens the recurrence rule
-  editor (frequency, interval, weekdays, Starts day; Clear stops it), and
+  one undoable command; the Due/Target calendar also offers a **time row**
+  (All day chip, hour/minute steppers) that sets the field's time flag
+  (§1.3). A task's Repeat row opens the recurrence rule
+  editor (frequency, interval, weekdays, Starts day with the same time row;
+  Clear stops it), and
   a goal's target date can also be set right in the create form. A task's
   due date is a one-off planning pin — display only, never a status — and
   setting a recurrence rule clears it (the rule owns the schedule).
@@ -385,7 +405,7 @@ button (below the fit button; the route is `/calendar`).
 - The **selected day's list** shows one row per node (§1.9's grouping) —
   tone dot, node title, the winning caption (Due today / Missed / Overdue /
   Due date / Logged / Scheduled / Target date / Completed / Started /
-  Record). Two **filter rows** sit above it, each single-select — state
+  Record), prefixed with the clock time for timed items (§1.3). Two **filter rows** sit above it, each single-select — state
   (**All / To do / Done / Log**) and kind (**All kinds / Tasks / Habits /
   Goals / Records**) — combining as intersection; they persist while
   swiping days and never affect the grid's dots. Month nav moves the view
@@ -406,7 +426,8 @@ button (below the fit button; the route is `/calendar`).
   plain tasks (habits schedule themselves by rule; synthetic midpoints are
   structure) — with the day it's pinned to, if any. Tapping a row pins the
   node to the selected day (the goal's `targetDate`, the task's
-  `dueDate`); tapping a row already on the day unpins it. Each toggle is
+  `dueDate`) — a timed pin keeps its time-of-day on the new day; tapping a
+  row already on the day unpins it. Each toggle is
   one undoable `setNodeTimes` command, and the grid behind the sheet
   updates live.
 - **+ New** (same header) creates on the selected day: the chooser

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, Share, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 
 import { Recipe, renameNode, setNodeDetail, setNodeRecurrence, setNodeTimes, StatusAction, transitionNodeStatus } from "@/domain/commands";
 import { EdgeData, edgeDepth, isGoal, isRecord, isTask, LifeMapDoc, NodeData } from "@/domain/doc";
+import { subgraphToMarkdown } from "@/domain/export";
 import { fmtDuration, focusedMs } from "@/domain/focus";
 import { describeRecur, dueState, nextDue, prevDue, recurStats } from "@/domain/recur";
 import { edgeStatus, nodeStatus } from "@/domain/status";
@@ -336,6 +337,23 @@ function NodeInfoCard(props: {
                 pathname: "/focus",
                 params: isTask(node) ? { taskId: node.id } : { goalId: node.id },
               });
+            }}
+          />
+        </View>
+      )}
+      {/* export (mode B): this node's context as Markdown — every complete
+          path it sits on, its notes and its direct neighbors — shared as
+          plain text for an AI retrospective. Date.now() is captured in the
+          press handler, not in render */}
+      {!node.synthetic && (
+        <View style={styles.infoStatusRow}>
+          <SheetButton
+            label="Export"
+            onPress={() => {
+              endEdit();
+              const md = subgraphToMarkdown(props.doc, node.id, Date.now());
+              if (!md) return;
+              Share.share({ message: md }).catch((err) => console.warn("[export] share failed", err));
             }}
           />
         </View>

@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Life Map — 3 UI Theme Prototypes</title>
+<style>
+  /* ============ page chrome (not part of the themes) ============ */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: #17171b; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    color: #f2f2f5; padding: 56px 40px 96px;
+  }
+  .page-head { max-width: 1400px; margin: 0 auto 40px; }
+  .page-head h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
+  .page-head p { margin-top: 8px; font-size: 14px; color: #9b9ba4; max-width: 720px; line-height: 1.55; }
+  .section-title {
+    max-width: 1400px; margin: 56px auto 22px; font-size: 13px; font-weight: 700;
+    letter-spacing: 0.14em; text-transform: uppercase; color: #8a8a93;
+  }
+  .row { display: flex; gap: 44px; justify-content: center; flex-wrap: wrap; max-width: 1400px; margin: 0 auto; }
+  .theme-col { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .theme-tag { text-align: center; }
+  .theme-tag .name { font-size: 16px; font-weight: 700; }
+  .theme-tag .desc { font-size: 12px; color: #9b9ba4; margin-top: 3px; }
+  .swatches { display: flex; gap: 5px; margin-top: 8px; justify-content: center; }
+  .swatches span { width: 16px; height: 16px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.18); }
+
+  /* ============ phone frame ============ */
+  .phone {
+    width: 390px; height: 844px; border-radius: 54px; padding: 11px;
+    background: #0a0a0c; box-shadow: 0 30px 80px rgba(0,0,0,0.55), 0 0 0 1px #3a3a40;
+    flex: none;
+  }
+  .screen { width: 100%; height: 100%; border-radius: 44px; overflow: hidden; position: relative; }
+
+  /* ============ THEME 1: cartographer — warm paper atlas ============ */
+  .t-cartographer {
+    --canvas: #f4efe6; --card: #fdfaf3;
+    --ink1: #2e2620; --ink2: #6d5f52; --ink3: #a2937f; --ink4: #d8cfbf; --ink5: #eae3d5;
+    --accent: #3a6ea5;
+    --st-todo: #a2937f; --st-prog: #d98e1b; --st-done: #5f7f4a;
+    --danger: #a63d22;
+    --banner-bg: #3a3128; --banner-fg: #f8f3e9;
+    --node-border: #ddd3c2; --input-border: #ddd3c2; --input-bg: #f8f3e9;
+    --pressed: #f1ead9; --handle: #cfc4b0; --edge: #ada189;
+    --on-ink: #fdfaf3; --backdrop: rgba(46,38,32,0.40);
+    --dot: rgba(46,38,32,0.05);
+    --shadow-card: 0 2px 8px rgba(58,47,34,0.10);
+    --shadow-float: 0 4px 16px rgba(58,47,34,0.14);
+    --r-sm: 10px; --r-md: 16px; --r-lg: 20px;
+    --tag-a: #5F8F6A; --tag-b: #D9A21B;
+    --display: Georgia, "Times New Roman", serif;
+    --body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    --title-weight: 600;
+  }
+  /* ============ THEME 2: nocturne — constellation dark ============ */
+  .t-nocturne {
+    --canvas: #0f1218; --card: #1b202b;
+    --ink1: #e9ecf2; --ink2: #a7aebc; --ink3: #6f7787; --ink4: #3a4150; --ink5: #262c38;
+    --accent: #6ea8ff;
+    --st-todo: #6f7787; --st-prog: #f0a832; --st-done: #41c47c;
+    --danger: #e5644e;
+    --banner-bg: #e9ecf2; --banner-fg: #10131a;
+    --node-border: #333a47; --input-border: #333a47; --input-bg: #151a22;
+    --pressed: #232a36; --handle: #454e5e; --edge: #4a5262;
+    --on-ink: #10131a; --backdrop: rgba(0,0,0,0.55);
+    --dot: rgba(233,236,242,0.10);
+    --shadow-card: 0 2px 8px rgba(0,0,0,0.35);
+    --shadow-float: 0 4px 16px rgba(0,0,0,0.50);
+    --r-sm: 10px; --r-md: 16px; --r-lg: 20px;
+    --tag-a: #41C47C; --tag-b: #F0A832;
+    --display: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    --body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    --title-weight: 700;
+  }
+  /* ============ THEME 3: playground — soft candy pastel ============ */
+  .t-playground {
+    --canvas: #f0eefb; --card: #ffffff;
+    --ink1: #2b2440; --ink2: #5d5675; --ink3: #938dae; --ink4: #d5d1e8; --ink5: #e7e4f5;
+    --accent: #6c5ce7;
+    --st-todo: #938dae; --st-prog: #ff9f1a; --st-done: #2ec4a6;
+    --danger: #e5484d;
+    --banner-bg: #2b2440; --banner-fg: #ffffff;
+    --node-border: #e0dcf0; --input-border: #ddd9ee; --input-bg: #f6f5fc;
+    --pressed: #eeebfa; --handle: #cdc8e4; --edge: #b3aecb;
+    --on-ink: #ffffff; --backdrop: rgba(43,36,64,0.40);
+    --dot: rgba(43,36,64,0.06);
+    --shadow-card: 0 2px 8px rgba(91,79,158,0.12);
+    --shadow-float: 0 4px 16px rgba(91,79,158,0.16);
+    --r-sm: 12px; --r-md: 18px; --r-lg: 24px;
+    --tag-a: #2EC4A6; --tag-b: #FF9F1A;
+    --display: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    --body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    --title-weight: 800;
+  }
+
+  /* ============ shared screen anatomy (themed via vars) ============ */
+  .screen { background: var(--canvas); color: var(--ink1); font-family: var(--body); }
+  .statusbar {
+    position: absolute; top: 0; left: 0; right: 0; height: 54px; z-index: 30;
+    display: flex; align-items: flex-end; justify-content: space-between;
+    padding: 0 32px 8px; font-size: 15px; font-weight: 600; color: var(--ink1);
+    pointer-events: none;
+  }
+  .statusbar .sb-right { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+  .home-indicator {
+    position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+    width: 134px; height: 5px; border-radius: 3px; background: var(--ink1); opacity: 0.85; z-index: 40;
+  }
+  .dotgrid {
+    position: absolute; inset: 0;
+    background-image: radial-gradient(var(--dot) 1.4px, transparent 1.4px);
+    background-size: 28px 28px;
+  }
+
+  /* --- map screen --- */
+  .edges { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .edges .line { fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; }
+  .edges .ah { fill: currentColor; }
+  .e-done    { color: var(--st-done); }
+  .e-prog    { color: var(--st-prog); }
+  .e-todo    { color: var(--edge); }
+  .e-neutral { color: var(--edge); }
+  .e-selected{ color: var(--ink1); }
+  .e-route   { color: var(--accent); }
+
+  .node {
+    position: absolute; transform: translate(-50%, -50%);
+    background: var(--card); border: 1.5px solid var(--node-border);
+    box-shadow: var(--shadow-card); display: flex; align-items: center; justify-content: center;
+    text-align: center; padding: 3px; z-index: 5;
+  }
+  .node .t { font-size: 11px; font-weight: 600; line-height: 1.15; color: var(--ink1); }
+  .node.goal { width: 52px; height: 52px; border-radius: 26px; }
+  .node.task { width: 40px; height: 40px; border-radius: 8px; }
+  .node.record { width: 20px; height: 20px; border-radius: 10px; }
+  .node.record .t { font-size: 8px; font-weight: 500; }
+  .node.s-todo { border-color: var(--st-todo); }
+  .node.s-prog { border-color: var(--st-prog); }
+  .node.s-done { border-color: var(--st-done); }
+  .node.selected { border-color: var(--ink1); border-width: 2.5px; }
+  .recur {
+    position: absolute; top: -6px; right: -6px; width: 15px; height: 15px; border-radius: 8px;
+    background: var(--card); border: 1px solid var(--ink4); color: var(--ink2);
+    font-size: 9px; line-height: 14px; text-align: center;
+  }
+  .recur.due { background: var(--ink1); border-color: var(--ink1); color: var(--on-ink); }
+
+  .rail { position: absolute; right: 16px; z-index: 20; display: flex; flex-direction: column; gap: 8px; }
+  .rail.top { top: 60px; }
+  .rail button {
+    width: 44px; height: 44px; border-radius: 22px; border: 1px solid var(--ink5);
+    background: var(--card); box-shadow: var(--shadow-float);
+    font-size: 17px; color: var(--ink1); cursor: default;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .mode-banner {
+    position: absolute; top: 96px; left: 50%; transform: translateX(-50%); z-index: 20;
+    background: var(--banner-bg); color: var(--banner-fg);
+    font-size: 13px; font-weight: 600; padding: 9px 18px; border-radius: 24px;
+    box-shadow: var(--shadow-float); white-space: nowrap;
+  }
+
+  .panel {
+    position: absolute; left: 16px; right: 16px; bottom: 16px; z-index: 25;
+    background: var(--card); border: 1px solid var(--ink5); border-radius: var(--r-md);
+    box-shadow: var(--shadow-float); padding: 14px 16px;
+  }
+  .panel .title { font-family: var(--display); font-size: 15px; font-weight: var(--title-weight); color: var(--ink1); }
+  .panel .meta { font-size: 13px; color: var(--ink2); margin-top: 3px; }
+  .panel .meta.sm { font-size: 12px; color: var(--ink3); }
+  .tagrow { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .chip-tag {
+    display: inline-flex; align-items: center; gap: 6px; border-radius: 999px;
+    background: var(--ink5); padding: 4px 10px; font-size: 12px; font-weight: 500; color: var(--ink1);
+  }
+  .chip-tag i { width: 8px; height: 8px; border-radius: 4px; display: block; }
+  .chip-tag.add { color: var(--ink3); }
+  .daterow { display: flex; justify-content: space-between; margin-top: 8px; font-size: 13px; }
+  .daterow .k { color: var(--ink3); }
+  .daterow .v { color: var(--ink1); }
+  .statusrow { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .statusrow .stxt { font-size: 13px; color: var(--ink2); margin-right: auto; }
+  .pillbtn {
+    border: 1px solid var(--ink1); color: var(--ink1); background: transparent;
+    border-radius: 16px; padding: 5px 12px; font-size: 12px; font-weight: 500;
+  }
+  .pillbtn.solid { background: var(--ink1); color: var(--on-ink); }
+  .notes-sep { border-top: 1px solid var(--ink5); margin-top: 12px; padding-top: 10px; }
+  .notes-link { font-size: 13px; color: var(--ink2); }
+
+  /* --- calendar screen --- */
+  .cal-wrap { position: absolute; inset: 0; padding: 60px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+  .cal-header { display: flex; align-items: center; justify-content: space-between; padding: 4px 4px 2px; }
+  .cal-header .side { font-size: 14px; color: var(--ink2); width: 60px; }
+  .cal-header .side:last-child { text-align: right; }
+  .cal-header .ttl { font-family: var(--display); font-size: 17px; font-weight: var(--title-weight); }
+  .cal-card {
+    background: var(--card); border: 1px solid var(--ink5); border-radius: var(--r-lg);
+    box-shadow: var(--shadow-card); padding: 14px;
+  }
+  .month-head { display: flex; align-items: center; justify-content: center; gap: 14px; font-size: 14px; font-weight: 600; }
+  .month-head .nav { color: var(--ink3); font-size: 16px; }
+  .month-head .collapse { margin-left: auto; color: var(--ink3); font-size: 12px; }
+  .month-head .mtitle { font-family: var(--display); font-weight: var(--title-weight); font-size: 15px; }
+  .dow-row, .week { display: grid; grid-template-columns: repeat(7, 1fr); }
+  .dow-row { margin-top: 10px; }
+  .dow-row span { text-align: center; font-size: 11px; font-weight: 500; color: var(--ink3); padding-bottom: 4px; }
+  .week div {
+    aspect-ratio: 0.85; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-size: 14px; color: var(--ink1); position: relative; border-radius: var(--r-sm);
+  }
+  .week div.today { border: 1px solid var(--ink4); }
+  .week div.sel { background: var(--ink1); color: var(--on-ink); font-weight: 700; }
+  .week div .dots { display: flex; gap: 3px; height: 6px; margin-top: 2px; }
+  .week div .dots i { width: 6px; height: 6px; border-radius: 3px; display: block; }
+  .d-attention { background: var(--st-prog); } .d-primary { background: var(--ink1); }
+  .d-done { background: var(--st-done); } .d-neutral { background: var(--ink3); }
+  .d-future { background: var(--ink4); }
+  .week div.sel .dots i { background: var(--on-ink); opacity: 0.75; }
+  .legend { display: flex; gap: 10px; margin-top: 10px; justify-content: center; flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--ink3); }
+  .legend i { width: 6px; height: 6px; border-radius: 3px; display: block; }
+
+  .day-head { display: flex; align-items: baseline; justify-content: space-between; }
+  .day-head .dt { font-family: var(--display); font-size: 17px; font-weight: var(--title-weight); }
+  .day-head .acts { display: flex; gap: 12px; font-size: 13px; font-weight: 600; color: var(--ink1); }
+  .chiprow { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .chip { border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 600; background: var(--ink5); color: var(--ink2); }
+  .chip.on { background: var(--ink1); color: var(--on-ink); }
+  .daylist { margin-top: 10px; }
+  .dayitem {
+    display: flex; align-items: center; gap: 10px; height: 38px;
+    border-bottom: 1px solid var(--ink5);
+  }
+  .dayitem:last-child { border-bottom: none; }
+  .dayitem .dot { width: 6px; height: 6px; border-radius: 3px; flex: none; }
+  .dayitem .nm { font-size: 14px; color: var(--ink1); }
+  .dayitem .cap { font-size: 12px; color: var(--ink3); margin-left: auto; }
+  .dayitem .grip { color: var(--handle); font-size: 14px; letter-spacing: 1px; }
+
+  /* --- create sheet --- */
+  .dim { position: absolute; inset: 0; background: var(--backdrop); z-index: 35; }
+  .sheet {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 40;
+    background: var(--card); border-radius: var(--r-lg) var(--r-lg) 0 0;
+    padding: 12px 24px 40px;
+  }
+  .sheet .grab { width: 36px; height: 5px; border-radius: 3px; background: var(--handle); margin: 0 auto 18px; }
+  .sheet h3 { font-family: var(--display); font-size: 17px; font-weight: var(--title-weight); margin-bottom: 14px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; font-weight: 500; color: var(--ink3); margin-bottom: 5px; }
+  .field .input {
+    border: 1px solid var(--input-border); background: var(--input-bg); border-radius: var(--r-sm);
+    padding: 10px 12px; font-size: 14px; color: var(--ink1);
+  }
+  .field .input.multiline { min-height: 64px; color: var(--ink2); }
+  .sheet-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+  .btn { border-radius: 999px; padding: 9px 20px; font-size: 14px; font-weight: 600; }
+  .btn.ghost { color: var(--ink2); }
+  .btn.solid { background: var(--ink1); color: var(--on-ink); }
+  .btn.danger-ghost { color: var(--danger); }
+</style>
+</head>
+<body>
+<header class="page-head">
+  <h1>Life Map — UI theme prototypes</h1>
+  <p>Three candidate redesigns of the current grayscale UI, rendered on the app's real screens (map canvas, calendar, create sheet) with realistic content. Same layout, different skin. Compare and pick one — the winner gets applied to the React Native app.</p>
+</header>
+
+<h2 class="section-title">1 · Map canvas</h2>
+<div class="row" id="row-map"></div>
+
+<h2 class="section-title">2 · Calendar</h2>
+<div class="row" id="row-cal"></div>
+
+<h2 class="section-title">3 · Create sheet</h2>
+<div class="row" id="row-sheet"></div>
+
+<!-- ================= MAP SCREEN TEMPLATE ================= -->
+<template id="tpl-map">
+  <div class="statusbar">
+    <span>9:41</span>
+    <span class="sb-right">
+      <svg width="17" height="11" viewBox="0 0 17 11"><rect x="0" y="7" width="3" height="4" rx="0.6" fill="currentColor"/><rect x="4.5" y="4.8" width="3" height="6.2" rx="0.6" fill="currentColor"/><rect x="9" y="2.4" width="3" height="8.6" rx="0.6" fill="currentColor"/><rect x="13.5" y="0" width="3" height="11" rx="0.6" fill="currentColor"/></svg>
+      <svg width="16" height="12" viewBox="0 0 16 12"><path d="M1.5 4.6a9.5 9.5 0 0 1 13 0" stroke="currentColor" fill="none" stroke-width="1.5" stroke-linecap="round"/><path d="M4 7.2a6 6 0 0 1 8 0" stroke="currentColor" fill="none" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="10" r="1.4" fill="currentColor"/></svg>
+      <svg width="25" height="12" viewBox="0 0 25 12"><rect x="0.5" y="0.5" width="20" height="11" rx="3.2" stroke="currentColor" fill="none" opacity="0.45"/><rect x="2" y="2" width="15" height="8" rx="1.6" fill="currentColor"/><path d="M22.5 4v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity="0.45"/></svg>
+    </span>
+  </div>
+  <div class="dotgrid"></div>
+  <svg class="edges" viewBox="0 0 390 844" preserveAspectRatio="none">
+    <g class="e e-done"><path class="line" d="M238.5 172.4 Q180 150 120.4 199.3"/><path class="ah" d="M120.4 199.3 L125.7 188.4 L132.1 196.2 Z"/></g>
+    <g class="e e-selected"><path class="line" d="M247.5 290.2 Q200 288 117.7 217.7"/><path class="ah" d="M117.7 217.7 L129.3 221.1 L122.8 228.7 Z"/></g>
+    <g class="e e-neutral"><path class="line" d="M190.7 406.8 Q230 368 250.2 321.3"/><path class="ah" d="M250.2 321.3 L250.4 333.4 L241.2 329.4 Z"/></g>
+    <g class="e e-route"><path class="line" d="M251.5 532.4 Q190 545 124 479.9"/><path class="ah" d="M124 479.9 L135.3 484 L128.3 491.2 Z"/></g>
+  </svg>
+  <div class="node goal s-prog" style="left:95px;top:205px"><span class="t">Run a marathon</span></div>
+  <div class="node task s-done" style="left:258px;top:172px"><span class="t">Buy shoes</span></div>
+  <div class="node task s-prog selected" style="left:265px;top:300px"><span class="t">Train wk 1</span><span class="recur due">↻</span></div>
+  <div class="node record" style="left:185px;top:415px"><span class="t">5k</span></div>
+  <div class="node goal s-todo" style="left:100px;top:470px"><span class="t">Japanese</span></div>
+  <div class="node task s-todo" style="left:270px;top:540px"><span class="t">Anki</span><span class="recur">↻</span></div>
+  <div class="rail top">
+    <button>🔍</button><button>↩</button><button>↪</button><button>⛶</button><button>📅</button>
+  </div>
+  <div class="mode-banner">Summarize mode · tap a goal</div>
+  <div class="panel">
+    <div class="title">Train week 1</div>
+    <div class="meta">task</div>
+    <div class="tagrow">
+      <span class="chip-tag"><i style="background:var(--tag-a)"></i>Health</span>
+      <span class="chip-tag"><i style="background:var(--tag-b)"></i>Morning</span>
+      <span class="chip-tag add">+ Tag</span>
+    </div>
+    <div class="daterow"><span class="k">Repeat</span><span class="v">Every week</span></div>
+    <div class="daterow"><span class="k">Started</span><span class="v">Oct 5</span></div>
+    <div class="statusrow">
+      <span class="stxt">Due today</span>
+      <span class="pillbtn">Log done</span>
+      <span class="pillbtn">Undo last log</span>
+    </div>
+    <div class="meta sm" style="margin-top:8px">12 logged · streak 3</div>
+    <div class="notes-sep"><span class="notes-link">Notes (2) · View all ›</span></div>
+  </div>
+  <div class="home-indicator"></div>
+</template>
+
+<!-- ================= CALENDAR SCREEN TEMPLATE ================= -->
+<template id="tpl-cal">
+  <div class="statusbar">
+    <span>9:41</span>
+    <span class="sb-right">
+      <svg width="17" height="11" viewBox="0 0 17 11"><rect x="0" y="7" width="3" height="4" rx="0.6" fill="currentColor"/><rect x="4.5" y="4.8" width="3" height="6.2" rx="0.6" fill="currentColor"/><rect x="9" y="2.4" width="3" height="8.6" rx="0.6" fill="currentColor"/><rect x="13.5" y="0" width="3" height="11" rx="0.6" fill="currentColor"/></svg>
+      <svg width="16" height="12" viewBox="0 0 16 12"><path d="M1.5 4.6a9.5 9.5 0 0 1 13 0" stroke="currentColor" fill="none" stroke-width="1.5" stroke-linecap="round"/><path d="M4 7.2a6 6 0 0 1 8 0" stroke="currentColor" fill="none" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="10" r="1.4" fill="currentColor"/></svg>
+      <svg width="25" height="12" viewBox="0 0 25 12"><rect x="0.5" y="0.5" width="20" height="11" rx="3.2" stroke="currentColor" fill="none" opacity="0.45"/><rect x="2" y="2" width="15" height="8" rx="1.6" fill="currentColor"/><path d="M22.5 4v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity="0.45"/></svg>
+    </span>
+  </div>
+  <div class="cal-wrap">
+    <div class="cal-header">
+      <span class="side">‹ Map</span>
+      <span class="ttl">Calendar</span>
+      <span class="side">Today</span>
+    </div>
+    <div class="cal-card">
+      <div class="month-head">
+        <span class="nav">‹</span>
+        <span class="mtitle">October 2026</span>
+        <span class="nav">›</span>
+        <span class="collapse">▾</span>
+      </div>
+      <div class="dow-row"><span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span></div>
+      <div class="week">
+        <div></div><div></div><div></div><div></div>
+        <div>1<span class="dots"></span></div>
+        <div>2<span class="dots"></span></div>
+        <div>3<span class="dots"><i class="d-done"></i></span></div>
+      </div>
+      <div class="week">
+        <div>4<span class="dots"></span></div>
+        <div>5<span class="dots"></span></div>
+        <div>6<span class="dots"></span></div>
+        <div class="today">7<span class="dots"><i class="d-attention"></i><i class="d-primary"></i></span></div>
+        <div>8<span class="dots"></span></div>
+        <div>9<span class="dots"><i class="d-attention"></i><i class="d-neutral"></i></span></div>
+        <div>10<span class="dots"></span></div>
+      </div>
+      <div class="week">
+        <div>11<span class="dots"></span></div>
+        <div class="sel">12<span class="dots"><i class="d-done"></i><i class="d-primary"></i></span></div>
+        <div>13<span class="dots"></span></div>
+        <div>14<span class="dots"></span></div>
+        <div>15<span class="dots"><i class="d-attention"></i><i class="d-future"></i></span></div>
+        <div>16<span class="dots"></span></div>
+        <div>17<span class="dots"></span></div>
+      </div>
+      <div class="week">
+        <div>18<span class="dots"></span></div>
+        <div>19<span class="dots"></span></div>
+        <div>20<span class="dots"></span></div>
+        <div>21<span class="dots"><i class="d-done"></i><i class="d-done"></i></span></div>
+        <div>22<span class="dots"></span></div>
+        <div>23<span class="dots"></span></div>
+        <div>24<span class="dots"></span></div>
+      </div>
+      <div class="week">
+        <div>25<span class="dots"></span></div>
+        <div>26<span class="dots"></span></div>
+        <div>27<span class="dots"></span></div>
+        <div>28<span class="dots"><i class="d-neutral"></i><i class="d-future"></i></span></div>
+        <div>29<span class="dots"></span></div>
+        <div>30<span class="dots"></span></div>
+        <div>31<span class="dots"></span></div>
+      </div>
+      <div class="legend">
+        <span><i class="d-attention"></i>attention</span>
+        <span><i class="d-primary"></i>primary</span>
+        <span><i class="d-done"></i>done</span>
+        <span><i class="d-neutral"></i>neutral</span>
+        <span><i class="d-future"></i>future</span>
+      </div>
+    </div>
+    <div class="cal-card">
+      <div class="day-head">
+        <span class="dt">Mon, Oct 12</span>
+        <span class="acts"><span>+ New</span><span>+ Schedule</span></span>
+      </div>
+      <div class="chiprow">
+        <span class="chip on">All</span><span class="chip">Todo</span><span class="chip">Doing</span><span class="chip">Done</span>
+      </div>
+      <div class="chiprow">
+        <span class="chip on">All</span><span class="chip">Goals</span><span class="chip">Tasks</span><span class="chip">Records</span>
+      </div>
+      <div class="daylist">
+        <div class="dayitem"><span class="dot d-done"></span><span class="nm">Morning run 5k</span><span class="cap">record · 07:12</span><span class="grip">≡</span></div>
+        <div class="dayitem"><span class="dot d-attention"></span><span class="nm">Train plan week 2</span><span class="cap">task · in progress</span><span class="grip">≡</span></div>
+        <div class="dayitem"><span class="dot d-primary"></span><span class="nm">Buy energy gels</span><span class="cap">task</span><span class="grip">≡</span></div>
+        <div class="dayitem"><span class="dot d-neutral"></span><span class="nm">Read race strategy</span><span class="cap">task · todo</span><span class="grip">≡</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="home-indicator"></div>
+</template>
+
+<!-- ================= CREATE SHEET TEMPLATE ================= -->
+<template id="tpl-sheet">
+  <div class="statusbar">
+    <span>9:41</span>
+    <span class="sb-right">
+      <svg width="17" height="11" viewBox="0 0 17 11"><rect x="0" y="7" width="3" height="4" rx="0.6" fill="currentColor"/><rect x="4.5" y="4.8" width="3" height="6.2" rx="0.6" fill="currentColor"/><rect x="9" y="2.4" width="3" height="8.6" rx="0.6" fill="currentColor"/><rect x="13.5" y="0" width="3" height="11" rx="0.6" fill="currentColor"/></svg>
+      <svg width="16" height="12" viewBox="0 0 16 12"><path d="M1.5 4.6a9.5 9.5 0 0 1 13 0" stroke="currentColor" fill="none" stroke-width="1.5" stroke-linecap="round"/><path d="M4 7.2a6 6 0 0 1 8 0" stroke="currentColor" fill="none" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="10" r="1.4" fill="currentColor"/></svg>
+      <svg width="25" height="12" viewBox="0 0 25 12"><rect x="0.5" y="0.5" width="20" height="11" rx="3.2" stroke="currentColor" fill="none" opacity="0.45"/><rect x="2" y="2" width="15" height="8" rx="1.6" fill="currentColor"/><path d="M22.5 4v4a2.2 2.2 0 0 0 0-4z" fill="currentColor" opacity="0.45"/></svg>
+    </span>
+  </div>
+  <div class="dotgrid"></div>
+  <svg class="edges" viewBox="0 0 390 844" preserveAspectRatio="none">
+    <g class="e e-done"><path class="line" d="M236.3 182.1 Q190 165 134.3 220.8"/><path class="ah" d="M134.3 220.8 L138.6 209.5 L145.6 216.5 Z"/></g>
+  </svg>
+  <div class="node goal s-prog" style="left:110px;top:230px"><span class="t">Marathon</span></div>
+  <div class="node task s-done" style="left:255px;top:175px"><span class="t">Buy shoes</span></div>
+  <div class="dim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <h3>New task</h3>
+    <div class="field">
+      <label>Title</label>
+      <div class="input">Morning pages</div>
+    </div>
+    <div class="field">
+      <label>Details</label>
+      <div class="input multiline">3 pages before work, no phone until done…</div>
+    </div>
+    <div class="sheet-actions">
+      <span class="btn ghost">Cancel</span>
+      <span class="btn solid">Save</span>
+    </div>
+  </div>
+  <div class="home-indicator" style="z-index:45"></div>
+</template>
+
+<script>
+const THEMES = [
+  { cls: "t-cartographer", name: "1 · Cartographer", desc: "Warm paper atlas — cream canvas, espresso ink, serif headings",
+    sw: ["#f4efe6","#fdfaf3","#2e2620","#3a6ea5","#d98e1b","#5f7f4a","#C2571F","#8E5572"] },
+  { cls: "t-nocturne", name: "2 · Nocturne", desc: "Constellation dark — starfield canvas, glowing status, inverted banner",
+    sw: ["#0f1218","#1b202b","#e9ecf2","#6ea8ff","#f0a832","#41c47c","#C77FD6","#F0708A"] },
+  { cls: "t-playground", name: "3 · Playground", desc: "Soft candy pastel — lilac canvas, violet ink, chunky radii, bold type",
+    sw: ["#f0eefb","#ffffff","#2b2440","#6c5ce7","#ff9f1a","#2ec4a6","#FF6B6B","#B983E0"] },
+];
+function stamp(rowId, tplId, full) {
+  const row = document.getElementById(rowId);
+  const tpl = document.getElementById(tplId);
+  THEMES.forEach((th) => {
+    const col = document.createElement("div");
+    col.className = "theme-col";
+    const tag = document.createElement("div");
+    tag.className = "theme-tag";
+    tag.innerHTML = full
+      ? `<div class="name">${th.name}</div><div class="desc">${th.desc}</div><div class="swatches">${th.sw.map((c) => `<span style="background:${c}"></span>`).join("")}</div>`
+      : `<div class="name" style="font-size:13px">${th.name}</div>`;
+    const phone = document.createElement("div");
+    phone.className = "phone";
+    const scr = document.createElement("div");
+    scr.className = "screen " + th.cls;
+    scr.appendChild(tpl.content.cloneNode(true));
+    phone.appendChild(scr);
+    col.appendChild(tag);
+    col.appendChild(phone);
+    row.appendChild(col);
+  });
+}
+stamp("row-map", "tpl-map", true);
+stamp("row-cal", "tpl-cal", false);
+stamp("row-sheet", "tpl-sheet", false);
+</script>
+</body>
+</html>

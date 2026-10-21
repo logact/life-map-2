@@ -47,8 +47,8 @@ describe("docToMarkdown", () => {
     expect(md).toContain("### Oct 19 2026");
     expect(md).toContain("- ✔ Morning run (logged)");
     expect(md).toContain("- ✗ Morning run (missed)");
-    expect(md).toContain('Record · Called grandma: "she is well"');
-    expect(md).toContain('Focus · 1h 5m — "Deep work"');
+    expect(md).toContain('Record · Called grandma at 12:00:00: "she is well"');
+    expect(md).toContain('Focus · 1h 5m at 12:00:00 — "Deep work"');
     // future scheduled occurrences are noise and never exported
     expect(md).not.toContain("Scheduled");
   });
@@ -61,6 +61,14 @@ describe("docToMarkdown", () => {
     const all = docToMarkdown(doc, { range: "all" }, NOW);
     expect(all).toContain("Range: Oct 01 2026 – Oct 21 2026");
     expect(all).toContain("Record · Ancient");
+  });
+
+  it("exports record times down to the second (issue #45)", () => {
+    const precise = new Date("2026-10-20T12:34:56").getTime();
+    const rec = makeRecordNode(0, 0, "Called grandma", "", precise);
+    const doc = docWith(rec);
+    expect(docToMarkdown(doc, { range: "all" }, NOW)).toContain("Record · Called grandma at 12:34:56");
+    expect(subgraphToMarkdown(doc, rec.id, NOW)).toContain("- 发生时间: Oct 20 2026 12:34:56");
   });
 
   it("says so when the period holds nothing", () => {
@@ -135,8 +143,8 @@ describe("subgraphToMarkdown", () => {
     // 关联的记录: directly linked records only (the habit is not one),
     // time ascending, full history
     expect(md).toContain("#### 关联的记录 (按照时间排序)");
-    expect(md).toContain("1. Oct 10 2026: First 5k — 很轻松");
-    expect(md).toContain("2. Oct 14 2026: Knee pain — left knee (45m)");
+    expect(md).toContain("1. Oct 10 2026 12:00:00: First 5k — 很轻松");
+    expect(md).toContain("2. Oct 14 2026 12:00:00: Knee pain — left knee (45m)");
     expect(md.indexOf("First 5k")).toBeLessThan(md.indexOf("Knee pain"));
     const recordsSection = md.slice(md.indexOf("#### 关联的记录"), md.indexOf("#### 后继节点"));
     expect(recordsSection).not.toContain("Morning run");
@@ -174,7 +182,7 @@ describe("subgraphToMarkdown", () => {
     expect(pathSection).toContain("(当前节点是顶层节点,无上游路径)");
     expect(pathSection).not.toContain("Race day");
     // ...and it shows up in 关联的记录
-    expect(md).toContain("1. Oct 01 2026: Race day — finished 10k");
+    expect(md).toContain("1. Oct 01 2026 12:00:00: Race day — finished 10k");
   });
 
   it("passes synthetic midpoints through to the real successors and linked records", () => {
@@ -190,7 +198,7 @@ describe("subgraphToMarkdown", () => {
     const md = subgraphToMarkdown(doc, root.id, NOW);
     const succ = md.slice(md.indexOf("#### 后继节点"));
     expect(succ.match(/【/g)?.length).toBe(1); // only the real child, the untitled midpoint adds no entry
-    expect(md).toContain("1. Oct 05 2026: Real record — reached through");
+    expect(md).toContain("1. Oct 05 2026 12:00:00: Real record — reached through");
     expect(succ).toContain("1.【任务-Real child-未开始】");
   });
 

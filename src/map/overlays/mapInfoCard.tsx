@@ -59,7 +59,7 @@ function NodeInfoCard(props: {
   // (captured in the tap handler — Date.now() is impure in render); hasTime
   // is set only for the schedulable fields (due/target) — it both opts the
   // picker into time editing and seeds the toggle
-  const [dateField, setDateField] = useState<{ field: DateField; label: string; value: number; hasTime?: boolean } | null>(null);
+  const [dateField, setDateField] = useState<{ field: DateField; label: string; value: number; hasTime?: boolean; timeRequired?: boolean; seconds?: boolean } | null>(null);
   const [tagPickerOpen, setTagPickerOpen] = useState(false);
   const [recurOpen, setRecurOpen] = useState(false);
   // tasks carry no detail; the goal's detail is its description, the
@@ -190,10 +190,11 @@ function NodeInfoCard(props: {
 
   // the node's date rows, in display order; tapping one opens the picker.
   // The schedulable fields (due/target) carry their time flag so the picker
-  // offers time-of-day editing; the backdating stamps stay day-only
-  const dateRows: { field: DateField; label: string; value?: number; hasTime?: boolean; placeholder?: string }[] = [];
+  // offers optional time-of-day editing; a record's occurred-at is always an
+  // exact moment, edited with seconds; the other stamps stay day-only
+  const dateRows: { field: DateField; label: string; value?: number; hasTime?: boolean; timeRequired?: boolean; seconds?: boolean; placeholder?: string }[] = [];
   if (isRecord(node)) {
-    dateRows.push({ field: "occurredAt", label: "Occurred", value: node.occurredAt, placeholder: "Set date…" });
+    dateRows.push({ field: "occurredAt", label: "Occurred", value: node.occurredAt, timeRequired: true, seconds: true, placeholder: "Set date…" });
   } else if (isTask(node)) {
     // a habit's schedule is its rule (the Repeat row below); a plain task
     // carries a one-off due date instead
@@ -274,7 +275,7 @@ function NodeInfoCard(props: {
             // picker's opening value is captured here, in the press handler —
             // Date.now() is impure and must not run during render
             endEdit();
-            setDateField({ field: r.field, label: r.label, value: r.value ?? Date.now(), hasTime: r.hasTime });
+            setDateField({ field: r.field, label: r.label, value: r.value ?? Date.now(), hasTime: r.hasTime, timeRequired: r.timeRequired, seconds: r.seconds });
           }}
         >
           <Text style={styles.dateRowLabel}>{r.label}</Text>
@@ -282,7 +283,9 @@ function NodeInfoCard(props: {
             {r.value !== undefined
               ? r.field === "targetDate" || r.field === "dueDate"
                 ? `${fmtDateTime(r.value, r.hasTime)} · ${fmtRelative(r.value, props.now)}`
-                : fmtDate(r.value)
+                : r.field === "occurredAt"
+                  ? fmtDateTime(r.value, true, true) // a record's exact moment, with seconds
+                  : fmtDate(r.value)
               : r.placeholder}
           </Text>
         </Pressable>
@@ -420,6 +423,8 @@ function NodeInfoCard(props: {
           title={dateField.label}
           value={dateField.value}
           hasTime={dateField.hasTime}
+          timeRequired={dateField.timeRequired}
+          seconds={dateField.seconds}
           onDone={(ms, time) => {
             // the schedulable fields carry their time flag alongside the
             // value; undefined (a day-only field) leaves any flag untouched

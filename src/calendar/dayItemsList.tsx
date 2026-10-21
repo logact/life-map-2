@@ -168,7 +168,7 @@ const DayRow = memo(function DayRow({
           </Text>
           <Text style={ls.itemLabel}>
             {[
-              item.timeMs !== undefined ? fmtTime(item.timeMs) : null,
+              item.timeMs !== undefined ? fmtTime(item.timeMs, item.kind === "record") : null,
               item.label,
               item.durationMs !== undefined ? fmtDuration(item.durationMs) : null,
             ]

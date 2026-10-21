@@ -8,3 +8,9 @@ export function fmtTime(ms: number): string {
   const d = new Date(ms);
   return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
+
+// "Oct 15 2026" — the app's short readable date, shared by the inspector,
+// the settings screen and the export formatters
+export function fmtDate(ms: number): string {
+  return new Date(ms).toDateString().slice(4); // drop the weekday prefix
+}

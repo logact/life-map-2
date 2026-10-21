@@ -1,6 +1,6 @@
 import { FitView } from "@/map/fitZoom";
 import { Id, LifeMapDoc, NodeData, NodeKind } from "@/domain/doc";
-import { fmtTime } from "@/domain/time";
+import { fmtDate, fmtTime } from "@/domain/time";
 import {
   BREAKPOINT_GAP,
   CHILD_RADIUS,
@@ -9,6 +9,10 @@ import {
   RECORD_SIZE,
   TASK_SIZE,
 } from "./constants";
+
+// fmtDate's implementation lives in src/domain/time.ts so the domain layer
+// (the export formatters) can share it without importing from the map layer
+export { fmtDate };
 
 // the camera the user sees: the fit view scaled by their pinch zoom about
 // the screen center. screen = world * cam.scale + cam offset + viewport pan
@@ -76,11 +80,6 @@ export function edgeEndpointNodes(doc: LifeMapDoc, edgeIds: Id[]): NodeData[] {
     if (b) nodes.set(b.id, b);
   }
   return [...nodes.values()];
-}
-
-// short readable date for the inspector's timestamps (epoch millis)
-export function fmtDate(ms: number): string {
-  return new Date(ms).toDateString().slice(4); // drop the weekday prefix
 }
 
 // a schedule field's display: the date, with its time-of-day appended when

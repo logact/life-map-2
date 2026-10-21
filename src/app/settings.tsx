@@ -1,9 +1,10 @@
 import { useCallback, useState } from "react";
-import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { Pressable, Share, StyleSheet, Switch, Text, View } from "react-native";
 import * as Linking from "expo-linking";
 import { useFocusEffect, useRouter } from "expo-router";
 
 import { diagnoseSync, nativeModulePresent, setSyncEnabled, SyncDiagnosis } from "@/data/cloudSync";
+import { docToMarkdown, ExportRange } from "@/domain/export";
 import { fmtDate } from "@/map/utils";
 import { useDocStore } from "@/state/docStore";
 import { useSyncStore } from "@/state/syncStore";
@@ -88,6 +89,14 @@ export default function SettingsScreen() {
     if (on) useDocStore.getState().syncNow();
   };
 
+  // mode A export: the whole doc over a date range, as Markdown for an AI
+  // retrospective — shared as plain text, no file involved
+  const RANGES: { range: ExportRange; label: string }[] = [
+    { range: "last7", label: "Last 7 days" },
+    { range: "last30", label: "Last 30 days" },
+    { range: "all", label: "All time" },
+  ];
+
   return (
     <View style={cs.container}>
       <View style={cs.header}>
@@ -131,6 +140,30 @@ export default function SettingsScreen() {
             <Text style={cs.syncButtonText}>↻ Sync now</Text>
           </Pressable>
         )}
+      </View>
+
+      <View style={cs.card}>
+        <Text style={cs.rowLabel}>Export</Text>
+        <Text style={cs.status}>
+          Share a date range as Markdown — the format an AI can review. To export one node and its
+          sub-tree, tap it on the map and use Export on its card.
+        </Text>
+        <View style={cs.exportRow}>
+          {RANGES.map((r) => (
+            <Pressable
+              key={r.range}
+              accessibilityLabel={`Export ${r.label}`}
+              style={({ pressed }) => [cs.syncButton, pressed && { opacity: 0.7 }]}
+              // Date.now() is captured in the press handler, not in render
+              onPress={() => {
+                const md = docToMarkdown(useDocStore.getState().doc, { range: r.range }, Date.now());
+                Share.share({ message: md }).catch(() => {});
+              }}
+            >
+              <Text style={cs.syncButtonText}>{r.label}</Text>
+            </Pressable>
+          ))}
+        </View>
       </View>
     </View>
   );
@@ -201,5 +234,10 @@ const cs = StyleSheet.create({
   syncButtonText: {
     ...TYPE.body,
     color: INK.primary,
+  },
+  exportRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
   },
 });

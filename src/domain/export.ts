@@ -1,8 +1,7 @@
-import { calendarMonth, CalItem, groupDayItems } from "./calendar";
 import { Id, isGoal, isRecord, isTask, LifeMapDoc, NodeData, RecurRule, Status } from "./doc";
 import { fmtDuration, focusedMs } from "./focus";
 import { getIndexes } from "./indexes";
-import { dayStart, describeRecur, recurStats, recurStatus } from "./recur";
+import { dayStart, dueState, recurStats, recurStatus } from "./recur";
 import { goalStatus } from "./status";
 import { fmtDate, fmtTime } from "./time";
 
@@ -12,32 +11,31 @@ import { fmtDate, fmtTime } from "./time";
 // format is human-readable Markdown and drops everything that is pure
 // noise to a model (canvas coordinates, internal ids, dayOrder). All rules
 // are pure derivations over the doc with `now` passed explicitly, reusing
-// the calendar/recurrence/focus derivations; tests live in
+// the recurrence/focus/status derivations; tests live in
 // src/domain/__tests__/export.test.ts.
 //
-// Two orthogonal modes:
-// - docToMarkdown: a global date-range export ("how was this period?"),
-//   English labels (the app has no i18n)
-// - subgraphToMarkdown: one node's context ("how is this going?"), in a
-//   fixed Chinese template: a format preamble, EVERY complete path the
-//   node sits on as a numbered 【类型-标题-描述-状态】 sequence (records
-//   omitted from paths), then the selected node's details — 基本信息, its
-//   note list, and its directly linked records sorted by time. The node
-//   graph is a DAG, not a tree (indexes.ts); synthetic expand-midpoints
-//   (doc.ts) are passed through — their neighbors attach to the real
-//   parent, matching the status rollup's behaviour.
-
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+// Two orthogonal modes, both in a fixed Chinese template:
+// - docToMarkdown: a global date-range export ("how was this period?") —
+//   a header (range + export time + timezone), then three sections:
+//   【范围标签】完成的工作 (numbered completed goals/tasks and logged
+//   habits, each with 基本信息, notes and in-range linked records),
+//   【范围标签】超时的工作 (overdue one-off tasks and due/overdue habits,
+//   evaluated as of the range end), and 事件汇总 (records, task creations
+//   and goal creations in range, chronological). Nothing past `now`
+//   counts — the effective range end is clamped to it.
+// - subgraphToMarkdown: one node's context ("how is this going?"): a
+//   format preamble, EVERY complete path the node sits on as a numbered
+//   【类型-标题-描述-状态】 sequence (records omitted from paths), then
+//   the selected node's details — 基本信息, its note list, and its
+//   directly linked records sorted by time. The node graph is a DAG, not
+//   a tree (indexes.ts); synthetic expand-midpoints (doc.ts) are passed
+//   through — their neighbors attach to the real parent, matching the
+//   status rollup's behaviour.
 
 function addDays(ms: number, n: number): number {
   const d = new Date(ms);
   d.setDate(d.getDate() + n);
   return d.getTime();
-}
-
-// "Oct 20 2026 (Mon)" — a day heading in the log section
-function fmtDay(ms: number): string {
-  return `${fmtDate(ms)} (${WEEKDAYS[new Date(ms).getDay()]})`;
 }
 
 // the header's timezone note: the whole app computes day boundaries in
@@ -50,75 +48,6 @@ function tzLabel(now: number): string {
   const h = Math.floor(abs / 60);
   const m = abs % 60;
   return `GMT${sign}${m > 0 ? `${h}:${String(m).padStart(2, "0")}` : h}`;
-}
-
-// one bullet in a day log, derived from the calendar item. Scheduled
-// (future) occurrences are skipped: a habit's rule fills every future day
-// with them, which is pure noise for a retrospective
-function itemLine(doc: LifeMapDoc, item: CalItem): string | null {
-  const t = item.title;
-  switch (item.label) {
-    case "Logged":
-      return `✔ ${t} (logged)`;
-    case "Missed":
-      return `✗ ${t} (missed)`;
-    case "Due today":
-      return `• ${t} (due today)`;
-    case "Overdue":
-      return `⚠ ${t} (overdue)`;
-    case "Completed":
-      return `✔ ${t} (completed)`;
-    case "Started":
-      return `Started: ${t}`;
-    case "Target date":
-      return `Target: ${t}`;
-    case "Due date":
-      return `Due: ${t}`;
-    case "Record": {
-      const node = doc.nodes[item.nodeId];
-      // a record's occurred-at is exact — export it with seconds
-      const time = item.timeMs !== undefined ? ` at ${fmtTime(item.timeMs, true)}` : "";
-      if (node?.durationMs !== undefined) {
-        return `Focus · ${fmtDuration(node.durationMs)}${time} — "${t}"`;
-      }
-      const note = node?.note?.trim();
-      return `Record · ${t}${time}${note ? `: "${note}"` : ""}`;
-    }
-    default:
-      return null;
-  }
-}
-
-// every day in [startDay, endDay] holding at least one calendar item, in
-// ascending order; the items keep the calendar's own ordering (tone, then
-// the stored manual day order)
-function daysWithItems(
-  doc: LifeMapDoc,
-  startDay: number,
-  endDay: number,
-  now: number,
-): { dayMs: number; items: CalItem[] }[] {
-  const out: { dayMs: number; items: CalItem[] }[] = [];
-  const s = new Date(startDay);
-  const e = new Date(endDay);
-  let y = s.getFullYear();
-  let m = s.getMonth();
-  const endKey = e.getFullYear() * 12 + e.getMonth();
-  while (y * 12 + m <= endKey) {
-    const month = calendarMonth(doc, y, m, now);
-    for (const [day, items] of month) {
-      const dayMs = new Date(y, m, day).getTime();
-      if (dayMs < startDay || dayMs > endDay) continue;
-      out.push({ dayMs, items });
-    }
-    m++;
-    if (m === 12) {
-      m = 0;
-      y++;
-    }
-  }
-  out.sort((a, b) => a.dayMs - b.dayMs);
-  return out;
 }
 
 // the earliest dated thing anywhere in the doc — the start of an "all
@@ -146,78 +75,144 @@ function earliestStamp(doc: LifeMapDoc): number | undefined {
 
 export type ExportRange = "last7" | "last30" | "all";
 
-export function docToMarkdown(doc: LifeMapDoc, options: { range: ExportRange }, now: number): string {
-  const today = dayStart(now);
-  const startDay =
-    options.range === "all"
-      ? dayStart(earliestStamp(doc) ?? now)
-      : addDays(today, options.range === "last7" ? -6 : -29);
+// presets, or an explicit custom range from the settings screen
+export type ExportOptions = { range: ExportRange } | { startMs: number; endMs: number };
+
+// "10月20日" — the Chinese month-day the section headings are built from
+function fmtMonthDayZh(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+// the word prefixing the first two section headings: 今天 when start, end
+// and now all share one day, a single date for a one-day range, else a
+// span ("10月15日–10月21日")
+function rangeLabelZh(startMs: number, endMs: number, now: number): string {
+  const sameDay = (a: number, b: number) => dayStart(a) === dayStart(b);
+  if (sameDay(startMs, endMs) && sameDay(endMs, now)) return "今天";
+  if (sameDay(startMs, endMs)) return fmtMonthDayZh(startMs);
+  return `${fmtMonthDayZh(startMs)}–${fmtMonthDayZh(endMs)}`;
+}
+
+export function docToMarkdown(doc: LifeMapDoc, options: ExportOptions, now: number): string {
+  let startMs: number;
+  let endMs: number;
+  if ("range" in options) {
+    startMs =
+      options.range === "all"
+        ? dayStart(earliestStamp(doc) ?? now)
+        : addDays(dayStart(now), options.range === "last7" ? -6 : -29);
+    endMs = now;
+  } else {
+    startMs = options.startMs;
+    endMs = options.endMs;
+  }
+  // nothing in the future counts: the effective end is clamped to now
+  const end = Math.min(endMs, now);
+  const inRange = (ms: number | undefined): ms is number =>
+    ms !== undefined && ms >= startMs && ms <= end;
 
   const nodes = Object.values(doc.nodes).filter((n) => !n.synthetic);
-  const goals = nodes.filter(isGoal);
-  const activeGoals = goals.filter((g) => !g.completedAt);
-  const completedInRange = goals.filter(
-    (g) => g.completedAt !== undefined && g.completedAt >= startDay && g.completedAt <= now,
-  ).length;
-  const habits = nodes.filter((n) => isTask(n) && n.recur);
-  const habitStats = habits.map((h) => recurStats(h.recur!, h.log ?? [], now));
-  const avgStreak =
-    habitStats.length > 0
-      ? Math.round((habitStats.reduce((s, x) => s + x.streak, 0) / habitStats.length) * 10) / 10
-      : 0;
 
-  // measured focus inside the range: focus segments are records carrying a
-  // duration (focus.ts)
-  let focusMs = 0;
-  let sessions = 0;
-  for (const n of nodes) {
-    if (
-      isRecord(n) &&
-      n.durationMs !== undefined &&
-      n.occurredAt !== undefined &&
-      dayStart(n.occurredAt) >= startDay &&
-      n.occurredAt <= now
-    ) {
-      focusMs += n.durationMs;
-      sessions++;
+  // 完成的工作: goals/tasks completed in range plus habits with an
+  // in-range check-in, ordered by when the work landed
+  const doneAt = (n: NodeData): number | undefined => {
+    if (isGoal(n)) return inRange(n.completedAt) ? n.completedAt : undefined;
+    if (isTask(n) && n.recur) {
+      const hits = (n.log ?? []).filter(inRange);
+      return hits.length > 0 ? hits[hits.length - 1] : undefined;
+    }
+    if (isTask(n)) {
+      return n.status === "done" && inRange(n.completedAt) ? n.completedAt : undefined;
+    }
+    return undefined;
+  };
+  const done = nodes
+    .map((n) => ({ node: n, at: doneAt(n) }))
+    .filter((e): e is { node: NodeData; at: number } => e.at !== undefined)
+    .sort((a, b) => a.at - b.at);
+
+  // 超时的工作, evaluated as of the (clamped) range end — mirrors the
+  // calendar's overdue rules: an untimed due date turns overdue the day
+  // after, a timed one the moment it passes
+  const overdueTasks = nodes
+    .filter(
+      (n) =>
+        isTask(n) &&
+        !n.recur &&
+        n.dueDate !== undefined &&
+        n.status !== "done" &&
+        (n.dueHasTime ? n.dueDate < end : dayStart(n.dueDate) < dayStart(end)),
+    )
+    .sort((a, b) => a.dueDate! - b.dueDate!);
+  const overdueHabits = nodes.filter((n) => {
+    const s = isTask(n) && n.recur ? dueState(n, end) : null;
+    return s === "due" || s === "overdue";
+  });
+
+  // 事件汇总: records, task creations and goal creations in range,
+  // chronological
+  const events = nodes
+    .map((n) => {
+      const time = isRecord(n) ? (n.occurredAt ?? n.createdAt) : n.createdAt;
+      return inRange(time) ? { node: n, time } : null;
+    })
+    .filter((e): e is { node: NodeData; time: number } => e !== null)
+    .sort((a, b) => a.time - b.time);
+
+  const label = rangeLabelZh(startMs, end, now);
+  const lines: string[] = [
+    "# 人生地图导出",
+    `范围: ${fmtDate(startMs)} – ${fmtDate(end)} · 导出于: ${fmtDate(now)} (${tzLabel(now)})`,
+    "",
+    `### ${label}完成的工作`,
+    "",
+  ];
+  if (done.length === 0) {
+    lines.push("(无)");
+  } else {
+    done.forEach(({ node }, i) => {
+      lines.push(`${i + 1}. 【${kindLabelZh(node)}-${node.title}-${nodeStatusZh(doc, node, now)}】`);
+      lines.push(...basicInfoZh(doc, node, now));
+      if (node.notes.length > 0) {
+        lines.push("- 笔记:");
+        for (const note of node.notes) lines.push(`  - (${fmtDate(note.createdAt)}) ${note.text}`);
+      }
+      const records = linkedRecordsZh(doc, node.id, { startMs, endMs: end });
+      if (records.length > 0) {
+        lines.push("- 关联的记录:");
+        lines.push(...records.map((l) => `  ${l}`));
+      }
+    });
+  }
+
+  lines.push("", `### ${label}超时的工作`, "");
+  if (overdueTasks.length === 0 && overdueHabits.length === 0) {
+    lines.push("(无)");
+  } else {
+    for (const t of overdueTasks) {
+      const time = t.dueHasTime ? ` ${fmtTime(t.dueDate!)}` : "";
+      lines.push(`- ${t.title}【${kindLabelZh(t)}】 — 截止: ${fmtDate(t.dueDate!)}${time}`);
+    }
+    for (const h of overdueHabits) {
+      lines.push(`- ${h.title}【习惯】 — 重复规则: ${describeRecurZh(h.recur!)}`);
     }
   }
 
-  const lines: string[] = [
-    "# Life Map Export",
-    `Range: ${fmtDate(startDay)} – ${fmtDate(today)} · Exported: ${fmtDate(now)} (${tzLabel(now)})`,
-    "",
-    "## Summary",
-    `- ${activeGoals.length} active goal${activeGoals.length === 1 ? "" : "s"} (${completedInRange} completed this period)`,
-    `- ${habits.length} habit${habits.length === 1 ? "" : "s"} · avg streak ${avgStreak}`,
-    `- Total focus: ${fmtDuration(focusMs)} across ${sessions} session${sessions === 1 ? "" : "s"}`,
-    "",
-    "## Goals & Habits",
-  ];
-  for (const g of goals) {
-    const facts = [`goal, ${goalStatus(doc, g.id)}`];
-    if (g.targetDate !== undefined) facts.push(`target ${fmtDate(g.targetDate)}`);
-    lines.push(`- ${g.title} (${facts.join(" · ")})`);
+  lines.push("", "### 事件汇总", "");
+  if (events.length === 0) {
+    lines.push("(无)");
+  } else {
+    for (const { node, time } of events) {
+      let line = `- ${fmtDate(time)}: 【${kindLabelZh(node)}】${node.title}`;
+      if (isRecord(node)) {
+        if (node.note?.trim()) line += ` — ${node.note.trim()}`;
+        if (node.durationMs !== undefined) line += ` (${fmtDuration(node.durationMs)})`;
+      }
+      lines.push(line);
+    }
   }
-  for (const [i, h] of habits.entries()) {
-    const s = habitStats[i];
-    lines.push(
-      `- ${h.title} (habit — ${describeRecur(h.recur!)}): ${s.total} logged, streak ${s.streak}`,
-    );
-  }
-  if (goals.length === 0 && habits.length === 0) lines.push("- (none)");
 
-  lines.push("", "## Daily Log");
-  let anyDay = false;
-  for (const { dayMs, items } of daysWithItems(doc, startDay, today, now)) {
-    const dayLines = groupDayItems(items)
-      .map((it) => itemLine(doc, it))
-      .filter((l): l is string => l !== null);
-    if (dayLines.length === 0) continue;
-    anyDay = true;
-    lines.push("", `### ${fmtDay(dayMs)}`, ...dayLines.map((l) => `- ${l}`));
-  }
-  if (!anyDay) lines.push("", "(nothing logged in this period)");
   return lines.join("\n") + "\n";
 }
 
@@ -366,15 +361,26 @@ function basicInfoZh(doc: LifeMapDoc, node: NodeData, now: number): string[] {
 }
 
 // the records directly linked to the node (either direction), deduped and
-// sorted by time ascending — the node's factual history, full length
-function linkedRecordsZh(doc: LifeMapDoc, rootId: Id): string[] {
+// sorted by time ascending — the node's factual history. Mode B wants it
+// full length; mode A passes a range to keep only the period's records
+function linkedRecordsZh(
+  doc: LifeMapDoc,
+  rootId: Id,
+  range?: { startMs: number; endMs: number },
+): string[] {
   const ids = [...effectiveNeighbors(doc, rootId, "in"), ...effectiveNeighbors(doc, rootId, "out")];
   const records = [...new Set(ids)]
     .map((id) => doc.nodes[id])
     .filter((n): n is NodeData => !!n && isRecord(n));
   const timeOf = (r: NodeData) => r.occurredAt ?? r.createdAt ?? 0;
   records.sort((a, b) => timeOf(a) - timeOf(b));
-  return records.map((r, i) => {
+  const shown = range
+    ? records.filter((r) => {
+        const t = timeOf(r);
+        return t >= range.startMs && t <= range.endMs;
+      })
+    : records;
+  return shown.map((r, i) => {
     const time = timeOf(r);
     let line = `${i + 1}. ${time > 0 ? `${fmtDate(time)} ${fmtTime(time, true)}` : "未知时间"}: ${r.title}`;
     if (r.note?.trim()) line += ` — ${r.note.trim()}`;

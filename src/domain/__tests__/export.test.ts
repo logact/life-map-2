@@ -2,6 +2,7 @@ import { describe, expect, it } from "@jest/globals";
 
 import { emptyDoc, Id, LifeMapDoc, makeEdgeData, makeGoal, makeRecordNode, makeTask, NodeData } from "../doc";
 import { docToMarkdown, subgraphToMarkdown } from "../export";
+import { dayStart } from "../recur";
 
 // fixed local dates in October 2026; `now` is Wednesday the 21st at noon
 const at = (iso: string) => new Date(`${iso}T12:00:00`).getTime();
@@ -20,69 +21,145 @@ function connect(doc: LifeMapDoc, fromId: Id, toId: Id): LifeMapDoc {
 }
 
 describe("docToMarkdown", () => {
-  function periodDoc(): { doc: LifeMapDoc; habit: NodeData } {
+  it("renders the header and in-range completed work with details", () => {
+    const goal = makeGoal(0, 0, "Ship v1", { completedAt: at("2026-10-20") });
+    goal.notes.push({
+      id: "n1",
+      text: "复盘笔记",
+      createdAt: at("2026-10-20"),
+      updatedAt: at("2026-10-20"),
+    });
+    const task = makeTask(0, 0, "Write report", { status: "done", completedAt: at("2026-10-19") });
     const habit = makeTask(0, 0, "Morning run", {
       recur: { freq: "daily", interval: 1, anchor: at("2026-10-15") },
       log: [at("2026-10-19"), NOW],
     });
-    const goal = makeGoal(0, 0, "Run 500km", { targetDate: at("2026-12-31") });
     const rec = makeRecordNode(0, 0, "Called grandma", "she is well", at("2026-10-20"));
-    const focus = makeRecordNode(0, 0, "Deep work", "", at("2026-10-20"));
-    focus.durationMs = 65 * 60000;
-    return { doc: docWith(habit, goal, rec, focus), habit };
-  }
+    const stale = makeGoal(0, 0, "Old win", { completedAt: at("2026-10-01") });
+    const doc = docWith(goal, task, habit, rec, stale);
+    connect(doc, goal.id, rec.id);
 
-  it("renders the header, summary and daily log for a range", () => {
-    const { doc } = periodDoc();
     const md = docToMarkdown(doc, { range: "last7" }, NOW);
-    expect(md).toContain("# Life Map Export");
-    expect(md).toContain(`Range: Oct 15 2026 – Oct 21 2026`);
-    expect(md).toMatch(/Exported: Oct 21 2026 \(GMT[+-]/);
-    expect(md).toContain("- 1 active goal (0 completed this period)");
-    expect(md).toContain("- 1 habit · avg streak 1");
-    expect(md).toContain("- Total focus: 1h 5m across 1 session");
-    expect(md).toContain("- Run 500km (goal, todo · target Dec 31 2026)");
-    expect(md).toContain("- Morning run (habit — Every day): 2 logged, streak 1");
-    // daily log: logged yesterday-and-today, missed the unlogged days
-    expect(md).toContain("### Oct 19 2026");
-    expect(md).toContain("- ✔ Morning run (logged)");
-    expect(md).toContain("- ✗ Morning run (missed)");
-    expect(md).toContain('Record · Called grandma at 12:00:00: "she is well"');
-    expect(md).toContain('Focus · 1h 5m at 12:00:00 — "Deep work"');
-    // future scheduled occurrences are noise and never exported
-    expect(md).not.toContain("Scheduled");
+    expect(md).toContain("# 人生地图导出");
+    expect(md).toContain("范围: Oct 15 2026 – Oct 21 2026");
+    expect(md).toMatch(/导出于: Oct 21 2026 \(GMT[+-]/);
+    expect(md).toContain("### 10月15日–10月21日完成的工作");
+    // numbered by completion time ascending: task (19th), goal (20th), habit (21st)
+    expect(md).toContain("1. 【任务-Write report-已完成】");
+    expect(md).toContain("2. 【目标-Ship v1-已完成】");
+    expect(md).toContain("3. 【习惯-Morning run-已完成】");
+    // 基本信息 lines ride along under each entry
+    expect(md).toContain("- 类型: 目标");
+    expect(md).toContain("- 完成: Oct 20 2026");
+    expect(md).toContain("- 重复规则: 每天");
+    // the notes subsection only appears where notes exist
+    expect(md).toContain("- 笔记:\n  - (Oct 20 2026) 复盘笔记");
+    // the in-range linked record nests under the goal
+    expect(md).toContain("- 关联的记录:\n  1. Oct 20 2026: Called grandma — she is well");
+    // completed before the range — absent
+    expect(md).not.toContain("Old win");
   });
 
-  it("scopes the range: last7 drops older days, all reaches back", () => {
+  it("filters linked records to the range", () => {
+    const task = makeTask(0, 0, "Fix bug", { status: "done", completedAt: at("2026-10-20") });
+    const inR = makeRecordNode(0, 0, "In range", "", at("2026-10-20"));
+    const outR = makeRecordNode(0, 0, "Out of range", "", at("2026-10-01"));
+    const doc = docWith(task, inR, outR);
+    connect(doc, task.id, inR.id);
+    connect(doc, task.id, outR.id);
+
+    const md = docToMarkdown(doc, { range: "last7" }, NOW);
+    expect(md).toContain("1. Oct 20 2026: In range");
+    expect(md).not.toContain("Out of range");
+  });
+
+  it("lists overdue tasks and due/overdue habits as of the range end", () => {
+    const untimed = makeTask(0, 0, "Late report", { dueDate: at("2026-10-19") });
+    const timed = makeTask(0, 0, "Timed deadline", {
+      dueDate: new Date("2026-10-21T09:00:00").getTime(),
+      dueHasTime: true,
+    });
+    // a daily habit unlogged today is due
+    const dueHabit = makeTask(0, 0, "Meditate", {
+      recur: { freq: "daily", interval: 1, anchor: at("2026-10-18") },
+      log: [at("2026-10-18")],
+    });
+    // a Monday habit not scheduled today (Wednesday), last log before the
+    // previous scheduled day → overdue
+    const overdueHabit = makeTask(0, 0, "Stretch", {
+      recur: { freq: "weekly", interval: 1, weekdays: [1], anchor: at("2026-10-05") },
+      log: [at("2026-10-05")],
+    });
+    const okHabit = makeTask(0, 0, "Read", {
+      recur: { freq: "daily", interval: 1, anchor: at("2026-10-15") },
+      log: [NOW],
+    });
+    const doneTask = makeTask(0, 0, "Finished late", {
+      status: "done",
+      dueDate: at("2026-10-10"),
+      completedAt: at("2026-10-12"),
+    });
+    const doc = docWith(untimed, timed, dueHabit, overdueHabit, okHabit, doneTask);
+
+    const md = docToMarkdown(doc, { range: "last7" }, NOW);
+    expect(md).toContain("### 10月15日–10月21日超时的工作");
+    expect(md).toContain("- Late report【任务】 — 截止: Oct 19 2026");
+    expect(md).toContain("- Timed deadline【任务】 — 截止: Oct 21 2026 9:00");
+    expect(md).toContain("- Meditate【习惯】 — 重复规则: 每天");
+    expect(md).toContain("- Stretch【习惯】 — 重复规则: 每周(周一)");
+    // a habit logged today asks nothing; a done task's past due date is history
+    expect(md).not.toContain("Read【习惯】");
+    expect(md).not.toContain("Finished late");
+  });
+
+  it("honors a custom range and clamps a future end to now", () => {
+    const inR = makeGoal(0, 0, "In range win", { completedAt: at("2026-10-19") });
+    const outR = makeGoal(0, 0, "Before range win", { completedAt: at("2026-10-16") });
+    const futureDue = makeTask(0, 0, "Due later", { dueDate: at("2026-10-23") });
+    const doc = docWith(inR, outR, futureDue);
+
+    const md = docToMarkdown(doc, { startMs: at("2026-10-18"), endMs: at("2026-10-25") }, NOW);
+    // the end clamps to now: the header stops at today, and a task due
+    // between now and endMs is not overdue
+    expect(md).toContain("范围: Oct 18 2026 – Oct 21 2026");
+    expect(md).toContain("### 10月18日–10月21日完成的工作");
+    expect(md).toContain("【目标-In range win-已完成】");
+    expect(md).not.toContain("Before range win");
+    expect(md).not.toContain("Due later");
+  });
+
+  it("labels a today-only range 今天, a single other day by date", () => {
+    const today = docToMarkdown(emptyDoc(), { startMs: dayStart(NOW), endMs: NOW }, NOW);
+    expect(today).toContain("### 今天完成的工作");
+    const oneDay = docToMarkdown(
+      emptyDoc(),
+      { startMs: dayStart(at("2026-10-20")), endMs: at("2026-10-20") },
+      NOW,
+    );
+    expect(oneDay).toContain("### 10月20日完成的工作");
+  });
+
+  it("lists records and creations chronologically in 事件汇总, (无) when empty", () => {
+    const rec = makeRecordNode(0, 0, "Called grandma", "she is well", at("2026-10-20"));
+    rec.durationMs = 65 * 60000;
+    const task = makeTask(0, 0, "New task", { createdAt: at("2026-10-18") });
+    const goal = makeGoal(0, 0, "New goal", { createdAt: at("2026-10-16") });
     const old = makeRecordNode(0, 0, "Ancient", "", at("2026-10-01"));
-    const { doc } = periodDoc();
-    doc.nodes[old.id] = old;
-    expect(docToMarkdown(doc, { range: "last7" }, NOW)).not.toContain("Ancient");
-    const all = docToMarkdown(doc, { range: "all" }, NOW);
-    expect(all).toContain("Range: Oct 01 2026 – Oct 21 2026");
-    expect(all).toContain("Record · Ancient");
-  });
+    const doc = docWith(rec, task, goal, old);
 
-  it("exports record times down to the second (issue #45)", () => {
-    const precise = new Date("2026-10-20T12:34:56").getTime();
-    const rec = makeRecordNode(0, 0, "Called grandma", "", precise);
-    const doc = docWith(rec);
-    expect(docToMarkdown(doc, { range: "all" }, NOW)).toContain("Record · Called grandma at 12:34:56");
-    expect(subgraphToMarkdown(doc, rec.id, NOW)).toContain("- 发生时间: Oct 20 2026 12:34:56");
-  });
+    const md = docToMarkdown(doc, { range: "last7" }, NOW);
+    expect(md).toContain("### 事件汇总");
+    expect(md).toContain("- Oct 16 2026: 【目标】New goal");
+    expect(md).toContain("- Oct 18 2026: 【任务】New task");
+    expect(md).toContain("- Oct 20 2026: 【记录】Called grandma — she is well (1h 5m)");
+    expect(md.indexOf("New goal")).toBeLessThan(md.indexOf("New task"));
+    expect(md.indexOf("New task")).toBeLessThan(md.indexOf("Called grandma"));
+    expect(md).not.toContain("Ancient");
 
-  it("says so when the period holds nothing", () => {
-    const md = docToMarkdown(emptyDoc(), { range: "last7" }, NOW);
-    expect(md).toContain("(nothing logged in this period)");
-    expect(md).toContain("- (none)");
-  });
-
-  it("marks a goal completed inside the period", () => {
-    const goal = makeGoal(0, 0, "Ship v1", { completedAt: at("2026-10-20") });
-    const md = docToMarkdown(docWith(goal), { range: "last7" }, NOW);
-    expect(md).toContain("0 active goals (1 completed this period)");
-    expect(md).toContain("- Ship v1 (goal, done)");
-    expect(md).toContain("- ✔ Ship v1 (completed)");
+    const empty = docToMarkdown(emptyDoc(), { range: "last7" }, NOW);
+    expect(empty).toContain("### 10月15日–10月21日完成的工作\n\n(无)");
+    expect(empty).toContain("### 10月15日–10月21日超时的工作\n\n(无)");
+    expect(empty).toContain("### 事件汇总\n\n(无)");
   });
 });
 

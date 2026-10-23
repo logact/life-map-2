@@ -2,7 +2,7 @@ import { useState } from "react";
 import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { styles } from "../styles";
-import { fmtDate } from "../utils";
+import { fmtDate, fmtDateTime } from "../utils";
 import { DatePickerBody } from "./datePicker";
 
 export interface TextDraft {
@@ -60,6 +60,7 @@ export function CreateNodeForm(props: {
               <DatePickerBody
                 value={pickingValue}
                 onChange={(ms) => props.onDraftChange({ ...draft, [picking]: ms })}
+                {...(picking === "occurredAt" ? { timeRequired: true, seconds: true } : {})}
               />
               <View style={styles.formButtons}>
                 {picking === "targetDate" && (
@@ -110,7 +111,7 @@ export function CreateNodeForm(props: {
               {mode === "record" && draft.occurredAt !== undefined && (
                 <Pressable style={styles.dateRow} onPress={() => setPicking("occurredAt")}>
                   <Text style={styles.dateRowLabel}>Occurred</Text>
-                  <Text style={styles.dateRowValue}>{fmtDate(draft.occurredAt)}</Text>
+                  <Text style={styles.dateRowValue}>{fmtDateTime(draft.occurredAt, true, true)}</Text>
                 </Pressable>
               )}
               {mode === "goal" && (

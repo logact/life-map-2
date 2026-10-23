@@ -26,7 +26,8 @@ describe("calendarMonth", () => {
     const rec = makeRecordNode(0, 0, "Shipped v1", "notes", at("2026-09-05"));
     const month = calendarMonth(docWith(rec), Y, M, NOW);
     expect(month.get(5)).toEqual([
-      { nodeId: rec.id, key: `${rec.id}:record`, kind: "record", title: "Shipped v1", label: "Record", tone: "neutral" },
+      // a record's item is always timed: timeMs is its exact occurred-at
+      { nodeId: rec.id, key: `${rec.id}:record`, kind: "record", title: "Shipped v1", label: "Record", tone: "neutral", timeMs: at("2026-09-05") },
     ]);
     expect(month.has(6)).toBe(false);
   });

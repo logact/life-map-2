@@ -76,7 +76,8 @@ function itemLine(doc: LifeMapDoc, item: CalItem): string | null {
       return `Due: ${t}`;
     case "Record": {
       const node = doc.nodes[item.nodeId];
-      const time = item.timeMs !== undefined ? ` at ${fmtTime(item.timeMs)}` : "";
+      // a record's occurred-at is exact — export it with seconds
+      const time = item.timeMs !== undefined ? ` at ${fmtTime(item.timeMs, true)}` : "";
       if (node?.durationMs !== undefined) {
         return `Focus · ${fmtDuration(node.durationMs)}${time} — "${t}"`;
       }
@@ -338,7 +339,10 @@ function basicInfoZh(doc: LifeMapDoc, node: NodeData, now: number): string[] {
     ]);
     if (node.description?.trim()) lines.push(`- 描述: ${node.description.trim()}`);
   } else if (isRecord(node)) {
-    dates([["发生时间", node.occurredAt]]);
+    // a record's occurred-at is an exact moment — export it with seconds
+    if (node.occurredAt !== undefined) {
+      lines.push(`- 发生时间: ${fmtDate(node.occurredAt)} ${fmtTime(node.occurredAt, true)}`);
+    }
     if (node.durationMs !== undefined) lines.push(`- 时长: ${fmtDuration(node.durationMs)}`);
     if (node.note?.trim()) lines.push(`- 内容: ${node.note.trim()}`);
   } else if (node.recur) {
@@ -372,7 +376,7 @@ function linkedRecordsZh(doc: LifeMapDoc, rootId: Id): string[] {
   records.sort((a, b) => timeOf(a) - timeOf(b));
   return records.map((r, i) => {
     const time = timeOf(r);
-    let line = `${i + 1}. ${time > 0 ? fmtDate(time) : "未知时间"}: ${r.title}`;
+    let line = `${i + 1}. ${time > 0 ? `${fmtDate(time)} ${fmtTime(time, true)}` : "未知时间"}: ${r.title}`;
     if (r.note?.trim()) line += ` — ${r.note.trim()}`;
     if (r.durationMs !== undefined) line += ` (${fmtDuration(r.durationMs)})`;
     return line;

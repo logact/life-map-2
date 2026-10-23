@@ -30,8 +30,9 @@ export interface CalItem {
   label: string;
   tone: CalTone;
   // the item's time-of-day (epoch millis) when its schedule field is timed;
-  // absent = all-day. Shown on the day row and orders timed rows before
-  // all-day ones within a tone group
+  // absent = all-day. A record's occurred-at is an exact moment, so record
+  // items always carry it. Shown on the day row and orders timed rows
+  // before all-day ones within a tone group
   timeMs?: number;
   // a focus segment record's measured duration — the day row shows it and
   // the day header sums it
@@ -185,7 +186,8 @@ export function calendarMonth(
   for (const node of Object.values(doc.nodes)) {
     if (node.synthetic) continue; // midpoint structure, not a real child (see scheduleSheet)
     if (isRecord(node)) {
-      push(node, "record", node.occurredAt, "record", "Record", "neutral");
+      // a record happened at an exact moment — always timed (issue #45)
+      push(node, "record", node.occurredAt, "record", "Record", "neutral", node.occurredAt);
     } else if (node.recur) {
       // a recurring task never completes: its schedule and log ARE its days
       habitItems(node, year, month0, today, byDay);

@@ -1,10 +1,12 @@
 import { useCallback, useState } from "react";
-import { Pressable, Share, StyleSheet, Switch, Text, View } from "react-native";
+import { Pressable, ScrollView, Share, StyleSheet, Switch, Text, View } from "react-native";
 import * as Linking from "expo-linking";
 import { useFocusEffect, useRouter } from "expo-router";
 
 import { diagnoseSync, nativeModulePresent, setSyncEnabled, SyncDiagnosis } from "@/data/cloudSync";
 import { docToMarkdown, ExportRange } from "@/domain/export";
+import { dayStart } from "@/domain/recur";
+import { DateRangePickerBody } from "@/map/overlays/datePicker";
 import { fmtDate } from "@/map/utils";
 import { useDocStore } from "@/state/docStore";
 import { useSyncStore } from "@/state/syncStore";
@@ -97,8 +99,23 @@ export default function SettingsScreen() {
     { range: "all", label: "All time" },
   ];
 
+  // custom range: the range calendar lives inline in the Export card, not
+  // in a Modal — iOS can't present the share sheet while a Modal is
+  // mid-dismissal, which silently swallowed the export. Date.now() stays
+  // in the handlers, out of render (react-hooks/purity)
+  const [custom, setCustom] = useState<null | { start: number; end: number }>(null);
+
+  const shareCustom = (a: number, b: number) => {
+    const startMs = Math.min(a, b);
+    const endMs = Math.max(a, b);
+    const md = docToMarkdown(useDocStore.getState().doc, { startMs, endMs }, Date.now());
+    Share.share({ message: md }).catch((err) => console.warn("[export] share failed", err));
+  };
+
   return (
-    <View style={cs.container}>
+    // the inline range calendar can push the Export card past the screen
+    // bottom — the whole page scrolls
+    <ScrollView style={cs.screen} contentContainerStyle={cs.container}>
       <View style={cs.header}>
         <Pressable accessibilityLabel="Back to map" onPress={back} hitSlop={12}>
           <Text style={cs.headerAction}>‹ Map</Text>
@@ -145,8 +162,9 @@ export default function SettingsScreen() {
       <View style={cs.card}>
         <Text style={cs.rowLabel}>Export</Text>
         <Text style={cs.status}>
-          Share a date range as Markdown — the format an AI can review. To export one node and its
-          sub-tree, tap it on the map and use Export on its card.
+          Share a date range as Markdown — the format an AI can review. Pick a preset, or 自定义…
+          to set your own start and end. To export one node and its sub-tree, tap it on the map and
+          use Export on its card.
         </Text>
         <View style={cs.exportRow}>
           {RANGES.map((r) => (
@@ -163,18 +181,60 @@ export default function SettingsScreen() {
               <Text style={cs.syncButtonText}>{r.label}</Text>
             </Pressable>
           ))}
+          <Pressable
+            accessibilityLabel="Export custom range"
+            style={({ pressed }) => [cs.syncButton, pressed && { opacity: 0.7 }]}
+            onPress={() => {
+              const now = Date.now();
+              setCustom({ start: dayStart(now), end: now });
+            }}
+          >
+            <Text style={cs.syncButtonText}>自定义…</Text>
+          </Pressable>
         </View>
+        {custom && (
+          <View style={cs.rangeBox}>
+            <DateRangePickerBody
+              start={custom.start}
+              end={custom.end}
+              onChange={(start, end) => setCustom({ start, end })}
+            />
+            <View style={cs.rangeButtons}>
+              <Pressable
+                accessibilityLabel="Cancel custom range"
+                style={({ pressed }) => [cs.syncButton, pressed && { opacity: 0.7 }]}
+                onPress={() => setCustom(null)}
+              >
+                <Text style={cs.syncButtonText}>取消</Text>
+              </Pressable>
+              <Pressable
+                accessibilityLabel="Export the custom range"
+                style={({ pressed }) => [cs.syncButton, pressed && { opacity: 0.7 }]}
+                onPress={() => {
+                  const c = custom;
+                  setCustom(null);
+                  shareCustom(c.start, c.end);
+                }}
+              >
+                <Text style={cs.syncButtonText}>导出</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
 const cs = StyleSheet.create({
-  container: {
+  screen: {
     flex: 1,
     backgroundColor: CANVAS_BG,
+  },
+  container: {
     paddingTop: 56, // aligns with the map's top row
     paddingHorizontal: 16,
+    paddingBottom: 40,
     gap: 12,
   },
   header: {
@@ -238,6 +298,18 @@ const cs = StyleSheet.create({
   exportRow: {
     flexDirection: "row",
     flexWrap: "wrap",
+    gap: 8,
+  },
+  // the inline range calendar, separated from the preset buttons above
+  rangeBox: {
+    borderTopWidth: 1,
+    borderTopColor: INK.subtle,
+    paddingTop: 10,
+    gap: 8,
+  },
+  rangeButtons: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
     gap: 8,
   },
 });

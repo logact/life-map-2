@@ -763,6 +763,10 @@ export const styles = StyleSheet.create({
     color: ON_INK,
     fontWeight: "700",
   },
+  // range picker: days strictly between the start and end edges
+  calCellInRange: {
+    backgroundColor: INK.subtle,
+  },
   calCellToday: {
     borderWidth: 1,
     borderColor: INK.hairline,

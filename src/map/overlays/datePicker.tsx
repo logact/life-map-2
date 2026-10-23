@@ -231,3 +231,211 @@ export function DatePickerSheet(props: {
     </Modal>
   );
 }
+
+// ---------- range picking: start and end on ONE calendar ----------
+// Used inline by the settings export card — deliberately not a Modal:
+// iOS can't present the share sheet while a Modal is mid-dismissal,
+// which silently swallowed the export. Two edge chips choose which bound
+// the calendar edits; each edge has its own time row (全天 = start at
+// 00:00 / end at 23:59, or 指定时间 with hour/minute steppers). Every
+// change keeps start <= end by pulling the other edge along.
+
+// one edge's time row: an All-day chip plus hour/minute steppers, the
+// same idiom as DatePickerBody's time row
+function RangeTimeRow(props: {
+  label: string;
+  value: number;
+  hasTime: boolean;
+  // what 全天 means for this edge: start snaps to 00:00, end to 23:59 so
+  // the whole day is inside the range
+  endOfDay?: boolean;
+  onChange: (ms: number, hasTime: boolean) => void;
+}) {
+  const setTimeOfDay = (h: number, m: number) => {
+    const next = new Date(props.value);
+    next.setHours(h, m, 0, 0);
+    return next;
+  };
+  // the steppers wrap inside their unit, never rolling the date itself
+  const shiftHour = (delta: number) => {
+    const d = new Date(props.value);
+    props.onChange(setTimeOfDay((d.getHours() + delta + 24) % 24, d.getMinutes()).getTime(), true);
+  };
+  const shiftMinute = (delta: number) => {
+    const d = new Date(props.value);
+    props.onChange(setTimeOfDay(d.getHours(), (d.getMinutes() + delta + 60) % 60).getTime(), true);
+  };
+  const selected = new Date(props.value);
+  return (
+    <View style={styles.recurStepperRow}>
+      <Text style={styles.dateRowLabel}>{props.label}</Text>
+      <Pressable
+        accessibilityLabel={`${props.label} 全天`}
+        style={[styles.recurChip, !props.hasTime && styles.recurChipSelected]}
+        onPress={() => {
+          const t = props.endOfDay ? setTimeOfDay(23, 59) : setTimeOfDay(0, 0);
+          props.onChange(t.getTime(), false);
+        }}
+      >
+        <Text style={[styles.recurChipText, !props.hasTime && styles.recurChipTextSelected]}>全天</Text>
+      </Pressable>
+      {props.hasTime ? (
+        <>
+          <Pressable accessibilityLabel={`${props.label}减一小时`} hitSlop={12} onPress={() => shiftHour(-1)}>
+            <Text style={styles.calNav}>‹</Text>
+          </Pressable>
+          <Text style={styles.recurStepperValue}>{String(selected.getHours()).padStart(2, "0")}</Text>
+          <Pressable accessibilityLabel={`${props.label}加一小时`} hitSlop={12} onPress={() => shiftHour(1)}>
+            <Text style={styles.calNav}>›</Text>
+          </Pressable>
+          <Text style={styles.recurStepperValue}>:</Text>
+          <Pressable accessibilityLabel={`${props.label}减五分钟`} hitSlop={12} onPress={() => shiftMinute(-5)}>
+            <Text style={styles.calNav}>‹</Text>
+          </Pressable>
+          <Text style={styles.recurStepperValue}>{String(selected.getMinutes()).padStart(2, "0")}</Text>
+          <Pressable accessibilityLabel={`${props.label}加五分钟`} hitSlop={12} onPress={() => shiftMinute(5)}>
+            <Text style={styles.calNav}>›</Text>
+          </Pressable>
+        </>
+      ) : (
+        <Pressable
+          accessibilityLabel={`${props.label} 指定时间`}
+          style={styles.recurChip}
+          onPress={() => props.onChange(setTimeOfDay(9, 0).getTime(), true)}
+        >
+          <Text style={styles.recurChipText}>指定时间</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+export function DateRangePickerBody(props: {
+  start: number;
+  end: number;
+  onChange: (start: number, end: number) => void;
+}) {
+  const [editing, setEditing] = useState<"start" | "end">("start");
+  const [startHasTime, setStartHasTime] = useState(false);
+  const [endHasTime, setEndHasTime] = useState(false);
+  // the month on display: follows the start home on open, then moves with
+  // the nav arrows only
+  const [view, setView] = useState(() => {
+    const d = new Date(props.start);
+    return { y: d.getFullYear(), m: d.getMonth() };
+  });
+
+  const shiftMonth = (delta: number) => {
+    const d = new Date(view.y, view.m + delta, 1);
+    setView({ y: d.getFullYear(), m: d.getMonth() });
+  };
+
+  // picking a day moves the editing edge, keeping its time-of-day; the
+  // other edge moves along so start <= end always holds
+  const pick = (day: number) => {
+    const next = new Date(editing === "start" ? props.start : props.end);
+    next.setFullYear(view.y, view.m, day);
+    const ms = next.getTime();
+    if (editing === "start") {
+      props.onChange(ms, Math.max(ms, props.end));
+    } else {
+      props.onChange(Math.min(ms, props.start), ms);
+    }
+  };
+
+  const setStart = (ms: number, hasTime: boolean) => {
+    setStartHasTime(hasTime);
+    props.onChange(ms, Math.max(ms, props.end));
+  };
+  const setEnd = (ms: number, hasTime: boolean) => {
+    setEndHasTime(hasTime);
+    props.onChange(Math.min(ms, props.start), ms);
+  };
+
+  const daysInMonth = new Date(view.y, view.m + 1, 0).getDate();
+  const leadingBlanks = new Date(view.y, view.m, 1).getDay();
+  const cells: (number | null)[] = [
+    ...Array<null>(leadingBlanks).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+  const today = new Date();
+  const startDate = new Date(props.start);
+  const endDate = new Date(props.end);
+
+  return (
+    <View>
+      <View style={styles.recurChipRow}>
+        <Pressable
+          accessibilityLabel="编辑开始日期"
+          style={[styles.recurChip, editing === "start" && styles.recurChipSelected]}
+          onPress={() => setEditing("start")}
+        >
+          <Text style={[styles.recurChipText, editing === "start" && styles.recurChipTextSelected]}>
+            开始 {fmtDate(props.start)}
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityLabel="编辑结束日期"
+          style={[styles.recurChip, editing === "end" && styles.recurChipSelected]}
+          onPress={() => setEditing("end")}
+        >
+          <Text style={[styles.recurChipText, editing === "end" && styles.recurChipTextSelected]}>
+            结束 {fmtDate(props.end)}
+          </Text>
+        </Pressable>
+      </View>
+      <View style={styles.calHeader}>
+        <Pressable accessibilityLabel="Previous month" onPress={() => shiftMonth(-1)} hitSlop={12}>
+          <Text style={styles.calNav}>‹</Text>
+        </Pressable>
+        <Text style={styles.calTitle}>
+          {MONTHS[view.m]} {view.y}
+        </Text>
+        <Pressable accessibilityLabel="Next month" onPress={() => shiftMonth(1)} hitSlop={12}>
+          <Text style={styles.calNav}>›</Text>
+        </Pressable>
+      </View>
+      <View style={styles.calRow}>
+        {DOW.map((d, i) => (
+          <Text key={i} style={styles.calDow}>
+            {d}
+          </Text>
+        ))}
+      </View>
+      <View style={styles.calGrid}>
+        {cells.map((day, i) => {
+          if (day === null) return <View key={`b${i}`} style={styles.calCell} />;
+          const cell = new Date(view.y, view.m, day);
+          const isEdge = sameDay(cell, startDate) || sameDay(cell, endDate);
+          const inRange = cell.getTime() > dayStartOf(startDate) && cell.getTime() < dayStartOf(endDate);
+          return (
+            <Pressable
+              key={day}
+              accessibilityLabel={`${MONTHS[view.m]} ${day}`}
+              style={[
+                styles.calCell,
+                inRange && styles.calCellInRange,
+                isEdge && styles.calCellSelected,
+                sameDay(cell, today) && styles.calCellToday,
+              ]}
+              onPress={() => pick(day)}
+            >
+              <Text style={[styles.calCellText, isEdge && styles.calCellTextSelected]}>{day}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <RangeTimeRow label="开始时间" value={props.start} hasTime={startHasTime} onChange={setStart} />
+      <RangeTimeRow label="结束时间" value={props.end} hasTime={endHasTime} endOfDay onChange={setEnd} />
+      <Text style={styles.calSummary}>
+        {fmtDateTime(props.start, startHasTime)} – {fmtDateTime(props.end, endHasTime)}
+      </Text>
+    </View>
+  );
+}
+
+// local midnight of the day a Date falls in (the range highlight compares
+// whole days)
+function dayStartOf(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}

@@ -159,6 +159,23 @@ export const styles = StyleSheet.create({
     justifyContent: "center",
     ...SHADOW.floating,
   },
+  recordsButton: {
+    position: "absolute",
+    right: 20,
+    top: 368, // below the settings button
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: CARD_BG,
+    borderWidth: 1,
+    borderColor: INK.subtle,
+    alignItems: "center",
+    justifyContent: "center",
+    ...SHADOW.floating,
+  },
+  recordsButtonOff: {
+    opacity: 0.4,
+  },
   historyButtonDisabled: {
     opacity: 0.4,
   },
@@ -510,6 +527,25 @@ export const styles = StyleSheet.create({
     height: 1,
     backgroundColor: INK.subtle,
     marginVertical: 6,
+  },
+  // records list on the node info card (a task's/goal's direct record
+  // children, issue #48): compact rows, one per record, newest first
+  recordRow: {
+    borderWidth: 1,
+    borderColor: INK.subtle,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginTop: 4,
+    gap: 2,
+  },
+  recordRowTitle: {
+    fontSize: 14,
+    color: INK.primary,
+  },
+  recordRowMeta: {
+    ...TYPE.meta,
+    color: INK.secondary,
   },
   notePeekText: {
     fontSize: 14,

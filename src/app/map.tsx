@@ -190,6 +190,10 @@ export default function MapScreen() {
   // that dismisses or retargets the card, so a stale flag (mid-edit
   // retarget) can't make the accommodation reserve room no input uses
   const [inlineEditActive, setInlineEditActive] = useState(false);
+  // records are hidden on the map by default (issue #48): the eye button
+  // toggles them for the session — pure view state, never persisted (same
+  // convention as the zoom lens)
+  const [showRecords, setShowRecords] = useState(false);
 
   const closeOverlays = () => {
     setInfoTarget(null);
@@ -249,8 +253,9 @@ export default function MapScreen() {
   };
 
   // domain -> UI: the visible frontier at the current lens, then plain
-  // view models derived from it (memoized on [doc, zoomedIds, nowTs])
-  const { visible, vm } = useMapViewModel(doc, zoomedIds, nowTs);
+  // view models derived from it (memoized on [doc, zoomedIds, nowTs,
+  // showRecords]); records stay out of the view model unless toggled on
+  const { visible, vm } = useMapViewModel(doc, zoomedIds, nowTs, showRecords);
 
   // camera: base (identity by default, a computed fit after the fit
   // button) × pinch zoom, composed in useMapCamera; fitRef inside it
@@ -265,6 +270,9 @@ export default function MapScreen() {
     zoomedIdsRef,
     setZoomedIds,
     setInfoTarget,
+    // focusing a record (search pick, calendar handoff) un-hides records,
+    // or the camera would center a node that isn't rendered
+    ensureRecordsShown: () => setShowRecords(true),
   });
   const routeQuery = useRouteQuery({
     doc,
@@ -285,6 +293,20 @@ export default function MapScreen() {
     useDocStore.getState().clearNodeFocus();
     focusNoteNode(pendingNodeFocusId);
   }, [loaded, pendingNodeFocusId, focusNoteNode]);
+
+  // info card records list -> the record's own card: un-hide records,
+  // then the same reveal/center/open a search pick performs
+  const openRecord = (recordId: string) => {
+    setShowRecords(true);
+    focusNoteNode(recordId);
+  };
+
+  const toggleRecords = () => {
+    // hiding closes open overlays: an open record card or menu would
+    // otherwise point at a node that just became invisible
+    if (showRecords) closeOverlays();
+    setShowRecords(!showRecords);
+  };
 
   // tear down every canvas mode that retargets taps/drags; entering the
   // route or note query starts from this clean slate
@@ -896,7 +918,7 @@ export default function MapScreen() {
     setZoomedIds(folded);
     setZoomEdgeIds([]);
     const newDoc = useDocStore.getState().doc;
-    camera.centerOnContent(deriveViewModel(newDoc, folded, Date.now()).nodes);
+    camera.centerOnContent(deriveViewModel(newDoc, folded, Date.now(), showRecords).nodes);
     closeOverlays();
   };
 
@@ -1194,6 +1216,18 @@ export default function MapScreen() {
         </Pressable>
       )}
 
+      {/* record visibility (issue #48): records are hidden by default; the
+          eye toggles them for the session. Dimmed while records are off */}
+      {!routeQuery.routeMode && !noteSearch.noteSearchMode && (
+        <Pressable
+          style={[styles.recordsButton, !showRecords && styles.recordsButtonOff]}
+          accessibilityLabel={showRecords ? "Hide records" : "Show records"}
+          onPress={toggleRecords}
+        >
+          <Text style={styles.queryButtonText}>👁</Text>
+        </Pressable>
+      )}
+
       {/* an active focus session is visible at all times; tapping the
           banner returns to the focus screen */}
       <FocusBanner />
@@ -1226,6 +1260,7 @@ export default function MapScreen() {
             zoomedIds={zoomedIds}
             run={run}
             onOpenNotes={(nodeId) => setNotesNodeId(nodeId)}
+            onOpenRecord={openRecord}
             onInlineEditChange={setInlineEditActive}
             onZoomStep={(deeper) => zoomSelectionStep(deeper)}
             onCloseEdge={() => {

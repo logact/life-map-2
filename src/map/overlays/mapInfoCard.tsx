@@ -5,7 +5,7 @@ import { useRouter } from "expo-router";
 import { Recipe, renameNode, setNodeDetail, setNodeRecurrence, setNodeTimes, StatusAction, transitionNodeStatus } from "@/domain/commands";
 import { EdgeData, edgeDepth, isGoal, isRecord, isTask, LifeMapDoc, NodeData } from "@/domain/doc";
 import { subgraphToMarkdown } from "@/domain/export";
-import { fmtDuration, focusedMs } from "@/domain/focus";
+import { fmtDuration, focusedMs, recordsOf } from "@/domain/focus";
 import { describeRecur, dueState, nextDue, prevDue, recurStats } from "@/domain/recur";
 import { edgeStatus, nodeStatus } from "@/domain/status";
 import { fmtTime } from "@/domain/time";
@@ -44,6 +44,9 @@ function NodeInfoCard(props: {
   doc: LifeMapDoc;
   run: (recipe: Recipe) => void;
   onOpenNotes: () => void;
+  // tap a record row in the records list: the screen un-hides records and
+  // focuses the record on the map (its own info card opens)
+  onOpenRecord: (recordId: string) => void;
   // reports the inline edit's active state: the screen reserves keyboard
   // room in its bottom-dock camera accommodation only while an edit is on
   onInlineEditChange: (active: boolean) => void;
@@ -121,6 +124,10 @@ function NodeInfoCard(props: {
   // total measured focus time on this node (sum of the focus segment
   // records directly under it)
   const totalFocusMs = focusedMs(props.doc, node.id);
+  // the node's direct record children (records are leaves), newest first —
+  // the records list below is how a hidden-by-default record is reached
+  // from its task/goal (issue #48); records themselves get no list
+  const childRecords = (isTask(node) || isGoal(node)) && !node.synthetic ? recordsOf(props.doc, node.id) : [];
 
   const commit = (field: EditField, text: string) => {
     if (field === "title") {
@@ -390,6 +397,35 @@ function NodeInfoCard(props: {
             </Text>
           </Pressable>
         ))}
+      {childRecords.length > 0 && (
+        <View>
+          <View style={styles.infoNotesSep} />
+          <Text style={styles.notePeekLink}>Records ({childRecords.length})</Text>
+          {/* the card never grows past a peek: five rows, then a count —
+              tapping a row focuses the record on the map */}
+          {childRecords.slice(0, 5).map((rec) => (
+            <Pressable
+              key={rec.id}
+              style={({ pressed }) => [styles.recordRow, pressed && { opacity: 0.6 }]}
+              onPress={() => {
+                endEdit();
+                props.onOpenRecord(rec.id);
+              }}
+            >
+              <Text style={styles.recordRowTitle} numberOfLines={1}>
+                {rec.title}
+              </Text>
+              <Text style={styles.recordRowMeta}>
+                {rec.occurredAt !== undefined ? fmtDate(rec.occurredAt) : "No date"}
+                {typeof rec.durationMs === "number" ? ` · ${fmtDuration(rec.durationMs)}` : ""}
+              </Text>
+            </Pressable>
+          ))}
+          {childRecords.length > 5 && (
+            <Text style={styles.infoMeta}>+{childRecords.length - 5} more</Text>
+          )}
+        </View>
+      )}
       <View style={styles.infoNotesSep} />
       <Pressable
         onPress={() => {
@@ -536,6 +572,7 @@ export function MapInfoCard(props: {
   zoomedIds: ReadonlySet<string>;
   run: (recipe: Recipe) => void;
   onOpenNotes: (nodeId: string) => void;
+  onOpenRecord: (recordId: string) => void;
   onInlineEditChange: (active: boolean) => void;
   onZoomStep: (deeper: boolean) => void;
   onCloseEdge: () => void;
@@ -554,6 +591,7 @@ export function MapInfoCard(props: {
         doc={doc}
         run={props.run}
         onOpenNotes={() => props.onOpenNotes(node.id)}
+        onOpenRecord={props.onOpenRecord}
         onInlineEditChange={props.onInlineEditChange}
         now={props.now}
       />

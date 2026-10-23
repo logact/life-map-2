@@ -25,7 +25,7 @@ All nodes share: `id` (uuid), `x/y` (world coordinates), `title`, `kind`,
 |--------|----------|-------------------------|--------------|
 | Goal   | `Goal`   | Large circle (52)       | `description?`, `targetDate?` (+ `targetHasTime?`), `completedAt?` |
 | Task   | `Task`   | Rounded square (40)     | `status` (stored), `startedAt?`, `completedAt?`, `dueDate?` (+ `dueHasTime?`), `recur?` + occurrence `log?` (§1.3) |
-| Record | `Record` | Small dot (20)          | `note`, `createdAt`, `occuredAt` — a leaf; nothing attaches under it |
+| Record | `Record` | Small dot (20)          | `note`, `createdAt`, `occurredAt` — always an exact moment, shown to the second; a leaf, nothing attaches under it |
 
 ### 1.2 Edges — directed roads with layers
 
@@ -87,8 +87,11 @@ epoch millis and gain meaning at minute precision when their flag
 flag the value is an **all-day** pin and behaves exactly as a bare date.
 All existing data is flagless, hence all-day — no migration. A timed due
 date is an exact deadline: it turns **Overdue** the moment it passes rather
-than at end of day. Seconds need no UI; the millis storage already holds
-them.
+than at end of day. Schedule fields keep minute precision — seconds need no
+UI there. A record's `occurredAt` is different: it records something that
+already happened, so it is **always an exact moment** — displayed and
+editable to the second everywhere (calendar rows, info card, create form,
+focus trail, exports).
 
 **Edge status has frontier semantics** (`edgeStatus`): walk the hidden child
 chain in travel order, take the first non-done node status (skipping the
@@ -175,7 +178,9 @@ and a stable slot-based **key** (`nodeId:slot`) that survives label flips —
 a day's manual order (§4) is stored against these keys and overrides the
 tone order for the items it knows; items it doesn't know append
 tone-sorted. An item whose schedule field is timed (§1.3) also carries
-`timeMs`: the day row shows the clock time, and within a tone group timed
+`timeMs` — a record item always does, its occurred-at being exact: the day
+row shows the clock time (to the second for records), and within a tone
+group timed
 rows sort earliest-first ahead of all-day rows. Synthetic midpoint tasks
 (edge structure, see §3) are skipped,
 like in the schedule sheet. Pure like the recurrence
@@ -341,7 +346,8 @@ form, notes, route query, note search).
   calendar and rewrite the stamp in
   one undoable command; the Due/Target calendar also offers a **time row**
   (All day chip, hour/minute steppers) that sets the field's time flag
-  (§1.3). A task's Repeat row opens the recurrence rule
+  (§1.3), while a record's Occurred calendar always shows the time row —
+  hour/minute/second steppers, no All-day chip. A task's Repeat row opens the recurrence rule
   editor (frequency, interval, weekdays, Starts day with the same time row;
   Clear stops it), and
   a goal's target date can also be set right in the create form. A task's
@@ -433,7 +439,8 @@ button (below the fit button; the route is `/calendar`).
 - **+ New** (same header) creates on the selected day: the chooser
   (`src/calendar/createSheet.tsx`) picks goal / task / record, then the
   map's shared create form opens with the day seeded — the goal's target,
-  the record's occurred-at (both editable in the form); a task's due date
+  the record's occurred-at (the day at the current time-of-day; both
+  editable in the form); a task's due date
   is pinned silently at save. Creation is one undoable `addFreeNode`
   command; the node lands on the map near the content center, fanned by a
   golden-angle step so repeated adds don't stack.

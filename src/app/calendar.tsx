@@ -199,12 +199,18 @@ export default function CalendarScreen() {
   const run = (recipe: Recipe) => useDocStore.getState().run(recipe);
 
   // kind picked in the chooser: open the create form with the day seeded —
-  // a record logs the day, a goal targets it; a task's due date is pinned
+  // a record logs the day at the current time-of-day (its occurred-at is an
+  // exact moment), a goal targets the bare day; a task's due date is pinned
   // at save (the form has no task date row)
   const pickCreateKind = (mode: NodeKind) => {
     setCreateChooserOpen(false);
     const draft: TextDraft = { title: "", detail: "" };
-    if (mode === "record") draft.occurredAt = selectedDayMs;
+    if (mode === "record") {
+      const now = new Date();
+      const at = new Date(selectedDayMs);
+      at.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), 0);
+      draft.occurredAt = at.getTime();
+    }
     if (mode === "goal") draft.targetDate = selectedDayMs;
     setCreate({ mode, draft });
   };

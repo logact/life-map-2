@@ -16,6 +16,7 @@ import { addChildNode, addNote, connectNodes, Recipe, transitionNodeStatus } fro
 import { isGoal, isRecord, isTask, NodeData } from "@/domain/doc";
 import { fmtClock, fmtDuration, focusedMs } from "@/domain/focus";
 import { childPosition, fmtDate } from "@/map/utils";
+import { fmtTime } from "@/domain/time";
 import { useDocStore } from "@/state/docStore";
 import { useFocusStore } from "@/state/focusStore";
 import { CANVAS_BG, CARD_BG, INK, ON_INK, RADIUS, SHADOW, STATUS_COLOR, TYPE } from "@/ui/theme";
@@ -349,7 +350,8 @@ export default function FocusScreen() {
                   {item.text}
                 </Text>
                 <Text style={fs.meta}>
-                  {item.kind === "note" ? "Note" : "Record"} · {fmtDate(item.at)}
+                  {item.kind === "note" ? "Note" : "Record"} ·{" "}
+                  {item.kind === "record" ? `${fmtDate(item.at)} ${fmtTime(item.at, true)}` : fmtDate(item.at)}
                   {item.durationMs !== undefined ? ` · ${fmtDuration(item.durationMs)}` : ""}
                   {item.source === "goal" ? " · goal" : ""}
                 </Text>

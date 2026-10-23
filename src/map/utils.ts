@@ -83,9 +83,10 @@ export function edgeEndpointNodes(doc: LifeMapDoc, edgeIds: Id[]): NodeData[] {
 }
 
 // a schedule field's display: the date, with its time-of-day appended when
-// the field is timed ("Oct 15 2026 · 21:30"); all-day reads as the bare date
-export function fmtDateTime(ms: number, hasTime?: boolean): string {
-  return hasTime ? `${fmtDate(ms)} · ${fmtTime(ms)}` : fmtDate(ms);
+// the field is timed ("Oct 15 2026 · 21:30"); all-day reads as the bare date.
+// Seconds are for records — a record's occurred-at is always exact
+export function fmtDateTime(ms: number, hasTime?: boolean, withSeconds?: boolean): string {
+  return hasTime ? `${fmtDate(ms)} · ${fmtTime(ms, withSeconds)}` : fmtDate(ms);
 }
 
 // a target date's distance from now in whole days: "today", "in 3 days",

@@ -18,8 +18,12 @@ export function useNoteSearch(params: {
   zoomedIdsRef: RefObject<Set<string>>;
   setZoomedIds: (s: Set<string>) => void;
   setInfoTarget: (t: InfoTarget | null) => void;
+  // records are hidden on the map by default (issue #48): focusing a
+  // record (a search pick, the calendar handoff) must un-hide them first,
+  // or the camera centers a node that isn't rendered
+  ensureRecordsShown?: () => void;
 }) {
-  const { doc, centerOnPoint, zoomedIdsRef, setZoomedIds, setInfoTarget } = params;
+  const { doc, centerOnPoint, zoomedIdsRef, setZoomedIds, setInfoTarget, ensureRecordsShown } = params;
   const [noteSearchMode, setNoteSearchMode] = useState(false);
   const [noteQuery, setNoteQuery] = useState("");
 
@@ -40,6 +44,7 @@ export function useNoteSearch(params: {
     const d = useDocStore.getState().doc;
     const node = d.nodes[nodeId];
     if (!node) return;
+    if (node.kind === "record") ensureRecordsShown?.();
     // the shallowest edge touching the node, at ANY layer: a node hidden
     // inside a collapsed edge has no visible touching edge, so the search
     // must cover hidden edges for the reveal to reach it

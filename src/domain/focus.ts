@@ -1,4 +1,4 @@
-import { Id, isRecord, LifeMapDoc } from "./doc";
+import { Id, isRecord, LifeMapDoc, NodeData } from "./doc";
 
 // ---------- focus mode: measured work sessions ----------
 // A focus session is "I am working on this task right now" (see
@@ -29,17 +29,26 @@ export function fmtClock(ms: number): string {
   return `${h > 0 ? `${h}:` : ""}${mm}:${String(s).padStart(2, "0")}`;
 }
 
+// the node's direct record children (records are leaves, so one hop is
+// the whole trail), newest first — the info card's records list and the
+// focusedMs total share this one traversal
+export function recordsOf(doc: LifeMapDoc, nodeId: Id): NodeData[] {
+  const out: NodeData[] = [];
+  for (const edge of Object.values(doc.edges)) {
+    if (edge.fromId !== nodeId) continue;
+    const child = doc.nodes[edge.toId];
+    if (child && isRecord(child)) out.push(child);
+  }
+  return out.sort((a, b) => (b.occurredAt ?? b.createdAt ?? 0) - (a.occurredAt ?? a.createdAt ?? 0));
+}
+
 // total focused time on a node: the sum of the durations on the records
 // directly under it. Deliberately NOT recursive — a goal's rollup beyond
 // its own records is out of scope (segments attach to tasks anyway)
 export function focusedMs(doc: LifeMapDoc, nodeId: Id): number {
   let total = 0;
-  for (const edge of Object.values(doc.edges)) {
-    if (edge.fromId !== nodeId) continue;
-    const child = doc.nodes[edge.toId];
-    if (child && isRecord(child) && typeof child.durationMs === "number") {
-      total += child.durationMs;
-    }
+  for (const rec of recordsOf(doc, nodeId)) {
+    if (typeof rec.durationMs === "number") total += rec.durationMs;
   }
   return total;
 }

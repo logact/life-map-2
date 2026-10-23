@@ -4,7 +4,7 @@ import { applyPatches, enablePatches, produceWithPatches } from "immer";
 import { addChildNode, addFocusSegment, addFreeNode, Recipe } from "../commands";
 import { calendarMonth } from "../calendar";
 import { emptyDoc, LifeMapDoc } from "../doc";
-import { fmtClock, fmtDuration, focusedMs, focusedMsOnDay } from "../focus";
+import { fmtClock, fmtDuration, focusedMs, focusedMsOnDay, recordsOf } from "../focus";
 import { docToRows, rowsToDoc } from "@/data/mapDb";
 
 enablePatches();
@@ -72,6 +72,26 @@ describe("focusedMs", () => {
     doc = run(doc, seg2.recipe);
     expect(focusedMs(doc, t)).toBe(10 * 60000);
     expect(focusedMs(doc, other.nodeId)).toBe(5 * 60000);
+  });
+});
+
+describe("recordsOf", () => {
+  it("lists only the node's direct record children, newest first", () => {
+    let { doc, t } = fixture();
+    const day = new Date(2026, 9, 7, 12, 0, 0).getTime();
+    const older = addChildNode(t, "record", "R1", "", { x: 1, y: 1 }, day - 86400000);
+    doc = run(doc, older.recipe);
+    const newer = addChildNode(t, "record", "R2", "", { x: 2, y: 2 }, day);
+    doc = run(doc, newer.recipe);
+    // a task child is not a record; a record under ANOTHER node is not
+    // this node's
+    const taskChild = addChildNode(t, "task", "T-child", "", { x: 3, y: 3 });
+    doc = run(doc, taskChild.recipe);
+    const elsewhere = addChildNode(taskChild.nodeId, "record", "R3", "", { x: 4, y: 4 }, day);
+    doc = run(doc, elsewhere.recipe);
+    expect(recordsOf(doc, t).map((r) => r.id)).toEqual([newer.nodeId, older.nodeId]);
+    expect(recordsOf(doc, taskChild.nodeId).map((r) => r.id)).toEqual([elsewhere.nodeId]);
+    expect(recordsOf(doc, newer.nodeId)).toEqual([]); // records are leaves
   });
 });
 
